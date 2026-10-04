@@ -139,3 +139,81 @@ test('当たり判定: 壁から押し出される・レイが壁で止まる', 
   assert.ok(Math.abs(t - 10 / 15) < 1e-6);
   assert.ok(cw.outOfBounds(95, 0));
 });
+
+// ---- IGN BD TOPO → OSM 形式の変換 ----
+import { ignToOsm, prettifyName } from '../../src/data/ign.js';
+import { fillWaterUnderBridges } from '../../src/world/parse.js';
+
+test('IGN: 略記の道路名を読みやすくする', () => {
+  assert.equal(prettifyName('R DES PENITENTS GRIS'), 'Rue des Penitents Gris');
+  assert.equal(prettifyName("PL DE L'EUROPE"), "Place de l'Europe");
+  assert.equal(prettifyName('Rue des Pénitents Gris'), 'Rue des Pénitents Gris');
+});
+
+test('IGN: 建物・道路・水域・広場を OSM 形式に変換する', () => {
+  const bbox = { s: 43.59, w: 1.43, n: 43.61, e: 1.46 };
+  const sq = (lon, lat, d) => [[lon, lat, 150], [lon + d, lat, 150], [lon + d, lat + d, 150], [lon, lat + d, 150], [lon, lat, 150]];
+  const layers = {
+    batiment: [
+      { geometry: { type: 'MultiPolygon', coordinates: [[sq(1.44, 43.60, 0.0002), sq(1.44005, 43.60005, 0.00005)]] },
+        properties: { hauteur: 12.3, nombre_d_etages: 4, nature: 'Indifférenciée', usage_1: 'Résidentiel', materiaux_des_murs: '40', materiaux_de_la_toiture: '10', altitude_minimale_toit: 160, altitude_maximale_toit: 162 } },
+      { geometry: { type: 'MultiPolygon', coordinates: [[sq(1.45, 43.60, 0.0002)]] },
+        properties: { hauteur: 20, nature: 'Eglise', materiaux_de_la_toiture: '40', altitude_minimale_toit: 170, altitude_maximale_toit: 175 } },
+    ],
+    troncon_de_route: [
+      { geometry: { type: 'LineString', coordinates: [[1.44, 43.601, 150], [1.441, 43.601, 150]] },
+        properties: { nature: 'Route à 1 chaussée', importance: '5', acces_vehicule_leger: 'Physiquement impossible', nom_voie_ban_gauche: "Rue d'Alsace-Lorraine", largeur_de_chaussee: 7, position_par_rapport_au_sol: '0' } },
+      { geometry: { type: 'LineString', coordinates: [[1.441, 43.601, 150], [1.442, 43.601, 150]] },
+        properties: { nature: 'Route à 2 chaussées', importance: '3', acces_vehicule_leger: 'Libre', nom_voie_ban_gauche: 'Pont Neuf', largeur_de_chaussee: 9, position_par_rapport_au_sol: '1', sens_de_circulation: 'Sens direct' } },
+    ],
+    surface_hydrographique: [{ geometry: { type: 'MultiPolygon', coordinates: [[sq(1.435, 43.595, 0.003)]] }, properties: { nature: 'Ecoulement naturel' } }],
+    zone_d_activite_ou_d_interet: [
+      { geometry: { type: 'MultiPolygon', coordinates: [[sq(1.443, 43.604, 0.0005)]] }, properties: { nature: 'Espace public', nature_detaillee: 'Esplanade', toponyme: 'Place du Capitole' } },
+      { geometry: { type: 'MultiPolygon', coordinates: [[sq(1.442, 43.608, 0.0005)]] }, properties: { nature: 'Culte chrétien', toponyme: 'Basilique Saint-Sernin' } },
+    ],
+  };
+  const { elements } = ignToOsm(layers, bbox);
+  const ways = elements.filter((e) => e.type === 'way' && e.tags);
+  const rel = elements.find((e) => e.type === 'relation');
+  // 中庭のある建物はマルチポリゴン、壁はレンガ、屋根の高さ 2 m を足した全体の高さ
+  assert.equal(rel.tags.building, 'yes');
+  assert.equal(rel.tags['building:material'], 'brick');
+  assert.equal(rel.tags.height, '14.3');
+  assert.equal(rel.tags['roof:height'], '2');
+  assert.equal(rel.members.filter((m) => m.role === 'inner').length, 1);
+  // コンクリート屋根の教会は陸屋根
+  const church = ways.find((w) => w.tags.building === 'church');
+  assert.equal(church.tags['roof:shape'], 'flat');
+  assert.equal(church.tags.height, '20');
+  // 歩行者専用の通りと橋
+  assert.equal(ways.find((w) => w.tags.name === "Rue d'Alsace-Lorraine").tags.highway, 'pedestrian');
+  const bridge = ways.find((w) => w.tags.name === 'Pont Neuf');
+  assert.equal(bridge.tags.bridge, 'yes');
+  assert.equal(bridge.tags.oneway, 'yes');
+  // 2 本の道路は同じ点でつながる
+  const a = ways.find((w) => w.tags.name === "Rue d'Alsace-Lorraine"), b = bridge;
+  assert.equal(a.nodes.at(-1), b.nodes[0]);
+  assert.equal(ways.find((w) => w.tags.natural === 'water').tags.water, 'river');
+  assert.equal(ways.find((w) => w.tags.name === 'Place du Capitole').tags.highway, 'pedestrian');
+  assert.ok(elements.some((e) => e.type === 'node' && e.tags?.name === 'Basilique Saint-Sernin'));
+  // 解析まで通る
+  const proj = new LocalProjection(43.6, 1.445);
+  const parsed = parseOsm({ elements }, proj, { minX: -1500, minZ: -1500, maxX: 1500, maxZ: 1500 }, []);
+  const court = parsed.buildings.find((x) => x.holes.length === 1);
+  assert.equal(court.info.heightSource, 'IGN');
+  assert.ok(Math.abs(court.info.height - 12.3) < 1e-6, `wall height ${court.info.height}`); // 壁は軒の高さまで
+  assert.equal(court.info.roofHeight, 2);
+});
+
+test('橋の下で切り抜かれた水面を埋める', () => {
+  // 川（x: -50〜50）を、橋の幅（z: -10〜10）だけ岸から岸まで切り抜いて 2 つに分けた形
+  const river = (z0, z1) => ({ type: 'water', outer: [[-50, z0], [50, z0], [50, z1], [-50, z1]], holes: [], depth: 6, kind: 'river', bounds: { minX: -50, maxX: 50, minZ: Math.min(z0, z1), maxZ: Math.max(z0, z1) } });
+  const areas = [river(-200, -10), river(10, 200)];
+  const roads = [{ bridge: true, tunnel: false, width: 8, pts: [[-80, 0], [80, 0]] }];
+  fillWaterUnderBridges(areas, roads);
+  const patch = areas.find((a) => a.patch);
+  assert.ok(patch, 'パッチができる');
+  assert.ok(pointInRing(0, 0, patch.outer) && pointInRing(-45, 9, patch.outer));
+  assert.ok(!pointInRing(-75, 0, patch.outer), '岸の上までは広げない');
+  assert.equal(patch.depth, 6);
+});

@@ -32,6 +32,34 @@ export function fillParkTrees(areas, mappedTrees, isFree) {
   return out;
 }
 
+// 並木道: 個々の木のデータがないとき（IGN データ）に、名前から並木道と分かる通りの両側に木を植える。
+// トゥールーズの Allées・Boulevard・Cours・Port（運河沿い）はプラタナス並木が多い
+export const TREE_LINED = /^(Allées?|Boulevard|Cours|Port)\b/;
+
+export function streetTrees(roads, isFree, spacing = 11) {
+  const out = [];
+  for (const r of roads) {
+    if (r.bridge || r.tunnel || !TREE_LINED.test(r.name)) continue;
+    const off = r.width / 2 + 1.4; // 歩道の上
+    let acc = 6;
+    for (let i = 0; i + 1 < r.pts.length; i++) {
+      const [ax, az] = r.pts[i], [bx, bz] = r.pts[i + 1];
+      const len = Math.hypot(bx - ax, bz - az);
+      if (len < 0.01) continue;
+      const ux = (bx - ax) / len, uz = (bz - az) / len;
+      for (; acc < len; acc += spacing) {
+        const px = ax + ux * acc, pz = az + uz * acc;
+        for (const side of [1, -1]) {
+          const x = px - uz * off * side, z = pz + ux * off * side;
+          if (isFree(x, z)) out.push([x, z]);
+        }
+      }
+      acc -= len;
+    }
+  }
+  return out;
+}
+
 export function buildTrees(points) {
   const pts = points.length > MAX_TREES ? points.filter((_, i) => i % Math.ceil(points.length / MAX_TREES) === 0) : points;
   const n = pts.length;

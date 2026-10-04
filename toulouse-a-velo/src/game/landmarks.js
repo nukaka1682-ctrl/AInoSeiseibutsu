@@ -34,7 +34,7 @@ export function resolveLandmarks(parsed, proj, rect, roadnet) {
     const z = best ? best.z : hz;
     const m = 25;
     if (x < rect.minX + m || x > rect.maxX - m || z < rect.minZ + m || z > rect.maxZ - m) continue;
-    const seg = roadnet.nearestSegment(x, z, 200, (s) => s.bike);
+    const seg = roadnet.approachPoint(x, z, 200);
     if (!seg) continue;
     out.push({
       ...lm,

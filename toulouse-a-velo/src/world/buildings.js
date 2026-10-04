@@ -225,6 +225,11 @@ export async function buildBuildings(parsed, materials, onProgress) {
     const b = list[i];
     stats[b.info.heightSource] = (stats[b.info.heightSource] || 0) + 1;
     const W = getChunk(b.inside[0], b.inside[1]);
+    // 傾斜屋根を作れない形（四角形以外）で屋根の高さが分かっている場合は、屋根の中間の高さで陸屋根にする
+    if (chooseRoof(b, b.outer) === 'flat' && b.info.roofShape !== 'flat' && b.info.roofHeight > 0 && !b.info.raised) {
+      b.info.height += b.info.roofHeight / 2;
+      b.info.raised = true;
+    }
     const color = wallColor(b);
     const plainColor = color;
     writeWalls(W, b.outer, outwardSign(b.outer), b, color, plainColor);

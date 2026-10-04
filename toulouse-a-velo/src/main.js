@@ -3,20 +3,17 @@
 import * as THREE from 'three';
 import { Sky } from 'three/addons/objects/Sky.js';
 import { AREA_PRESETS, DEFAULT_AREA, TOUR_ROUTE } from './config.js';
-import { Grid, LocalProjection, bboxAround, pointInPolygon, pointInRing } from './geo.js';
-import { loadAreaData } from './data/load.js';
-import { parseOsm } from './world/parse.js';
+import { bboxAround } from './geo.js';
+import { PROVIDER_LABEL, loadAreaData } from './data/load.js';
 import { makeTextures } from './world/textures.js';
-import { buildBuildings, createBuildingMaterials } from './world/buildings.js';
-import { ORDER, buildGround, createGroundMaterials } from './world/ground.js';
-import { buildTrees, fillParkTrees } from './world/trees.js';
-import { CollisionWorld } from './game/collision.js';
-import { RoadNetwork } from './game/roadnet.js';
+import { createBuildingMaterials } from './world/buildings.js';
+import { ORDER, createGroundMaterials } from './world/ground.js';
+import { assembleWorld } from './world/assemble.js';
 import { Bike } from './game/bike.js';
 import { CAMERA_LABELS, CameraRig } from './game/camera.js';
 import { Input } from './game/input.js';
 import { AudioFx } from './game/audio.js';
-import { animateBeacon, createBeacon, distanceToLandmark, resolveLandmarks } from './game/landmarks.js';
+import { animateBeacon, createBeacon, distanceToLandmark } from './game/landmarks.js';
 import { MapRenderer, drawFullMap, drawMinimap } from './ui/minimap.js';
 
 const $ = (id) => document.getElementById(id);
@@ -176,9 +173,10 @@ async function startGame() {
       bbox,
       presetId: area.custom ? null : state.presetId,
       forceNetwork: $('opt-refresh').checked,
+      provider: $('opt-ign').checked ? 'ign' : 'auto',
       onStatus: (t) => setLoading(t, 0.1),
     });
-    setLoading(`地図データ: ${data.source}（OSM ${data.osm.elements.length.toLocaleString()} 要素 / IGN 建物 ${data.bdtopo.length.toLocaleString()} 棟）\n地図を解析中…`, 0.3);
+    setLoading(`地図データ: ${PROVIDER_LABEL[data.provider]}（${data.source}）\n地図を解析中…`, 0.3);
     await nextFrame();
     state.world = await buildWorld(data, bbox, (t, p) => setLoading(`地図データ: ${data.source}\n${t}`, 0.3 + p * 0.65));
     beginPlay();
@@ -192,103 +190,21 @@ async function startGame() {
 
 // ---------------------------------------------------------------- 3D 都市の構築
 async function buildWorld(data, bbox, progress) {
-  const lat0 = (bbox.s + bbox.n) / 2, lon0 = (bbox.w + bbox.e) / 2;
-  const proj = new LocalProjection(lat0, lon0);
-  const rect = {
-    minX: proj.project(lat0, bbox.w)[0], maxX: proj.project(lat0, bbox.e)[0],
-    minZ: proj.project(bbox.n, lon0)[1], maxZ: proj.project(bbox.s, lon0)[1],
-  };
-  progress('建物・道路・水辺を解析中…', 0);
-  await nextFrame();
-  const parsed = parseOsm(data.osm, proj, rect, data.bdtopo);
-  const roadnet = new RoadNetwork(parsed.roads);
+  const world = await assembleWorld(data, bbox, { buildingMats, groundMats, progress, pause: nextFrame });
+  for (const lm of world.landmarks) lm.discovered = state.discovered.has(lm.id);
+  world.map = new MapRenderer(world.parsed, world.rect);
 
-  progress('道路と川を作成中…', 0.15);
-  await nextFrame();
-  const group = new THREE.Group();
-  const ground = buildGround(parsed, rect, groundMats);
-  group.add(ground.group);
-
-  const collision = new CollisionWorld(rect);
-  for (const b of parsed.buildings) {
-    if (!b.info.collide) continue;
-    collision.addRing(b.outer);
-    for (const h of b.holes) collision.addRing(h);
-  }
-  for (const p of parsed.parts) if (!p.hasParent && p.info.collide) collision.addRing(p.outer);
-  collision.inWater = ground.inWater;
-  collision.onRoad = (x, z) => roadnet.onRoad(x, z, 0.4);
-
-  // 木
-  progress('街路樹を植えています…', 0.25);
-  await nextFrame();
-  const bGrid = new Grid(30);
-  parsed.buildings.forEach((b, i) => bGrid.insertBounds(b.bounds.minX, b.bounds.minZ, b.bounds.maxX, b.bounds.maxZ, i));
-  const insideBuilding = (x, z) => {
-    let hit = false;
-    bGrid.queryPoint(x, z, 0, (i) => {
-      if (!hit && pointInRing(x, z, parsed.buildings[i].outer)) hit = true;
-    });
-    return hit;
-  };
-  const m = 30;
-  const inRect = ([x, z]) => x > rect.minX - m && x < rect.maxX + m && z > rect.minZ - m && z < rect.maxZ + m;
-  const extra = fillParkTrees(parsed.areas, parsed.trees, (x, z) => !roadnet.onRoad(x, z, 1.5) && !ground.inWater(x, z) && !insideBuilding(x, z));
-  const treePts = parsed.trees.filter(inRect).concat(extra);
-  const trees = buildTrees(treePts);
-  group.add(trees);
-  for (const [x, z] of trees.userData.points || []) collision.addCircle(x, z, 0.3);
-
-  // 建物
-  const buildings = await buildBuildings(parsed, buildingMats, (p) => progress(`建物を建てています… ${Math.round(p * 100)}%`, 0.3 + p * 0.6));
-  group.add(buildings.group);
-
-  // 路面の種類（転がり抵抗用）
-  const greenGrid = new Grid(40);
-  const greens = parsed.areas.filter((a) => a.type === 'grass' || a.type === 'forest' || a.type === 'pitch');
-  greens.forEach((a, i) => greenGrid.insertBounds(a.bounds.minX, a.bounds.minZ, a.bounds.maxX, a.bounds.maxZ, i));
-  const surfaceAt = (x, z) => {
-    const s = roadnet.nearestSegment(x, z, roadnet.maxHalfWidth + 0.5);
-    if (s && Math.sqrt(s.d2) < s.seg.road.width / 2 + 0.3) {
-      const r = s.seg.road;
-      if (/^(gravel|fine_gravel|compacted|dirt|ground|earth|grass|sand|unpaved)$/.test(r.surface)) return 'gravel';
-      if (r.type === 'pedestrian' || r.type === 'living_street' || /^(paving_stones|sett|cobblestone)$/.test(r.surface)) return 'paving';
-      return 'road';
-    }
-    let g = false;
-    greenGrid.queryPoint(x, z, 0, (i) => {
-      if (!g && pointInPolygon(x, z, greens[i])) g = true;
-    });
-    return g ? 'grass' : 'paving';
-  };
-
-  progress('名所を探しています…', 0.93);
-  await nextFrame();
-  const landmarks = resolveLandmarks(parsed, proj, rect, roadnet);
-  for (const lm of landmarks) lm.discovered = state.discovered.has(lm.id);
-  const map = new MapRenderer(parsed, rect);
-
-  const beacon = createBeacon();
-  group.add(beacon);
-  const routeMesh = new THREE.Mesh(
+  world.beacon = createBeacon();
+  world.group.add(world.beacon);
+  world.routeMesh = new THREE.Mesh(
     new THREE.BufferGeometry(),
     new THREE.MeshBasicMaterial({ color: '#2f7cf6', transparent: true, opacity: 0.55, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -8 }),
   );
-  routeMesh.renderOrder = ORDER.route;
-  routeMesh.frustumCulled = false;
-  group.add(routeMesh);
-
-  scene.add(group);
-  return {
-    proj, rect, parsed, roadnet, ground, collision, buildings, trees, landmarks, map, beacon, routeMesh, group, surfaceAt,
-    stats: {
-      buildings: buildings.stats,
-      roads: parsed.roads.length,
-      trees: treePts.length,
-      source: data.source,
-      fetchedAt: data.fetchedAt,
-    },
-  };
+  world.routeMesh.renderOrder = ORDER.route;
+  world.routeMesh.frustumCulled = false;
+  world.group.add(world.routeMesh);
+  scene.add(world.group);
+  return world;
 }
 
 function disposeWorld() {
@@ -341,6 +257,10 @@ function beginPlay() {
   show('hud');
   state.phase = 'play';
   updateModeHud();
+  $('attribution').textContent = w.stats.provider === 'ign'
+    ? '地図 © IGN BD TOPO（Licence Ouverte）'
+    : '© OpenStreetMap contributors · IGN BD TOPO';
+  if (w.stats.fallbackReason) toast('OpenStreetMap のサーバーにつながらなかったため、IGN（フランス国土地理院）の地図で街を作りました', 6);
   const st = w.stats.buildings;
   const pct = (n) => Math.round(((n || 0) / Math.max(1, st.total)) * 100);
   toast(`<b>Bienvenue à Toulouse !</b><br>建物 ${st.total.toLocaleString()} 棟（高さ: IGN 実測 ${pct(st.IGN)}% / OSM ${pct(st.OSM) + pct(st['OSM（階数）'])}% / 推定 ${pct(st['推定'])}%）<br>W でこぎ出そう。M で地図、C でカメラ切替。`, 7);
@@ -574,6 +494,12 @@ function update(dt, forced) {
     updateModeHud();
   }
   tickToast(dt);
+}
+
+// ミニマップと名所ラベル（描画フレームごと。テスト用のシミュレーションでは呼ばない）
+function drawHud() {
+  const w = state.world;
+  const bike = state.bike;
   drawMinimap($('minimap'), w.map, {
     x: bike.x, z: bike.z, heading: bike.heading, zoom: 0.9, route: state.route, landmarks: w.landmarks, target: state.target,
   });
@@ -606,7 +532,7 @@ function togglePause(force) {
     const b = s.buildings;
     $('pause-info').innerHTML = `<p>建物 ${b.total.toLocaleString()} 棟 · 道 ${s.roads.toLocaleString()} 本 · 木 ${s.trees.toLocaleString()} 本<br>
       建物の高さの出典: IGN 実測 ${(b.IGN || 0).toLocaleString()} / OSM ${((b.OSM || 0) + (b['OSM（階数）'] || 0)).toLocaleString()} / 推定 ${(b['推定'] || 0).toLocaleString()}<br>
-      データ: ${s.source}${s.fetchedAt ? `（${new Date(s.fetchedAt).toLocaleDateString('ja-JP')} 取得）` : ''}</p>`;
+      地図: ${PROVIDER_LABEL[s.provider] || s.provider}（${s.source}${s.fetchedAt ? `・${new Date(s.fetchedAt).toLocaleDateString('ja-JP')} 取得` : ''}）</p>`;
   }
   show('pause-screen', pause);
 }
@@ -763,7 +689,10 @@ function frame(now) {
   requestAnimationFrame(frame);
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
-  if (state.world && state.phase === 'play') update(dt);
+  if (state.world && state.phase === 'play') {
+    update(dt);
+    drawHud();
+  }
   if (state.world) renderer.render(scene, camera);
 }
 requestAnimationFrame(frame);

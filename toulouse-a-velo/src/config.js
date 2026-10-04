@@ -38,7 +38,7 @@ export const LANDMARKS = [
     name: 'Capitole de Toulouse',
     ja: 'キャピトル（市庁舎）',
     lat: 43.60436, lon: 1.44357,
-    match: /^(Capitole( de Toulouse)?|Hôtel de ville de Toulouse)$/i,
+    match: /^(Capitole de Toulouse|H[ôo]tel de [Vv]ille de Toulouse|Mairie de Toulouse)$/i,
     text: '市庁舎と劇場を兼ねる街の顔。18世紀のファサードには、かつての市参事会員（カピトゥール）を象徴する8本のピンク大理石の円柱が並ぶ。',
   },
   {
@@ -78,7 +78,7 @@ export const LANDMARKS = [
     name: 'Basilique Notre-Dame de la Daurade',
     ja: 'ドラード聖母教会',
     lat: 43.60110, lon: 1.43900,
-    match: /Notre-Dame de la Daurade/i,
+    match: /Notre-Dame de la Daurade|^Place de la Daurade$/i,
     text: 'ガロンヌ川の岸辺に建つ教会。「黒い聖母」で知られる。前の河岸は夕日の名所。',
   },
   {
@@ -101,8 +101,8 @@ export const LANDMARKS = [
     id: 'chateau-eau',
     name: "Galerie du Château d'Eau",
     ja: 'シャトー・ドー写真ギャラリー',
-    lat: 43.59860, lon: 1.43430,
-    match: /Château d['’][Ee]au/i,
+    lat: 43.59880, lon: 1.43620,
+    match: /^(Galerie du |[Ll]e )?Ch[âa]teau d['’][Ee]au$/i,
     text: 'ポン・ヌフの左岸側のたもとに建つ、19世紀の給水塔を利用した写真ギャラリー。',
   },
   {
@@ -134,7 +134,7 @@ export const LANDMARKS = [
     name: 'Place Wilson',
     ja: 'ウィルソン広場',
     lat: 43.60490, lon: 1.44860,
-    match: /^Place (Wilson|du Président Thomas Wilson)$/i,
+    match: /^(Place (du Président Thomas (Woodrow )?)?Wilson|Jardin Pierre Goudouli)$/i,
     text: '楕円形の広場。中央の噴水にはオック語詩人ピエール・グドゥリの像が立つ。',
   },
   {
@@ -158,7 +158,7 @@ export const LANDMARKS = [
     name: 'Halle aux Grains',
     ja: 'アル・オー・グラン',
     lat: 43.59960, lon: 1.45620,
-    match: /^Halle aux Grains$/i,
+    match: /^(la )?Halle aux Grains$/i,
     text: 'かつての穀物市場を改装したコンサートホール。キャピトル国立管弦楽団の本拠地。',
   },
   {
@@ -166,7 +166,7 @@ export const LANDMARKS = [
     name: 'Gare Matabiau',
     ja: 'マタビオ駅',
     lat: 43.61120, lon: 1.45410,
-    match: /^(Gare de )?(Toulouse[- ])?Matabiau$/i,
+    match: /^(Gare( de)? )?(Toulouse[- ])?Matabiau$/i,
     text: 'ミディ運河沿いに建つトゥールーズの中央駅。駅前の運河沿いは並木道になっている。',
   },
   {

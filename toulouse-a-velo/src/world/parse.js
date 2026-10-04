@@ -1,7 +1,7 @@
 // OSM の生データ（Overpass JSON）を、ゲームで使う地物（ローカル座標）に変換する。
 // three.js に依存しない（Node のテストから使える）。
 import {
-  Grid, centroid, clipRingToRect, hash01, pointInRing, ringBounds, signedArea, simplifyRing,
+  Grid, centroid, clipRingToRect, closestOnSegment, hash01, pointInRing, ringBounds, signedArea, simplifyRing,
 } from '../geo.js';
 
 export const FLOOR_HEIGHT = 3.1;
@@ -124,7 +124,7 @@ export function buildingInfo(b) {
 
   if (osmHeight > 0) {
     // OSM の height は屋根を含む全体の高さ
-    heightSource = 'OSM';
+    heightSource = t['height:source'] === 'IGN' ? 'IGN' : 'OSM';
     wallTop = osmHeight;
   } else if (b.bdHeight > 0) {
     heightSource = 'IGN';
@@ -154,7 +154,7 @@ export function buildingInfo(b) {
   if (!(roofHeight >= 0)) roofHeight = NaN;
   // OSM の高さは屋根込みなので、屋根の高さを引いて壁の高さにする
   let height = wallTop;
-  if (heightSource === 'OSM' && roofHeight > 0 && roofHeight < osmHeight) height = osmHeight - roofHeight;
+  if (osmHeight > 0 && roofHeight > 0 && roofHeight < osmHeight) height = osmHeight - roofHeight;
   if (minHeight >= height) minHeight = Math.max(0, height - 1);
 
   const floorHeight = Math.min(5, Math.max(2.6, (height - minHeight) / Math.max(1, levels)));
@@ -386,7 +386,85 @@ export function parseOsm(osm, proj, rect, bdtopo = []) {
     }
   }
 
+  fillWaterUnderBridges(areas, roads);
   return { nodePos, buildings, parts, roads, areas, rails, waterLines, trees, named };
+}
+
+// IGN BD TOPO などでは、橋の下の部分が水面から切り抜かれている（穴になっている／水面が分断されている）。
+// そのままだと橋が陸の上に架かって見えるので、橋の下を水に戻す。
+export function fillWaterUnderBridges(areas, roads) {
+  const water = areas.filter((a) => a.type === 'water');
+  if (!water.length) return;
+  const bridges = roads.filter((r) => r.bridge && !r.tunnel);
+  const distToBridge = (x, z) => {
+    let best = Infinity;
+    for (const r of bridges) {
+      for (let i = 0; i + 1 < r.pts.length; i++) {
+        const d = Math.sqrt(closestOnSegment(x, z, r.pts[i][0], r.pts[i][1], r.pts[i + 1][0], r.pts[i + 1][1]).d2) - r.width / 2;
+        if (d < best) best = d;
+      }
+    }
+    return best;
+  };
+  // 1) 橋の真下にある穴を消す
+  for (const a of water) a.holes = a.holes.filter((h) => distToBridge(...interiorPoint(h)) > 4);
+
+  // 2) 橋に沿って調べ、橋の上流側と下流側の両方が水なら「橋の下も水」とみなしてパッチで埋める
+  //    （BD TOPO では橋の下が岸から岸まで切り抜かれていて、橋の中心線上には水がない）
+  const depthAt = (x, z) => {
+    let d = 0;
+    for (const a of water) {
+      if (x < a.bounds.minX || x > a.bounds.maxX || z < a.bounds.minZ || z > a.bounds.maxZ) continue;
+      if (a.depth > d && pointInRing(x, z, a.outer) && !a.holes.some((h) => pointInRing(x, z, h))) d = a.depth;
+    }
+    return d;
+  };
+  const OFFSETS = [4, 8, 13, 19, 26];
+  const step = 1.5;
+  for (const r of bridges) {
+    const samples = [];
+    for (let i = 0; i + 1 < r.pts.length; i++) {
+      const [ax, az] = r.pts[i], [bx, bz] = r.pts[i + 1];
+      const len = Math.hypot(bx - ax, bz - az);
+      if (len < 0.01) continue;
+      const dx = (bx - ax) / len, dz = (bz - az) / len;
+      for (let t = 0; t <= len; t += step) {
+        const x = ax + dx * t, z = az + dz * t;
+        let depth = depthAt(x, z);
+        let reach = 0;
+        if (!depth) {
+          // 左右それぞれ、少しずつ離れながら水を探す
+          let dl = 0, dr = 0, wl = 0, wr = 0;
+          for (const o of OFFSETS) {
+            const off = r.width / 2 + o;
+            if (!dl) { dl = depthAt(x - dz * off, z + dx * off); wl = off; }
+            if (!dr) { dr = depthAt(x + dz * off, z - dx * off); wr = off; }
+          }
+          if (dl && dr) {
+            depth = Math.max(dl, dr);
+            reach = Math.max(wl, wr);
+          }
+        }
+        samples.push({ x, z, dx, dz, depth, reach, gap: !depthAt(x, z) && depth > 0 });
+      }
+    }
+    for (let i = 0; i < samples.length; i++) {
+      if (!samples[i].gap) continue;
+      let j = i;
+      while (j < samples.length && samples[j].gap) j++;
+      const seg = samples.slice(Math.max(0, i - 1), Math.min(samples.length, j + 1));
+      const depth = Math.max(...seg.map((q) => q.depth));
+      const half = Math.max(...seg.map((q) => q.reach)) + 2;
+      const left = seg.map((q) => [q.x - q.dz * half, q.z + q.dx * half]);
+      const right = seg.map((q) => [q.x + q.dz * half, q.z - q.dx * half]).reverse();
+      const outer = left.concat(right);
+      const patch = { id: -1 - areas.length, type: 'water', name: '', tags: {}, outer, holes: [], depth, kind: depth >= 6 ? 'river' : 'canal', patch: true };
+      patch.bounds = ringBounds(outer);
+      patch.area = Math.abs(signedArea(outer));
+      areas.push(patch);
+      i = j;
+    }
+  }
 }
 
 function assignBdHeights(buildings, bGrid, bdtopo, proj) {

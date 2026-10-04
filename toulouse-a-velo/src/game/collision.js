@@ -13,9 +13,11 @@ export class CollisionWorld {
     this.onRoad = () => false;
   }
 
-  addRing(ring) {
+  // skip(a, b) が true を返す辺は壁にしない（建物の下をくぐる通路など）
+  addRing(ring, skip = null) {
     for (let i = 0; i < ring.length; i++) {
       const a = ring[i], b = ring[(i + 1) % ring.length];
+      if (skip && skip(a, b)) continue;
       this.addSegment(a[0], a[1], b[0], b[1]);
     }
   }
@@ -106,7 +108,7 @@ export class CollisionWorld {
   }
 }
 
-function segIntersect(ax, az, bx, bz, cx, cz, dx, dz) {
+export function segIntersect(ax, az, bx, bz, cx, cz, dx, dz) {
   const rx = bx - ax, rz = bz - az, sx = dx - cx, sz = dz - cz;
   const den = rx * sz - rz * sx;
   if (Math.abs(den) < 1e-9) return null;

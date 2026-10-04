@@ -89,15 +89,28 @@ async function readJsonWithProgress(res, onBytes) {
   return JSON.parse(new TextDecoder('utf-8').decode(all));
 }
 
-export async function fetchOverpass(bbox, { onStatus, headers = {}, timeoutMs = 240000, endpoints = OVERPASS_ENDPOINTS } = {}) {
+// timeoutMs: 1 回のダウンロード全体の上限。headerTimeoutMs: 応答が始まるまでの上限。
+// deadlineMs: 全サーバー・全再試行を合わせた上限（ブラウザでは早めに IGN へ切り替えるため）
+export async function fetchOverpass(bbox, {
+  onStatus, headers = {}, timeoutMs = 240000, headerTimeoutMs = 90000, deadlineMs = Infinity, endpoints = OVERPASS_ENDPOINTS, attempts = 2,
+} = {}) {
   const query = buildOverpassQuery(bbox);
   const errors = [];
-  for (const url of endpoints) {
+  const t0 = Date.now();
+  // 接続が不安定なことがあるので、各サーバーを attempts 回まで試す
+  const tries = endpoints.flatMap((url) => Array.from({ length: attempts }, (_, i) => ({ url, retry: i })));
+  for (const { url, retry } of tries) {
     const host = new URL(url).host;
+    if (retry > 0) await new Promise((r) => setTimeout(r, Math.min(30000, 3000 * 2 ** (retry - 1))));
+    const remaining = deadlineMs - (Date.now() - t0);
+    if (remaining <= 0) {
+      errors.push('時間切れのため打ち切り');
+      break;
+    }
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    let timer = setTimeout(() => ctrl.abort(), Math.min(headerTimeoutMs, remaining));
     try {
-      onStatus?.({ host, bytes: 0 });
+      onStatus?.({ host, bytes: 0, retry });
       const res = await fetch(url, {
         method: 'POST',
         body: new URLSearchParams({ data: query }),
@@ -105,12 +118,15 @@ export async function fetchOverpass(bbox, { onStatus, headers = {}, timeoutMs = 
         signal: ctrl.signal,
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      // 応答が始まったら、ダウンロード完了まで待つ
+      clearTimeout(timer);
+      timer = setTimeout(() => ctrl.abort(), timeoutMs);
       const json = await readJsonWithProgress(res, (bytes) => onStatus?.({ host, bytes }));
       if (!json.elements) throw new Error('elements がありません');
       if (json.remark && /runtime error|timed out|out of memory/i.test(json.remark)) throw new Error(json.remark);
       return compactOsm(json);
     } catch (err) {
-      errors.push(`${host}: ${err.name === 'AbortError' ? 'タイムアウト' : err.message}`);
+      errors.push(`${host}${retry ? `（再試行 ${retry}）` : ''}: ${err.name === 'AbortError' ? 'タイムアウト' : err.message}${err.cause ? ` (${err.cause.code || err.cause.message})` : ''}`);
     } finally {
       clearTimeout(timer);
     }

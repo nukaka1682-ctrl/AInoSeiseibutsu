@@ -252,6 +252,7 @@ export function buildGround(parsed, rect, mats) {
     for (const a of water) {
       writeFlatPolygon(mask, a.outer, a.holes, 0, 10);
       writeFlatPolygon(surface, a.outer, a.holes, -a.depth, 25);
+      if (a.patch) continue; // 橋の下を埋めたパッチには岸壁を作らない
       writeQuai(a.outer, false, a);
       for (const h of a.holes) writeQuai(h, true, a);
     }
