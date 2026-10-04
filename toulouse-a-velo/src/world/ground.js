@@ -79,7 +79,7 @@ export function createGroundMaterials(tex) {
 }
 
 // 折れ線の左右のオフセット（マイター結合、長さ制限付き）
-function offsets(pts, half) {
+export function offsets(pts, half) {
   const n = pts.length;
   const L = [], R = [];
   for (let i = 0; i < n; i++) {
@@ -169,6 +169,20 @@ function roadStyle(road) {
   if (paved) return { order: ORDER.road, tex: 'paving', color: c3('#d9d1c4') };
   if (t === 'service') return { order: ORDER.service, tex: 'asphalt', color: c3('#e6e6e6') };
   return { order: ORDER.road, tex: 'asphalt', color: c3('#ffffff') };
+}
+
+// 水の上かどうかの判定（当たり判定用。描画とは独立）
+export function makeWaterTest(areas) {
+  const water = areas.filter((a) => a.type === 'water');
+  const grid = new Grid(50);
+  water.forEach((a, i) => grid.insertBounds(a.bounds.minX, a.bounds.minZ, a.bounds.maxX, a.bounds.maxZ, i));
+  return (x, z) => {
+    let hit = false;
+    grid.queryPoint(x, z, 0, (i) => {
+      if (!hit && pointInPolygon(x, z, water[i])) hit = true;
+    });
+    return hit;
+  };
 }
 
 export function buildGround(parsed, rect, mats) {

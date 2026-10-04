@@ -5,7 +5,7 @@ import { MeshWriter, writeFlatPolygon } from './meshwriter.js';
 import { centroid, hash01, isConvex, signedArea } from '../geo.js';
 
 const CHUNK = 300;
-const BAY = 3.5; // 窓 1 列分の幅（m）
+export const BAY = 3.5; // 窓 1 列分の幅（m）
 
 // トゥールーズ「ばら色の街」の壁の色（レンガ）と、漆喰・石の色
 const BRICK = ['#c9846c', '#bf745b', '#d39277', '#b86c55', '#cc8b70', '#c27b63', '#d69c80'];
@@ -33,7 +33,7 @@ function paletteColor(palette, id, salt) {
   return [tmpColor.r * k, tmpColor.g * k, tmpColor.b * k];
 }
 
-function wallColor(b) {
+export function wallColor(b) {
   const t = b.tags;
   const tag = colorFromTag(t['building:colour']);
   if (tag) return tag;

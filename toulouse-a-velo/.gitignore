@@ -3,5 +3,3 @@ dist/
 test/output/
 # 地図データ（npm run fetch-data で作成。大きいので Git には入れない）
 public/data/*.json
-# Draco デコーダー（npm run dev / build のときに node_modules からコピー）
-public/draco/

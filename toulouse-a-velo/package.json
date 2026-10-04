@@ -5,9 +5,7 @@
   "type": "module",
   "description": "実在のトゥールーズの街を3Dで再現したサイクリングゲーム（OpenStreetMap + IGN BD TOPO）",
   "scripts": {
-    "predev": "node scripts/copy-draco.mjs",
     "dev": "vite",
-    "prebuild": "node scripts/copy-draco.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "fetch-data": "NODE_USE_ENV_PROXY=1 node scripts/fetch-data.mjs",
@@ -17,7 +15,7 @@
   },
   "license": "MIT",
   "dependencies": {
-    "3d-tiles-renderer": "^0.5.3",
+    "poly2tri": "^1.5.0",
     "three": "^0.186.1"
   },
   "devDependencies": {

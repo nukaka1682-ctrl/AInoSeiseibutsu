@@ -1,6 +1,7 @@
 // 街路樹・公園の木（InstancedMesh で数千本を 2 回の描画コールで描く）。
 // OSM に登録されている木（natural=tree / tree_row）に加え、木の少ない公園には木を補う。
 import * as THREE from 'three';
+import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { Grid, hash01, mulberry32, pointInPolygon } from '../geo.js';
 
 const MAX_TREES = 16000;
@@ -60,6 +61,48 @@ export function streetTrees(roads, isFree, spacing = 11) {
   return out;
 }
 
+// 樹冠: 球の表面を少しでこぼこにした形（葉の塊らしく）
+function lumpyCrown() {
+  let g = new THREE.IcosahedronGeometry(1, 1); // 80 面（1 万本で 80 万面）
+  g.deleteAttribute('normal');
+  g.deleteAttribute('uv');
+  g = mergeVertices(g); // 頂点を共有させて滑らかな陰影にする
+  const pos = g.attributes.position;
+  const v = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i);
+    const n = Math.sin(v.x * 5.1 + v.y * 2.3) * Math.cos(v.z * 4.7 - v.y * 3.1) + Math.sin(v.x * 3.7 - v.z * 4.3) * 0.5;
+    v.multiplyScalar(1 + n * 0.09);
+    if (v.y < 0) v.y *= 0.8; // 下側は少し平ら
+    pos.setXYZ(i, v.x, v.y, v.z);
+  }
+  g.computeVertexNormals();
+  return g;
+}
+
+// 葉の塊のまだら模様と、樹冠の下側の陰（UV を使わず、樹冠の中の位置から 3D ノイズで作る）
+function leafShading(material) {
+  material.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vLeafPos;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvLeafPos = position;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>
+        varying vec3 vLeafPos;
+        float leafHash(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+        float leafNoise(vec3 x) {
+          vec3 i = floor(x), f = fract(x);
+          f = f * f * (3.0 - 2.0 * f);
+          return mix(mix(mix(leafHash(i), leafHash(i + vec3(1, 0, 0)), f.x), mix(leafHash(i + vec3(0, 1, 0)), leafHash(i + vec3(1, 1, 0)), f.x), f.y),
+                     mix(mix(leafHash(i + vec3(0, 0, 1)), leafHash(i + vec3(1, 0, 1)), f.x), mix(leafHash(i + vec3(0, 1, 1)), leafHash(i + vec3(1, 1, 1)), f.x), f.y), f.z);
+        }`)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        float leaf = leafNoise(vLeafPos * 5.0) * 0.55 + leafNoise(vLeafPos * 13.0) * 0.45;
+        diffuseColor.rgb *= (0.62 + leaf * 0.7) * (0.7 + 0.3 * smoothstep(-0.9, 0.5, vLeafPos.y));`);
+  };
+  material.customProgramCacheKey = () => 'leaf-shading';
+}
+
 export function buildTrees(points) {
   const pts = points.length > MAX_TREES ? points.filter((_, i) => i % Math.ceil(points.length / MAX_TREES) === 0) : points;
   const n = pts.length;
@@ -69,9 +112,10 @@ export function buildTrees(points) {
 
   const trunkGeo = new THREE.CylinderGeometry(0.16, 0.26, 1, 6);
   trunkGeo.translate(0, 0.5, 0);
-  const crownGeo = new THREE.IcosahedronGeometry(1, 1);
-  const trunkMat = new THREE.MeshLambertMaterial({ color: '#8a7a66' });
-  const crownMat = new THREE.MeshLambertMaterial({ color: '#ffffff', flatShading: true });
+  const crownGeo = lumpyCrown();
+  const trunkMat = new THREE.MeshLambertMaterial({ color: '#7a6c5a' });
+  const crownMat = new THREE.MeshLambertMaterial({ color: '#ffffff' });
+  leafShading(crownMat);
   const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, n);
   const crowns = new THREE.InstancedMesh(crownGeo, crownMat, n);
   const m = new THREE.Matrix4();
@@ -79,16 +123,28 @@ export function buildTrees(points) {
   const s = new THREE.Vector3();
   const p = new THREE.Vector3();
   const col = new THREE.Color();
-  const greens = ['#5e7f3a', '#6b8c42', '#557534', '#738f48', '#4f6d33', '#7b9a4f'];
+  const greens = ['#4b6a2e', '#56753a', '#435f2a', '#5d7a3e', '#3e5a2b', '#64803f'];
   for (let i = 0; i < n; i++) {
-    const [x, z] = pts[i];
+    // 点は [x, z]（大きさは推定）か { x, z, y, h, r }（LiDAR で測った高さと枝の広がり）
+    const t = pts[i];
+    const x = t.x ?? t[0], z = t.z ?? t[1], y = t.y ?? 0;
     const seed = Math.floor(x * 7.13) * 31 + Math.floor(z * 3.71);
-    const r = 2.4 + hash01(seed, 1) * 2.4;
-    const trunkH = 2.6 + hash01(seed, 2) * 2.2;
+    let r = 2.4 + hash01(seed, 1) * 2.4;
+    let trunkH = 2.6 + hash01(seed, 2) * 2.2;
+    let crownH = r * (0.8 + hash01(seed, 4) * 0.3);
+    let crownY = trunkH + crownH * 0.9;
+    if (t.h) {
+      // 測った高さ: 樹冠は高さの上 7 割ほど（プラタナスなどの街路樹は下枝が 3〜6 m）
+      r = Math.max(1.5, t.r * 1.05);
+      const bottom = Math.max(1.8, Math.min(t.h * 0.32, 6));
+      crownH = Math.max(1, Math.min((t.h - bottom) / 2, r * 1.3)); // 細長くなりすぎないように（そのぶん幹が伸びる）
+      crownY = t.h - crownH;
+      trunkH = crownY - crownH * 0.4;
+    }
     q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), hash01(seed, 3) * Math.PI * 2);
-    m.compose(p.set(x, 0, z), q, s.set(1 + r * 0.06, trunkH + r * 0.5, 1 + r * 0.06));
+    m.compose(p.set(x, y, z), q, s.set(1 + r * 0.06, trunkH + crownH * 0.6, 1 + r * 0.06));
     trunks.setMatrixAt(i, m);
-    m.compose(p.set(x, trunkH + r * 0.75, z), q, s.set(r, r * (0.8 + hash01(seed, 4) * 0.3), r));
+    m.compose(p.set(x, y + crownY, z), q, s.set(r, crownH, r));
     crowns.setMatrixAt(i, m);
     col.set(greens[Math.floor(hash01(seed, 5) * greens.length)]);
     crowns.setColorAt(i, col);

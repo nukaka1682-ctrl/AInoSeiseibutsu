@@ -275,16 +275,5 @@ kbd {
   .map-side { width: 100%; max-height: 40%; }
 }
 
-#ion-token {
-  display: block;
-  width: 100%;
-  margin: 8px 0 4px;
-  padding: 8px 10px;
-  border: 1px solid #d3c3b8;
-  border-radius: 8px;
-  font: 13px ui-monospace, SFMono-Regular, Menlo, monospace;
-  background: #fffdfb;
-  -webkit-user-select: text;
-  user-select: text;
-}
 .choice a { color: var(--rose-dark); }
+.real-choice { margin-top: 16px; }

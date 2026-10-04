@@ -217,3 +217,60 @@ test('橋の下で切り抜かれた水面を埋める', () => {
   assert.ok(!pointInRing(-75, 0, patch.outer), '岸の上までは広げない');
   assert.equal(patch.depth, 6);
 });
+
+// ---- LiDAR（表面・地形モデル）----
+import { HeightGrid, fillNoData, lidarResolution } from '../../src/data/lidar.js';
+import { roofFromDsm } from '../../src/world/lidarroof.js';
+import { detectTrees } from '../../src/world/lidartrees.js';
+
+// 100 m × 100 m、1 m 格子の合成データ: 平らな地面 140 m、切妻屋根の建物（軒 10 m・棟 13 m）、木 1 本（高さ 12 m）
+function syntheticLidar() {
+  const rect = { minX: -50, maxX: 50, minZ: -50, maxZ: 50 };
+  const cols = 100, rows = 100;
+  const dtm = new Float32Array(cols * rows).fill(140);
+  const dsm = new Float32Array(cols * rows).fill(140);
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const x = -50 + c + 0.5, z = -50 + r + 0.5;
+      if (x > -20 && x < 0 && z > -10 && z < 10) dsm[r * cols + c] = 150 + 3 * (1 - Math.abs(z) / 10); // 棟は z = 0（東西方向）
+      const d = Math.hypot(x - 25, z - 25);
+      if (d < 4) dsm[r * cols + c] = 140 + 12 - d * 1.2;
+    }
+  }
+  return { rect, dsm: { data: dsm, cols, rows }, dtm: { data: dtm, cols, rows } };
+}
+
+test('LiDAR: 格子の補間・欠測の穴埋め・解像度', () => {
+  const g = new HeightGrid({ data: new Float32Array([0, 10, 20, 30]), cols: 2, rows: 2 }, { minX: 0, maxX: 2, minZ: 0, maxZ: 2 }, 5);
+  assert.equal(g.sample(1, 0.5), 0); // セルの中心同士の真ん中: (0 + 10) / 2 - 5
+  assert.equal(g.sample(1, 1), 10);
+  const d = new Float32Array([1, -99999, 3, 4, 5, 6, 7, 8, 9]);
+  fillNoData(d, 3, 3);
+  assert.ok(Math.abs(d[1] - (1 + 3 + 5) / 3) < 1e-6);
+  assert.deepEqual(lidarResolution({ minX: -1200, maxX: 1200, minZ: -1200, maxZ: 1200 }), { dsm: 1, dtm: 2 });
+});
+
+test('LiDAR: 表面モデルから切妻屋根の形を作る', () => {
+  const L = syntheticLidar();
+  const dsm = new HeightGrid(L.dsm, L.rect, 140);
+  const outer = [[-20, -10], [0, -10], [0, 10], [-20, 10]];
+  const roof = roofFromDsm(outer, [], (x, z) => dsm.sample(x, z));
+  assert.ok(roof.triangles.length >= 6 && roof.triangles.length % 3 === 0);
+  const ridge = Math.max(...roof.heights), eave = Math.min(...roof.heights);
+  assert.ok(ridge > 12 && ridge <= 13.01, `棟 ${ridge}`);
+  assert.ok(eave > 9.9 && eave < 11, `軒 ${eave}`);
+  // 平らな面の上の点は省かれる（棟の上の点だけ残る）
+  const steiner = roof.points.length - roof.rings[0].count;
+  assert.ok(steiner < 20, `内部の点 ${steiner}`);
+});
+
+test('LiDAR: 樹冠から木を見つける（建物の上は除く）', () => {
+  const L = syntheticLidar();
+  const dsm = new HeightGrid(L.dsm, L.rect, 140), dtm = new HeightGrid(L.dtm, L.rect, 140);
+  const building = { outer: [[-20, -10], [0, -10], [0, 10], [-20, 10]], bounds: { minX: -20, maxX: 0, minZ: -10, maxZ: 10 } };
+  const trees = detectTrees({ dsm, dtm, buildings: [building] });
+  assert.equal(trees.length, 1);
+  assert.ok(Math.hypot(trees[0].x - 25, trees[0].z - 25) < 1.5);
+  assert.ok(trees[0].h > 10 && trees[0].h < 12.5, `高さ ${trees[0].h}`);
+  assert.ok(trees[0].r > 2 && trees[0].r < 6, `半径 ${trees[0].r}`);
+});

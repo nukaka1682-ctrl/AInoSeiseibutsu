@@ -4,12 +4,11 @@ import * as THREE from 'three';
 import { Sky } from 'three/addons/objects/Sky.js';
 import { AREA_PRESETS, DEFAULT_AREA, TOUR_ROUTE } from './config.js';
 import { bboxAround } from './geo.js';
-import { PROVIDER_LABEL, loadAreaData } from './data/load.js';
+import { PROVIDER_LABEL, loadAreaData, loadLidar } from './data/load.js';
 import { makeTextures } from './world/textures.js';
 import { createBuildingMaterials } from './world/buildings.js';
 import { ORDER, createGroundMaterials } from './world/ground.js';
-import { assembleWorld } from './world/assemble.js';
-import { PhotorealCity } from './world/photoreal.js';
+import { areaFrame, assembleWorld } from './world/assemble.js';
 import { Bike } from './game/bike.js';
 import { CAMERA_LABELS, CameraRig } from './game/camera.js';
 import { Input } from './game/input.js';
@@ -44,7 +43,7 @@ renderer.setSize(innerWidth, innerHeight);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 0.8;
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = THREE.PCFShadowMap;
 $('app').appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
@@ -87,7 +86,7 @@ sun.shadow.bias = -0.0004;
 sun.shadow.normalBias = 0.35;
 scene.add(sun, sun.target);
 
-// 実写 3D のときの自転車の足元の影（実写のタイルは影を受けないので、丸い影を置く）
+// 航空写真の地面は影を受けない（写真に影が写っている）ので、自転車の足元に丸い影を置く
 const blobShadow = (() => {
   const c = document.createElement('canvas');
   c.width = c.height = 64;
@@ -128,8 +127,6 @@ const state = {
   toastTimer: 0,
   lastWarn: 0,
   discovered: new Set(store.get('tav-discovered', [])),
-  photo: null, // 実写 3D の街並み（PhotorealCity）
-  photoOn: false,
 };
 window.__tav = state; // デバッグ・テスト用
 state.rig = rig;
@@ -158,13 +155,7 @@ const areas = { ...(customArea ? { custom: customArea } : {}), ...AREA_PRESETS }
     list.appendChild(label);
   }
   if (params.get('mode') === 'tour') document.querySelector('input[name=mode][value=tour]').checked = true;
-  // 実写 3D のトークン: このブラウザに保存したもの → ビルド時に埋め込んだもの（VITE_CESIUM_ION_TOKEN）
-  const token = store.get('tav-ion-token', '') || import.meta.env.VITE_CESIUM_ION_TOKEN || '';
-  $('ion-token').value = token;
-  document.querySelector(`input[name=look][value=${token ? 'photo' : 'model'}]`).checked = true;
-  $('ion-token').addEventListener('input', () => {
-    if ($('ion-token').value.trim()) document.querySelector('input[name=look][value=photo]').checked = true;
-  });
+  if (params.get('real') === '0') $('opt-real').checked = false;
 }
 
 function show(id, on = true) {
@@ -204,18 +195,22 @@ async function startGame() {
       provider: $('opt-ign').checked ? 'ign' : 'auto',
       onStatus: (t) => setLoading(t, 0.1),
     });
+    if ($('opt-real').checked) {
+      // 本物そっくりモード: LiDAR の表面・地形モデル
+      try {
+        setLoading('IGN LiDAR HD（屋根・地形・木の実測データ）を取得中…', 0.2);
+        data.lidar = await loadLidar(bbox, areaFrame(bbox).rect, {
+          forceNetwork: $('opt-refresh').checked,
+          onStatus: (p) => setLoading(`IGN LiDAR HD（屋根・地形・木の実測データ）を取得中… ${Math.round(p * 100)}%`, 0.2 + p * 0.1),
+        });
+      } catch (err) {
+        console.warn('LiDAR を取得できませんでした', err);
+        state.lidarNote = 'LiDAR の実測データを取得できなかったため、地図から生成した街で始めます';
+      }
+    }
     setLoading(`地図データ: ${PROVIDER_LABEL[data.provider]}（${data.source}）\n地図を解析中…`, 0.3);
     await nextFrame();
     state.world = await buildWorld(data, bbox, (t, p) => setLoading(`地図データ: ${data.source}\n${t}`, 0.3 + p * 0.65));
-    const token = $('ion-token').value.trim();
-    if (document.querySelector('input[name=look]:checked')?.value === 'photo') {
-      if (token) {
-        store.set('tav-ion-token', token);
-        await preparePhotoreal(state.world, token);
-      } else {
-        state.photoNote = '実写 3D にはトークンが必要なため、地図から生成した街で始めます';
-      }
-    }
     beginPlay();
   } catch (err) {
     console.error(err);
@@ -253,13 +248,10 @@ function disposeWorld() {
     if (o.isInstancedMesh) o.dispose();
   });
   if (state.bike) scene.remove(state.bike.root);
-  if (state.photo) state.photo.dispose();
-  state.photo = null;
-  state.photoOn = false;
   state.world = null;
 }
 
-// ---------------------------------------------------------------- 実写 3D
+// ---------------------------------------------------------------- スタート地点・地面の高さ
 // スタート地点（タイムアタックは 1 つ目の名所、自由走行はキャピトル広場）
 function spawnPoint(w) {
   let at = null;
@@ -271,78 +263,16 @@ function spawnPoint(w) {
   return w.roadnet.nearestRideablePoint(at ? at.x : 0, at ? at.z : 0, (x, z) => !w.collision.blockedByWater(x, z)) || { x: 0, z: 0, heading: 0 };
 }
 
-// 実写 3D のタイルを読み込み、地面の高さを合わせる。失敗したら地図から生成した街のまま続ける
-async function preparePhotoreal(w, token) {
-  const photo = new PhotorealCity({
-    token, lat: w.proj.lat0, lon: w.proj.lon0, camera, renderer, errorTarget: $('opt-hires').checked ? 8 : 12,
-  });
-  scene.add(photo.root);
-  const sp = spawnPoint(w);
-  // スタート地点の上空から見下ろして、周りのタイルを先に読み込む
-  camera.position.set(sp.x, 90, sp.z + 60);
-  camera.lookAt(sp.x, 0, sp.z);
-  const t0 = performance.now();
-  let reason = '';
-  for (;;) {
-    photo.update();
-    renderer.render(scene, camera);
-    await nextFrame();
-    const sec = (performance.now() - t0) / 1000;
-    setLoading(`実写 3D の街並みを読み込み中…（${photo.loadedModels} タイル）`, 0.95 + Math.min(1, photo.progress) * 0.05);
-    if (photo.errors.length && photo.loadedModels === 0) {
-      reason = photo.errors[0];
-      break;
-    }
-    if (photo.loadedModels > 20 && photo.progress >= 1 && sec > 2) break;
-    if (sec > 60) {
-      if (photo.loadedModels === 0) reason = '60 秒待ってもタイルが届きませんでした';
-      break;
-    }
-  }
-  if (!reason && !photo.calibrate(sp.x, sp.z)) reason = '地面の高さを測れませんでした';
-  if (reason) {
-    console.warn('実写 3D を使えません:', reason);
-    photo.dispose();
-    state.photoNote = `実写 3D を読み込めなかったため、地図から生成した街で始めます（${/401|403|Unauthorized|Forbidden/i.test(reason) ? 'トークンが正しいか確認してください' : reason}）`;
-    return;
-  }
-  state.photo = photo;
-  setPhotoMode(true);
-}
-
-// 実写 3D ⇔ 地図から生成 の切り替え
-function setPhotoMode(on) {
-  const w = state.world;
-  state.photoOn = !!(on && state.photo);
-  if (state.photo) state.photo.root.visible = state.photoOn;
-  for (const g of [w.ground.group, w.buildings.group, w.trees]) g.visible = !state.photoOn;
-  w.routeMesh.material.opacity = state.photoOn ? 0 : 0.55;
-  sun.castShadow = !state.photoOn && $('opt-shadows').checked;
-  scene.fog.near = state.photoOn ? 600 : 280;
-  scene.fog.far = state.photoOn ? 3500 : 1500;
-  const bike = state.bike;
-  if (bike) {
-    bike.y = state.photoOn ? groundForTeleport(bike.x, bike.z) : 0;
-    bike.syncModel();
-  }
-  $('look-btn').classList.toggle('hidden', !state.photo);
-  $('look-btn').textContent = `見た目: ${state.photoOn ? '実写 3D' : '地図から生成'}`;
-  updateAttribution();
-}
-
-// ワープした地点の地面の高さ（実写 3D のときだけ）
+// ワープした地点などの地面の高さ（LiDAR の地形があるときだけ 0 以外）
 function groundForTeleport(x, z) {
-  if (!state.photoOn) return 0;
-  const seg = state.world.roadnet.nearestSegment(x, z, 15);
-  const onBridge = !!(seg && seg.seg.road.bridge && Math.sqrt(seg.d2) < seg.seg.road.width / 2 + 2);
-  return state.photo.findGround(x, z, onBridge) ?? 0;
+  return state.world?.heightAt ? state.world.heightAt(x, z) : 0;
 }
 
 function updateAttribution() {
   const w = state.world;
   if (!w) return;
-  const base = w.stats.provider === 'ign' ? '地図 © IGN BD TOPO（Licence Ouverte）' : '© OpenStreetMap contributors · IGN BD TOPO';
-  $('attribution').textContent = state.photoOn ? `3D: Google · ${state.photo.attributions() || 'Google'} · Cesium ion ／ ${base}` : base;
+  const base = w.stats.provider === 'ign' ? '地図 © IGN BD TOPO' : '© OpenStreetMap contributors · IGN BD TOPO';
+  $('attribution').textContent = w.real ? `${base} · LiDAR HD・航空写真 © IGN（Licence Ouverte）` : base;
 }
 
 // ---------------------------------------------------------------- プレイ開始
@@ -371,22 +301,25 @@ function beginPlay() {
     }
   }
   const p = spawnPoint(w);
-  bike.place(p.x, p.z, p.heading, 0);
-  setPhotoMode(state.photoOn);
+  bike.place(p.x, p.z, p.heading, groundForTeleport(p.x, p.z));
+  updateAttribution();
   rig.initialized = false;
 
   show('loading-screen', false);
   show('hud');
   state.phase = 'play';
   updateModeHud();
-  if (state.photoNote) {
-    toast(state.photoNote, 6);
-    state.photoNote = '';
+  if (w.realNote) toast(w.realNote, 6);
+  if (state.lidarNote) {
+    toast(state.lidarNote, 6);
+    state.lidarNote = '';
   }
   if (w.stats.fallbackReason) toast('OpenStreetMap のサーバーにつながらなかったため、IGN（フランス国土地理院）の地図で街を作りました', 6);
   const st = w.stats.buildings;
   const pct = (n) => Math.round(((n || 0) / Math.max(1, st.total)) * 100);
-  toast(`<b>Bienvenue à Toulouse !</b><br>建物 ${st.total.toLocaleString()} 棟（高さ: IGN 実測 ${pct(st.IGN)}% / OSM ${pct(st.OSM) + pct(st['OSM（階数）'])}% / 推定 ${pct(st['推定'])}%）<br>W でこぎ出そう。M で地図、C でカメラ切替。`, 7);
+  toast(w.real
+    ? `<b>Bienvenue à Toulouse !</b><br>建物 ${st.total.toLocaleString()} 棟・木 ${w.stats.trees.toLocaleString()} 本。屋根の形・地形・木は LiDAR の実測、地面と屋根は航空写真です<br>W でこぎ出そう。M で地図、C でカメラ切替。`
+    : `<b>Bienvenue à Toulouse !</b><br>建物 ${st.total.toLocaleString()} 棟（高さ: IGN 実測 ${pct(st.IGN)}% / OSM ${pct(st.OSM) + pct(st['OSM（階数）'])}% / 推定 ${pct(st['推定'])}%）<br>W でこぎ出そう。M で地図、C でカメラ切替。`, 7);
 }
 
 function setTarget(lm) {
@@ -472,7 +405,7 @@ function updateLabels() {
       root.appendChild(el);
       labelEls.set(lm.id, el);
     }
-    tmpV.set(lm.x, lm.height + bike.y, lm.z).project(camera);
+    tmpV.set(lm.x, lm.height + (lm.y || 0), lm.z).project(camera);
     if (tmpV.z > 1 || tmpV.x < -1.2 || tmpV.x > 1.2 || tmpV.y < -1.2 || tmpV.y > 1.2) {
       el.style.display = 'none';
       continue;
@@ -512,13 +445,21 @@ function updateRouteMesh() {
   }
   const pos = [];
   const half = 0.9;
+  // 地形があるときは 4 m ごとに区切って地面に沿わせる
+  const lift = w.real ? 0.3 : 0.06;
+  const yAt = (x, z) => w.heightAt(x, z) + lift;
   for (let i = 0; i + 1 < pts.length; i++) {
-    const [ax, az] = pts[i], [bx, bz] = pts[i + 1];
-    const l = Math.hypot(bx - ax, bz - az);
+    const [px, pz] = pts[i], [qx, qz] = pts[i + 1];
+    const l = Math.hypot(qx - px, qz - pz);
     if (l < 0.01) continue;
-    const nx = (-(bz - az) / l) * half, nz = ((bx - ax) / l) * half;
-    const y = 0.06;
-    pos.push(ax + nx, y, az + nz, bx + nx, y, bz + nz, bx - nx, y, bz - nz, ax + nx, y, az + nz, bx - nx, y, bz - nz, ax - nx, y, az - nz);
+    const nx = (-(qz - pz) / l) * half, nz = ((qx - px) / l) * half;
+    const steps = w.real ? Math.max(1, Math.ceil(l / 4)) : 1;
+    for (let k = 0; k < steps; k++) {
+      const ax = px + ((qx - px) * k) / steps, az = pz + ((qz - pz) * k) / steps;
+      const bx = px + ((qx - px) * (k + 1)) / steps, bz = pz + ((qz - pz) * (k + 1)) / steps;
+      const ya = yAt(ax, az), yb = yAt(bx, bz);
+      pos.push(ax + nx, ya, az + nz, bx + nx, yb, bz + nz, bx - nx, yb, bz - nz, ax + nx, ya, az + nz, bx - nx, yb, bz - nz, ax - nx, ya, az - nz);
+    }
   }
   const g = w.routeMesh.geometry;
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
@@ -540,7 +481,7 @@ function update(dt, forced) {
   bike.update(dt, ctl, {
     collision: w.collision,
     surfaceAt: w.surfaceAt,
-    groundAt: state.photoOn ? (x, z, y) => state.photo.groundAt(x, z, y) : null,
+    groundAt: w.groundAt || null,
   });
   state.playTime += dt;
 
@@ -554,8 +495,8 @@ function update(dt, forced) {
     }
   }
 
-  blobShadow.visible = state.photoOn;
-  if (state.photoOn) {
+  blobShadow.visible = !!w.real;
+  if (w.real) {
     blobShadow.position.set(bike.x, bike.y + 0.05, bike.z);
     blobShadow.rotation.z = -bike.heading;
   }
@@ -565,7 +506,7 @@ function update(dt, forced) {
   sun.position.set(bike.x + sunDir.x * 500, sunDir.y * 500, bike.z + sunDir.z * 500);
   groundMats.water.normalMap.offset.set(state.playTime * 0.012, state.playTime * 0.02);
 
-  rig.update(dt, bike, w.collision);
+  rig.update(dt, bike, w.collision, w.real ? w.heightAt : null);
   audio.update(dt, bike.speed, ctl.throttle === 0);
 
   // 名所の発見
@@ -623,7 +564,6 @@ function update(dt, forced) {
     state.streetTimer = 0.3;
     const road = w.roadnet.streetNameAt(bike.x, bike.z);
     $('hud-street').textContent = road ? road.name : '';
-    if (state.photoOn && Math.random() < 0.15) updateAttribution();
     $('hud-stats').innerHTML = `走行距離 ${fmtDist(bike.odometer)} · 最高 ${Math.round(bike.topSpeed)} km/h<br>${CAMERA_LABELS[rig.mode]}`;
     updateModeHud();
   }
@@ -784,7 +724,6 @@ $('clear-target').addEventListener('click', () => {
   renderFullMap();
 });
 $('resume-btn').addEventListener('click', () => togglePause(false));
-$('look-btn').addEventListener('click', () => setPhotoMode(!state.photoOn));
 $('title-btn').addEventListener('click', backToTitle);
 $('mute-btn').addEventListener('click', () => {
   audio.setMuted(!audio.muted);
@@ -828,7 +767,7 @@ function frame(now) {
     update(dt);
     drawHud();
   }
-  if (state.photoOn) state.photo.update();
+  if (state.world?.real) state.world.real.ortho.update(dt, camera);
   if (state.world) renderer.render(scene, camera);
 }
 requestAnimationFrame(frame);

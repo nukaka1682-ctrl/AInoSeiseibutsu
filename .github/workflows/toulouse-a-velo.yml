@@ -38,11 +38,7 @@ jobs:
       - name: Fetch OpenStreetMap + IGN data
         run: npm run fetch-data -- centre
         continue-on-error: true
-      # 実写 3D の Cesium ion トークンを埋め込む場合は、リポジトリの Secrets に CESIUM_ION_TOKEN を登録する
-      # （未登録なら、遊ぶ人がタイトル画面で自分のトークンを入力する）
       - run: npm run build
-        env:
-          VITE_CESIUM_ION_TOKEN: ${{ secrets.CESIUM_ION_TOKEN }}
       - name: Assemble site
         run: |
           mkdir -p ../_site
