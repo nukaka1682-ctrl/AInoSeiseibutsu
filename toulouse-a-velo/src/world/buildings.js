@@ -3,6 +3,8 @@
 import * as THREE from 'three';
 import { MeshWriter, writeFlatPolygon } from './meshwriter.js';
 import { centroid, hash01, isConvex, signedArea } from '../geo.js';
+import { STYLE, useFacadeAtlas } from './facades.js';
+import { facadeSpan } from './landmarkfacades.js';
 
 const CHUNK = 300;
 export const BAY = 3.5; // 窓 1 列分の幅（m）
@@ -46,6 +48,29 @@ export function wallColor(b) {
   return hash01(b.id, 2) < 0.66 ? paletteColor(BRICK, b.id, 1) : paletteColor(STUCCO, b.id, 1);
 }
 
+// ファサードの様式（facades.js）: 壁の材料ごとに、トゥールーズで見かける割合で選ぶ
+const STYLE_MIX = {
+  brick: [[STYLE.brickStone, 0.3], [STYLE.brickShutters, 0.36], [STYLE.rose, 0.12], [STYLE.ochre, 0.1], [STYLE.salmon, 0.12]],
+  stone: [[STYLE.cream, 0.6], [STYLE.brickStone, 0.2], [STYLE.taupe, 0.2]],
+  concrete: [[STYLE.modern, 0.6], [STYLE.cream, 0.25], [STYLE.ochre, 0.15]],
+  wood: [[STYLE.modern, 1]],
+  other: [[STYLE.brickStone, 0.2], [STYLE.brickShutters, 0.22], [STYLE.ochre, 0.12], [STYLE.taupe, 0.11], [STYLE.salmon, 0.12], [STYLE.cream, 0.1], [STYLE.rose, 0.13]],
+};
+export function facadeStyle(b) {
+  const mat = b.tags['building:material'];
+  const mix = STYLE_MIX[mat === 'sandstone' || mat === 'limestone' ? 'stone' : mat === 'plaster' || mat === 'render' ? 'other' : mat] || STYLE_MIX.other;
+  let r = hash01(b.id, 21);
+  for (const [style, p] of mix) {
+    if ((r -= p) < 0) return style;
+  }
+  return mix[0][0];
+}
+// ファサードの色はテクスチャに描いてあるので、頂点カラーは建物ごとのわずかな明るさの違いだけ
+export function facadeTint(b) {
+  const k = 0.9 + hash01(b.id, 22) * 0.14, warm = hash01(b.id, 23) * 0.04;
+  return [k, k * (1 - warm * 0.5), k * (1 - warm)];
+}
+
 function roofColor(b, flat) {
   const tag = colorFromTag(b.tags['roof:colour']);
   if (tag) return tag;
@@ -56,7 +81,7 @@ function outwardSign(ring) {
   return signedArea(ring) > 0 ? 1 : -1;
 }
 
-function writeWalls(W, ring, sign, b, color, plainColor) {
+function writeWalls(W, ring, sign, b, plainColor, facade) {
   const info = b.info;
   const y0 = info.minHeight;
   const y1 = info.height;
@@ -64,6 +89,8 @@ function writeWalls(W, ring, sign, b, color, plainColor) {
   const floorH = info.floorHeight;
   const groundH = Math.max(3.4, floorH * 1.15);
   const bayShift = Math.floor(hash01(b.id, 9) * 4);
+  const sv = facadeStyle(b) * 1000; // v に様式の番号を入れる（facades.js）
+  const tint = facadeTint(b);
   const n = ring.length;
   for (let i = 0; i < n; i++) {
     const a = ring[i], c = ring[(i + 1) % n];
@@ -73,6 +100,12 @@ function writeWalls(W, ring, sign, b, color, plainColor) {
     const nrm = [(dz / L) * sign, 0, (-dx / L) * sign];
     const A = (y) => [a[0], y, a[1]];
     const C = (y) => [c[0], y, c[1]];
+    const span = facade?.building === b ? facadeSpan(facade, a, c, nrm) : null;
+    if (span) {
+      const top = Math.max(y1, y0 + facade.height);
+      W.capitole.quad(A(y0), C(y0), C(top), A(top), nrm, [span[0], 0], [span[1], 0], [span[1], (top - y0) / facade.height], [span[0], (top - y0) / facade.height]);
+      continue;
+    }
     if (info.isChurch || L < 1.6 || info.kind === 'roof') {
       W.plain.quad(A(y0), C(y0), C(y1), A(y1), nrm, [0, y0 / 4], [L / 4, y0 / 4], [L / 4, y1 / 4], [0, y1 / 4], plainColor);
       continue;
@@ -84,12 +117,12 @@ function writeWalls(W, ring, sign, b, color, plainColor) {
     if (y0 < 0.5) {
       const gt = Math.min(y1, y0 + groundH);
       const v1 = (gt - y0) / groundH;
-      W.ground.quad(A(y0), C(y0), C(gt), A(gt), nrm, [u0, 0], [u1, 0], [u1, v1], [u0, v1], color);
+      W.ground.quad(A(y0), C(y0), C(gt), A(gt), nrm, [u0, sv], [u1, sv], [u1, sv + v1], [u0, sv + v1], tint);
       yb = gt;
     }
     if (y1 > yb + 0.05) {
       const v1 = (y1 - yb) / floorH;
-      W.upper.quad(A(yb), C(yb), C(y1), A(y1), nrm, [u0, 0], [u1, 0], [u1, v1], [u0, v1], color);
+      W.upper.quad(A(yb), C(yb), C(y1), A(y1), nrm, [u0, sv], [u1, sv], [u1, sv + v1], [u0, sv + v1], tint);
     }
   }
 }
@@ -195,9 +228,10 @@ function writeRoof(W, ring, b, wColor, plainColor) {
 export function createBuildingMaterials(tex) {
   const std = (map, extra = {}) => new THREE.MeshStandardMaterial({ map, vertexColors: true, roughness: 0.92, metalness: 0, ...extra });
   return {
-    upper: std(tex.upper),
-    ground: std(tex.shopfront),
+    upper: useFacadeAtlas(std(tex.upper)),
+    ground: useFacadeAtlas(std(tex.shopfront)),
     plain: std(tex.plain),
+    capitole: std(tex.capitole, { alphaTest: 0.5 }), // キャピトルの正面（屋上の手すりの上は透明）
     roof: std(tex.roof, { roughness: 0.85 }),
     flat: std(tex.flatRoof),
   };
@@ -205,7 +239,7 @@ export function createBuildingMaterials(tex) {
 
 const nextFrame = () => new Promise((r) => setTimeout(r, 0));
 
-export async function buildBuildings(parsed, materials, onProgress) {
+export async function buildBuildings(parsed, materials, onProgress, facade = null) {
   const group = new THREE.Group();
   group.name = 'buildings';
   const chunks = new Map();
@@ -213,7 +247,7 @@ export async function buildBuildings(parsed, materials, onProgress) {
     const key = `${Math.floor(x / CHUNK)},${Math.floor(z / CHUNK)}`;
     let c = chunks.get(key);
     if (!c) {
-      c = { upper: new MeshWriter(), ground: new MeshWriter(), plain: new MeshWriter(), roof: new MeshWriter(), flat: new MeshWriter() };
+      c = { upper: new MeshWriter(), ground: new MeshWriter(), plain: new MeshWriter(), capitole: new MeshWriter(), roof: new MeshWriter(), flat: new MeshWriter() };
       chunks.set(key, c);
     }
     return c;
@@ -232,8 +266,8 @@ export async function buildBuildings(parsed, materials, onProgress) {
     }
     const color = wallColor(b);
     const plainColor = color;
-    writeWalls(W, b.outer, outwardSign(b.outer), b, color, plainColor);
-    for (const h of b.holes) writeWalls(W, h, -outwardSign(h), b, color, plainColor); // 中庭の壁は内向き
+    writeWalls(W, b.outer, outwardSign(b.outer), b, plainColor, facade);
+    for (const h of b.holes) writeWalls(W, h, -outwardSign(h), b, plainColor); // 中庭の壁は内向き
     if (b.info.minHeight > 0.5) {
       // 浮いているパーツ（張り出しなど）の底面
       writeFlatPolygon(W.plain, b.outer, b.holes, b.info.minHeight, 4, plainColor, false);
@@ -246,7 +280,7 @@ export async function buildBuildings(parsed, materials, onProgress) {
   }
 
   for (const c of chunks.values()) {
-    for (const key of ['upper', 'ground', 'plain', 'roof', 'flat']) {
+    for (const key of ['upper', 'ground', 'plain', 'capitole', 'roof', 'flat']) {
       if (c[key].empty) continue;
       const mesh = new THREE.Mesh(c[key].toGeometry(), materials[key]);
       mesh.castShadow = true;

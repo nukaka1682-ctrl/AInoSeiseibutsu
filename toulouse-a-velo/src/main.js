@@ -40,8 +40,9 @@ const store = {
 // ---------------------------------------------------------------- レンダラーとシーン
 const renderer = new THREE.WebGLRenderer({ antialias: true, stencil: true, powerPreference: 'high-performance' });
 renderer.setSize(innerWidth, innerHeight);
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 0.8;
+// Neutral（Khronos PBR Neutral）は材料の色をそのまま出す（日なたのレンガの壁が白っぽく飛ばない）
+renderer.toneMapping = THREE.NeutralToneMapping;
+renderer.toneMappingExposure = 0.85;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
 $('app').appendChild(renderer.domElement);
@@ -76,9 +77,9 @@ scene.add(sky);
 }
 scene.fog = new THREE.Fog('#c9d6df', 280, 1500);
 
-const hemi = new THREE.HemisphereLight('#d4e1f2', '#7d6e5e', 0.6);
+const hemi = new THREE.HemisphereLight('#d4e1f2', '#7d6e5e', 0.75);
 scene.add(hemi);
-const sun = new THREE.DirectionalLight('#fff1dc', 1.9);
+const sun = new THREE.DirectionalLight('#fff1dc', 1.6);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
 Object.assign(sun.shadow.camera, { left: -90, right: 90, top: 90, bottom: -90, near: 1, far: 1200 });

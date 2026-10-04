@@ -54,6 +54,15 @@ try {
   await page.screenshot({ path: join(out, '01-start.png') });
   const start = await bikeState(page);
   check(true, `スタート地点 (${start.x.toFixed(1)}, ${start.z.toFixed(1)})`);
+  const capitole = (p) => p.evaluate(() => {
+    let tris = 0;
+    window.__tav.world.group.traverse((o) => {
+      if (o.isMesh && o.material.alphaTest === 0.5) tris += o.geometry.attributes.position.count / 3;
+    });
+    return tris;
+  });
+  const capTris = await capitole(page);
+  check(capTris >= 2, `キャピトルの正面に専用のファサード（${capTris} 三角形）`);
 
   // 物理は描画速度に依存しないよう __tavSimulate でゲーム内時間を進める
   const sim = (sec, ctl) => page.evaluate(([s, c]) => window.__tavSimulate(s, c), [sec, ctl]);
@@ -155,6 +164,7 @@ try {
   check(rs.lidar, `LiDAR の実測データで街を作る（三角形 ${rs.tris?.toLocaleString()}・木 ${rs.trees} 本）`);
   check(Math.abs(rs.base + rs.y - fakeTerrain(rs.x, rs.z)) < 0.3, `自転車が地面の上にいる（標高 ${(rs.base + rs.y).toFixed(1)} m）`);
   check(rs.trees >= 15 && rs.trees <= 25, `樹冠から木を見つける（${rs.trees} 本、並木は 20 本）`);
+  check((await capitole(real)) >= 2, '本物そっくりモードでもキャピトルの正面に専用のファサード');
   const roof = await real.evaluate(() => {
     // 建物の中心の真上の高さ（屋根の上）
     const w = window.__tav.world;

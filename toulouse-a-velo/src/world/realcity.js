@@ -6,11 +6,12 @@
 // エリアを区画に分け、区画ごとに 1 枚の航空写真を使う（ortho.js が距離に応じて解像度を変える）。
 import * as THREE from 'three';
 import { MeshWriter, writeFlatPolygon } from './meshwriter.js';
-import { BAY, wallColor } from './buildings.js';
+import { BAY, facadeStyle, facadeTint, wallColor } from './buildings.js';
 import { CAR_ROADS } from './parse.js';
 import { offsets } from './ground.js';
 import { roofFromDsm } from './lidarroof.js';
 import { forEachCellIn } from './lidartrees.js';
+import { facadeSpan } from './landmarkfacades.js';
 import { HeightGrid } from '../data/lidar.js';
 import { OrthoManager, orthoUV } from './ortho.js';
 import { Grid, closestOnSegment, hash01, pointInPolygon, signedArea } from '../geo.js';
@@ -23,7 +24,7 @@ function median(arr) {
   return a.length ? a[a.length >> 1] : NaN;
 }
 
-export async function buildRealCity({ parsed, rect, proj, lidar, materials, waterMaterial, progress = () => {} }) {
+export async function buildRealCity({ parsed, rect, proj, lidar, materials, waterMaterial, facade = null, progress = () => {} }) {
   // 高さの基準: エリア中心の地面を y = 0 に
   const dtmRaw = new HeightGrid(lidar.dtm, rect);
   const base = median([[0, 0], [30, 0], [-30, 0], [0, 30], [0, -30]].map(([x, z]) => dtmRaw.sample(x, z)));
@@ -81,7 +82,7 @@ export async function buildRealCity({ parsed, rect, proj, lidar, materials, wate
   const wallChunks = new Map(); // 区画ごとの壁（視錐台カリングのため）
   const wallsOf = (c) => {
     let w = wallChunks.get(c);
-    if (!w) wallChunks.set(c, (w = { upper: new MeshWriter(), ground: new MeshWriter(), plain: new MeshWriter() }));
+    if (!w) wallChunks.set(c, (w = { upper: new MeshWriter(), ground: new MeshWriter(), plain: new MeshWriter(), capitole: new MeshWriter() }));
     return w;
   };
 
@@ -167,7 +168,7 @@ export async function buildRealCity({ parsed, rect, proj, lidar, materials, wate
   for (let k = 0; k < buildings.length; k++) {
     const b = buildings[k];
     const c = chunkAt(b.inside[0], b.inside[1]);
-    writeLidarBuilding(b, photoW.get(c), wallsOf(c), c.image, dtm, dsmAt);
+    writeLidarBuilding(b, photoW.get(c), wallsOf(c), c.image, dtm, dsmAt, facade);
     if (k % 600 === 599) {
       progress(`建物を建てています（屋根は LiDAR の実測）… ${Math.round((k / buildings.length) * 100)}%`, 0.15 + (k / buildings.length) * 0.65);
       await pause();
@@ -196,7 +197,7 @@ export async function buildRealCity({ parsed, rect, proj, lidar, materials, wate
     }
     const ws = wallChunks.get(c);
     if (!ws) continue;
-    for (const key of ['upper', 'ground', 'plain']) {
+    for (const key of ['upper', 'ground', 'plain', 'capitole']) {
       if (ws[key].empty) continue;
       const m = new THREE.Mesh(ws[key].toGeometry(), materials[key]);
       m.castShadow = true;
@@ -260,7 +261,7 @@ export async function buildRealCity({ parsed, rect, proj, lidar, materials, wate
 }
 
 // 建物 1 棟: 壁（地面から屋根の端まで）と、LiDAR の屋根（ゆるい面は航空写真、急な面は壁の材質）
-function writeLidarBuilding(b, photo, W, image, dtm, dsmAt) {
+function writeLidarBuilding(b, photo, W, image, dtm, dsmAt, facade) {
   const info = b.info;
   const roof = roofFromDsm(b.outer, b.holes, dsmAt);
   const groundYs = b.outer.map(([x, z]) => dtm.sample(x, z));
@@ -269,19 +270,36 @@ function writeLidarBuilding(b, photo, W, image, dtm, dsmAt) {
   // LiDAR が取れていない（または低すぎる）所は IGN / OSM の高さで補う
   const fallbackTop = groundMed + info.height;
   const hs = roof.heights.map((h) => (Number.isFinite(h) && h > groundMed + 2 ? h : fallbackTop));
-  const color = wallColor(b);
-  const floorH = info.floorHeight;
-  const groundH = Math.max(3.4, floorH * 1.15);
+  const color = wallColor(b); // 窓のない壁（教会など）の色
+  const sv = facadeStyle(b) * 1000; // ファサードの様式（v に入れる。facades.js）
+  const tint = facadeTint(b);
+  const groundH = Math.max(3.4, info.floorHeight * 1.15);
   const pts = roof.points;
+  // 2 階以上の階の高さ: 軒の高さでちょうど割り切れるようにする（最上階の窓が軒で切れないように）
+  const outerHs = hs.slice(0, roof.rings[0].count).sort((x, y) => x - y);
+  const upperH = outerHs[Math.floor(outerHs.length * 0.3)] - (groundMed + groundH);
+  const floorH = upperH > info.floorHeight * 0.7 ? upperH / Math.max(1, Math.round(upperH / info.floorHeight)) : info.floorHeight;
+  const bayShift = Math.floor(hash01(b.id, 9) * 4);
 
   // 壁
   for (const [ri, ring] of roof.rings.entries()) {
     const ringPts = pts.slice(ring.start, ring.start + ring.count);
     const s = signedArea(ringPts) > 0 ? 1 : -1;
     const sign = ri === 0 ? s : -s; // 中庭の壁は内向き
-    let along = hash01(b.id, 9) * BAY * 4;
+    const P = (i) => pts[ring.start + ((i + ring.count) % ring.count)];
+    let along = 0, narrow = false;
     for (let i = 0; i < ring.count; i++) {
       const ia = ring.start + i, ib = ring.start + ((i + 1) % ring.count);
+      if (i === 0 || P(i).orig) {
+        // 元の外形の辺ごとに、窓の並びを辺の中央にそろえる（角で窓が切れないように）
+        let len = 0;
+        for (let k = i; k < i + ring.count; k++) {
+          len += Math.hypot(P(k + 1)[0] - P(k)[0], P(k + 1)[1] - P(k)[1]);
+          if (P(k + 1).orig) break;
+        }
+        along = (bayShift + 0.5 - len / BAY / 2) * BAY;
+        narrow = len < 2.2;
+      }
       const a = pts[ia], c = pts[ib];
       const dx = c[0] - a[0], dz = c[1] - a[1];
       const L = Math.hypot(dx, dz);
@@ -290,19 +308,29 @@ function writeLidarBuilding(b, photo, W, image, dtm, dsmAt) {
       const ya = hs[ia], yc = hs[ib];
       const u0 = along / BAY / 4, u1 = (along + L) / BAY / 4;
       along += L;
-      if (info.isChurch) {
+      const span = facade?.building === b ? facadeSpan(facade, a, c, nrm) : null;
+      if (span) {
+        // 名所の正面（キャピトル）: 地面から専用テクスチャの高さまで
+        const top = groundMed + facade.height;
+        const v = (y) => (y - groundMed) / facade.height;
+        W.capitole.quad([a[0], baseY, a[1]], [c[0], baseY, c[1]], [c[0], Math.max(top, yc), c[1]], [a[0], Math.max(top, ya), a[1]], nrm,
+          [span[0], v(baseY)], [span[1], v(baseY)], [span[1], v(Math.max(top, yc))], [span[0], v(Math.max(top, ya))]);
+        continue;
+      }
+      if (info.isChurch || narrow) {
         W.plain.quad([a[0], baseY, a[1]], [c[0], baseY, c[1]], [c[0], yc, c[1]], [a[0], ya, a[1]], nrm,
           [u0 * 3.5, baseY / 4], [u1 * 3.5, baseY / 4], [u1 * 3.5, yc / 4], [u0 * 3.5, ya / 4], color);
         continue;
       }
       // 1 階（店・扉）と 2 階以上（窓）
       const g0 = groundMed, gt = groundMed + groundH;
+      const vg = (y) => sv + (y - g0) / groundH;
       W.ground.quad([a[0], baseY, a[1]], [c[0], baseY, c[1]], [c[0], Math.min(gt, yc), c[1]], [a[0], Math.min(gt, ya), a[1]], nrm,
-        [u0, (baseY - g0) / groundH], [u1, (baseY - g0) / groundH], [u1, (Math.min(gt, yc) - g0) / groundH], [u0, (Math.min(gt, ya) - g0) / groundH], color);
+        [u0, vg(baseY)], [u1, vg(baseY)], [u1, vg(Math.min(gt, yc))], [u0, vg(Math.min(gt, ya))], tint);
       if (ya > gt || yc > gt) {
         const ta = Math.max(gt, ya), tc = Math.max(gt, yc);
         W.upper.quad([a[0], gt, a[1]], [c[0], gt, c[1]], [c[0], tc, c[1]], [a[0], ta, a[1]], nrm,
-          [u0, 0], [u1, 0], [u1, (tc - gt) / floorH], [u0, (ta - gt) / floorH], color);
+          [u0, sv], [u1, sv], [u1, sv + (tc - gt) / floorH], [u0, sv + (ta - gt) / floorH], tint);
       }
     }
   }
@@ -324,9 +352,9 @@ function writeLidarBuilding(b, photo, W, image, dtm, dsmAt) {
       // ほぼ垂直な面（高さの違う棟の境の壁・塔の側面）は壁として描く。教会以外は窓のある壁
       const hl = Math.hypot(nx, nz) || 1;
       const ax = -nz / hl, az = nx / hl; // 面に沿った水平方向
-      const uv = (P) => [(P[0] * ax + P[2] * az) / BAY / 4, (P[1] - gt) / floorH];
+      const uv = (P) => [(P[0] * ax + P[2] * az) / BAY / 4, sv + (P[1] - gt) / floorH];
       if (info.isChurch) W.plain.tri(A, B, C, [nx, ny, nz], [A[0] / 4, A[1] / 4], [B[0] / 4, B[1] / 4], [C[0] / 4, C[1] / 4], color);
-      else W.upper.tri(A, B, C, [nx, ny, nz], uv(A), uv(B), uv(C), color);
+      else W.upper.tri(A, B, C, [nx, ny, nz], uv(A), uv(B), uv(C), tint);
     } else {
       photo.tri(A, B, C, [0, 1, 0], orthoUV(image, A[0], A[2]), orthoUV(image, B[0], B[2]), orthoUV(image, C[0], C[2]));
     }
@@ -355,13 +383,20 @@ function writeBridge(road, photo, body, dtm, dsm) {
 
   const edge = offsets(pts, half);
   const image = road.chunk.image;
-  const stone = new THREE.Color('#c58a6e');
-  const col = [stone.r, stone.g, stone.b];
+  const rgb = (hex) => {
+    const c = new THREE.Color(hex);
+    return [c.r, c.g, c.b];
+  };
+  // ポン・ヌフのように、壁はレンガ、アーチの縁・水切り・手すりは白い石
+  const col = rgb('#c98a70'), stone = rgb('#e6ded0'), dark = rgb('#3a3632');
   const n = pts.length;
+  const along = [0];
+  for (let i = 1; i < n; i++) along.push(along[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
   const ground = pts.map(([x, z]) => dtm.sample(x, z));
   // 橋の下面の高さ。地面（川面）より 3 m 以上高い区間は、橋脚の間をアーチにする（約 26 m おき、橋脚は径間の 2 割）
   const DECK = 1.3;
   const under = ys.map((y) => y - DECK);
+  const arched = ys.map(() => false);
   const piers = [];
   for (let i = 0; i < n; i++) {
     if (ys[i] - ground[i] <= 3) continue;
@@ -375,6 +410,7 @@ function writeBridge(road, photo, body, dtm, dsm) {
       const rise = ta <= 0 || ta >= 1 ? 0 : Math.sin(Math.PI * ta) ** 0.6;
       const bottom = ground[k] - 1;
       under[k] = bottom + (ys[k] - DECK - bottom) * rise;
+      arched[k] = rise > 0;
     }
     for (let sp = 1; sp < spans; sp++) piers.push(Math.round(a0 + ((a1 - a0) * sp) / spans));
     i = j;
@@ -385,13 +421,24 @@ function writeBridge(road, photo, body, dtm, dsm) {
     const c = [edge.R[i + 1][0], y1, edge.R[i + 1][1]], d = [edge.L[i + 1][0], y1, edge.L[i + 1][1]];
     const uv = (p) => orthoUV(image, p[0], p[2]);
     photo.quad(a, b, c, d, [0, 1, 0], uv(a), uv(b), uv(c), uv(d));
-    // 側面（橋面からアーチの下面まで）とアーチの内側
+    // 側面（橋面からアーチの下面まで）。アーチの縁の約 1 m は白い石、その上はレンガ。上に石の手すり
     const u0 = under[i], u1 = under[i + 1];
-    for (const [p, q, s] of [[edge.L[i], edge.L[i + 1], 1], [edge.R[i], edge.R[i + 1], -1]]) {
+    const r0 = Math.min(y0 - 0.3, u0 + (arched[i] || arched[i + 1] ? 1.0 : 0)), r1 = Math.min(y1 - 0.3, u1 + (arched[i] || arched[i + 1] ? 1.0 : 0));
+    const s0 = along[i] / 3, s1 = along[i + 1] / 3;
+    const inner = offsets(pts.slice(i, i + 2), half - 0.45);
+    for (const [p, q, s, ip, iq] of [[edge.L[i], edge.L[i + 1], 1, inner.L[0], inner.L[1]], [edge.R[i], edge.R[i + 1], -1, inner.R[0], inner.R[1]]]) {
       const dx = q[0] - p[0], dz = q[1] - p[1];
       const l = Math.hypot(dx, dz) || 1;
-      body.quad([p[0], y0, p[1]], [q[0], y1, q[1]], [q[0], u1, q[1]], [p[0], u0, p[1]], [(-dz / l) * s, 0, (dx / l) * s],
-        [0, y0 / 3], [l / 3, y1 / 3], [l / 3, u1 / 3], [0, u0 / 3], col);
+      const nrm = [(-dz / l) * s, 0, (dx / l) * s];
+      const wall = (ya, yb, yc, yd, color) =>
+        body.quad([p[0], ya, p[1]], [q[0], yb, q[1]], [q[0], yc, q[1]], [p[0], yd, p[1]], nrm, [s0, ya / 3], [s1, yb / 3], [s1, yc / 3], [s0, yd / 3], color);
+      wall(y0, y1, r1, r0, col);
+      if (r0 > u0 + 0.01 || r1 > u1 + 0.01) wall(r0, r1, u1, u0, stone);
+      // 手すり（高さ 1 m・厚さ 45 cm）
+      const t0 = y0 + 1.0, t1 = y1 + 1.0;
+      body.quad([p[0], y0, p[1]], [q[0], y1, q[1]], [q[0], t1, q[1]], [p[0], t0, p[1]], nrm, [s0, 0], [s1, 0], [s1, 0.33], [s0, 0.33], stone);
+      body.quad([ip[0], y0, ip[1]], [iq[0], y1, iq[1]], [iq[0], t1, iq[1]], [ip[0], t0, ip[1]], [-nrm[0], 0, -nrm[2]], [s0, 0], [s1, 0], [s1, 0.33], [s0, 0.33], stone);
+      body.quad([p[0], t0, p[1]], [q[0], t1, q[1]], [iq[0], t1, iq[1]], [ip[0], t0, ip[1]], [0, 1, 0], [s0, 0], [s1, 0], [s1, 0.15], [s0, 0.15], stone);
     }
     body.quad([a[0], u0, a[2]], [b[0], u0, b[2]], [c[0], u1, c[2]], [d[0], u1, d[2]], [0, -1, 0],
       [0, 0], [1, 0], [1, 1], [0, 1], col);
@@ -414,9 +461,22 @@ function writeBridge(road, photo, body, dtm, dsm) {
         const l = Math.hypot(dx, dz) || 1;
         let nx = -dz / l, nz = dx / l;
         if (nx * (p[0] + q[0] - 2 * side[0]) + nz * (p[1] + q[1] - 2 * side[1]) < 0) { nx = -nx; nz = -nz; }
-        body.quad([p[0], yt, p[1]], [q[0], yt, q[1]], [q[0], yb, q[1]], [p[0], yb, p[1]], [nx, 0, nz], [0, yt / 3], [l / 3, yt / 3], [l / 3, yb / 3], [0, yb / 3], col);
+        body.quad([p[0], yt, p[1]], [q[0], yt, q[1]], [q[0], yb, q[1]], [p[0], yb, p[1]], [nx, 0, nz], [0, yt / 3], [l / 3, yt / 3], [l / 3, yb / 3], [0, yb / 3], stone);
       }
-      body.tri([A[0], yt, A[1]], [C[0], yt, C[1]], [B[0], yt, B[1]], [0, 1, 0], [0, 0], [1, 0], [0, 1], col);
+      body.tri([A[0], yt, A[1]], [C[0], yt, C[1]], [B[0], yt, B[1]], [0, 1, 0], [0, 0], [1, 0], [0, 1], stone);
+      // 橋脚の上の丸い穴（ポン・ヌフの「ドゥグロワール」）: 石の輪と暗い穴
+      const h = ys[k] - ground[k];
+      const r = Math.max(0.8, Math.min(2.3, h * 0.14));
+      const yc = ground[k] + h * 0.62;
+      const o = [(ox / ol) * 0.06, (oz / ol) * 0.06];
+      const nrm = [ox / ol, 0, oz / ol];
+      const at = (ang, rr) => [side[0] + o[0] + ux * Math.cos(ang) * rr, yc + Math.sin(ang) * rr, side[1] + o[1] + uz * Math.cos(ang) * rr];
+      const SEG = 20;
+      for (let q = 0; q < SEG; q++) {
+        const a0 = (q / SEG) * Math.PI * 2, a1 = ((q + 1) / SEG) * Math.PI * 2;
+        body.quad(at(a0, r), at(a1, r), at(a1, r + 0.5), at(a0, r + 0.5), nrm, [0, 0], [0.2, 0], [0.2, 0.15], [0, 0.15], stone);
+        body.tri([side[0] + o[0] * 1.2, yc, side[1] + o[1] * 1.2], at(a0, r), at(a1, r), nrm, [0, 0], [0.1, 0], [0, 0.1], dark);
+      }
     }
   }
   return { pts, ys, half };

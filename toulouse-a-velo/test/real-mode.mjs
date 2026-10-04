@@ -92,6 +92,11 @@ for (const v of views) {
       const [x, z] = road.pts[i], [x2, z2] = road.pts[i + 1];
       s.bike.place(x, z, Math.atan2(x2 - x, -(z2 - z)) + (v.turn || 0), s.world.heightAt(x, z));
     } else if (v.x != null) s.bike.place(v.x, v.z, v.heading || 0, s.world.heightAt(v.x, v.z));
+    if (v.look) {
+      // 指定した点の方を向く
+      const b = s.bike;
+      b.place(b.x, b.z, Math.atan2(v.look[0] - b.x, -(v.look[1] - b.z)), b.y);
+    }
     s.rig.mode = v.camera || 'chase';
     s.rig.initialized = false;
     window.__tavSimulate(v.sim || 0.3, v.ctl || {});

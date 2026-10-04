@@ -10,6 +10,7 @@ import { buildBuildings } from './buildings.js';
 import { buildGround, makeWaterTest } from './ground.js';
 import { buildTrees, fillParkTrees, streetTrees } from './trees.js';
 import { buildRealCity } from './realcity.js';
+import { findCapitoleFacade } from './landmarkfacades.js';
 import { detectTrees } from './lidartrees.js';
 import { CollisionWorld } from '../game/collision.js';
 import { RoadNetwork } from '../game/roadnet.js';
@@ -63,6 +64,7 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
     return hit;
   };
 
+  const facade = findCapitoleFacade(parsed); // キャピトルの正面には専用のテクスチャ
   let real = null, ground = null, buildingStats;
   let treePts;
   if (data.lidar) {
@@ -70,7 +72,7 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
     const waterMaterial = groundMats.water.clone();
     // 航空写真の川面には橋そのもの（斜めに写った橋面）や影が写っているので、水面は不透明にして隠す
     real = await buildRealCity({
-      parsed, rect, proj, lidar: data.lidar, materials: buildingMats, waterMaterial,
+      parsed, rect, proj, lidar: data.lidar, materials: buildingMats, waterMaterial, facade,
       progress: (t, p) => progress(t, 0.1 + p * 0.8),
     });
     group.add(real.group);
@@ -97,7 +99,7 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
       ? streetTrees(parsed.roads.filter((r) => CAR_ROADS.has(r.type) || r.type === 'pedestrian'), (x, z) => inRect([x, z]) && !roadnet.onRoad(x, z, 0.2) && !inWater(x, z) && !insideBuilding(x, z))
       : [];
     treePts = parsed.trees.filter(inRect).concat(extra, avenue);
-    const buildings = await buildBuildings(parsed, buildingMats, (p) => progress(`建物を建てています… ${Math.round(p * 100)}%`, 0.3 + p * 0.6));
+    const buildings = await buildBuildings(parsed, buildingMats, (p) => progress(`建物を建てています… ${Math.round(p * 100)}%`, 0.3 + p * 0.6), facade);
     group.add(buildings.group);
     buildingStats = buildings.stats;
   }
