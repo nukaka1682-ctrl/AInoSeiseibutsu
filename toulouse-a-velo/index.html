@@ -28,6 +28,16 @@
             <span><b>名所めぐりタイムアタック</b><small>キャピトル → サン・セルナン → … 名所を順番に回るタイムを競う</small></span></label>
         </div>
 
+        <h2>街の見た目</h2>
+        <div class="choices">
+          <label class="choice"><input type="radio" name="look" value="photo" />
+            <span><b>実写 3D（おすすめ）</b><small>航空写真から作られた本物の街並み（Google Photorealistic 3D Tiles）。無料の Cesium ion トークンが必要です</small>
+              <input type="password" id="ion-token" placeholder="Cesium ion のアクセストークンを貼り付け" autocomplete="off" spellcheck="false" />
+              <small><a href="https://ion.cesium.com/signup" target="_blank" rel="noopener">無料アカウント作成</a> → Asset Depot で「Google Photorealistic 3D Tiles」を追加 → Access Tokens のトークンをコピー。トークンはこのブラウザにだけ保存されます</small></span></label>
+          <label class="choice"><input type="radio" name="look" value="model" />
+            <span><b>地図から生成</b><small>トークン不要。建物の形と高さは実データですが、壁の模様は自動生成です</small></span></label>
+        </div>
+
         <details class="settings">
           <summary>グラフィック設定</summary>
           <label><input type="checkbox" id="opt-shadows" checked /> 影を描画する</label>
@@ -120,6 +130,7 @@
         <h2>ポーズ</h2>
         <div id="pause-info"></div>
         <button id="resume-btn" class="primary">再開 (Esc)</button>
+        <button id="look-btn" class="hidden">見た目: 実写 3D</button>
         <button id="mute-btn">音: オン</button>
         <button id="title-btn">タイトルに戻る</button>
       </div>

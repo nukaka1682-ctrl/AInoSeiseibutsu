@@ -13,6 +13,24 @@
 
 ※ スクリーンショットは IGN BD TOPO のデータで組み立てた標準エリア（半径 1.2 km）。ソフトウェア描画の開発環境で撮影したため、実際のブラウザではもっとなめらかです。
 
+## 2 つの見た目
+
+| 見た目 | 中身 | 必要なもの |
+| --- | --- | --- |
+| **実写 3D**（おすすめ） | 航空写真から作られた本物の街並み（[Google Photorealistic 3D Tiles](https://developers.google.com/maps/documentation/tile/3d-tiles)）。建物の外観・屋根・木・地形の高低差まで実物どおり | 無料の Cesium ion トークン |
+| **地図から生成** | 地図データ（建物の形・高さ・屋根の高さ・材料）から 3D を組み立てる。壁の模様は自動生成 | なし |
+
+どちらの見た目でも、当たり判定・ナビ・通りの名前・名所は同じ地図データ（OpenStreetMap / IGN）で動きます。実写 3D の建物と地図データの建物は同じ場所にあるので、実写の壁にぶつかります。実写 3D では地面の高さも本物なので、ガロンヌ川沿いの低い遊歩道や橋の上り下りもそのまま走れます（坂では速度が変わります）。
+
+### 実写 3D の準備（無料・カード不要）
+
+1. [Cesium ion](https://ion.cesium.com/signup) で無料アカウント（Community プラン：個人の非商用利用、月 1,000 回の起動まで無料）を作る
+2. ion の **Asset Depot** で「**Google Photorealistic 3D Tiles**」を探し、**Add to my assets** を押す
+3. **Access Tokens** ページの **Default Token** をコピー
+4. ゲームのタイトル画面「街の見た目」の欄に貼り付けて「走り出す」
+
+トークンはそのブラウザ（localStorage）にだけ保存されます。GitHub Pages で公開するときに全員分のトークンを埋め込みたい場合は、リポジトリの Secrets に `CESIUM_ION_TOKEN` を登録してください（公開ページに埋め込まれるので、Cesium ion 側でトークンの使えるサイトを制限しておくのがおすすめです）。
+
 ## 遊び方
 
 | 操作 | キーボード | ゲームパッド | スマホ |
@@ -96,6 +114,7 @@ npm test                           # 単体テスト（座標変換・OSM/IGN �
 npm run build && npm run test:e2e  # ブラウザでの通しテスト（合成データ）
 npm run test:autopilot             # 本物の地図で、全名所を自動走行で回れるか（要 fetch-data）
 npm run build && node test/e2e-network.mjs  # 本物のネットワークで IGN への自動切り替えを確認
+CESIUM_ION_TOKEN=... npm run build && node test/photoreal.mjs  # 実写 3D モード（地図データとの位置合わせも確認）
 ```
 
 - `test:e2e` は地図サーバーへの通信を合成データ（`test/fixture.mjs`、トゥールーズ風の格子状の街）に差し替えて、読み込み → 走行 → 建物・川との衝突 → 橋 → 地図とナビ → タイムアタックを確認し、`test/output/` にスクリーンショットを保存します。
@@ -119,6 +138,7 @@ src/
   world/ground.js    地面・道路・歩道・水面と河岸・橋
   world/trees.js     木（InstancedMesh）
   world/textures.js  手続き的テクスチャ（ファサード・瓦・石畳・水面）
+  world/photoreal.js 実写 3D（Google Photorealistic 3D Tiles を Cesium ion 経由で表示、地面の高さ）
   game/bike.js       自転車とライダーのモデル・物理
   game/collision.js  当たり判定（建物・木・川・エリア端）
   game/roadnet.js    道路ネットワーク（通りの名前・ルート探索 A*）
@@ -133,4 +153,5 @@ scripts/fetch-data.mjs  地図データの事前取得
 - コード: MIT
 - 地図データ: © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright)（ODbL 1.0）
 - 地図データ: IGN BD TOPO®（[Licence Ouverte / Etalab 2.0](https://www.etalab.gouv.fr/licence-ouverte-open-licence/)）
-- 3D 描画: [three.js](https://threejs.org/)
+- 実写 3D: Google Photorealistic 3D Tiles（Cesium ion 経由）。表示中は画面右下に Google のデータ提供元を表示します
+- 3D 描画: [three.js](https://threejs.org/)、[3DTilesRendererJS](https://github.com/NASA-AMMOS/3DTilesRendererJS)

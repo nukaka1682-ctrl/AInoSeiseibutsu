@@ -52,7 +52,7 @@ export class CameraRig {
       const dist = high ? 12 : 5.2 + Math.min(sp, 12) * 0.12;
       const height = high ? 34 : 2.3 + Math.min(sp, 12) * 0.03;
       let tx = bike.x - cx * dist, tz = bike.z - cz * dist;
-      let ty = height;
+      let ty = bike.y + height;
       let pulled = false;
       if (!high) {
         const t = collision.raycast(bike.x, bike.z, tx, tz);
@@ -60,7 +60,7 @@ export class CameraRig {
           const k = Math.max(0.12, t - 0.12);
           tx = bike.x + (tx - bike.x) * k;
           tz = bike.z + (tz - bike.z) * k;
-          ty = height + (1 - k) * 0.8;
+          ty = bike.y + height + (1 - k) * 0.8;
           pulled = true;
         }
       }
@@ -77,7 +77,7 @@ export class CameraRig {
         }
       }
       cam.position.copy(this.pos);
-      this.look.set(bike.x + fx * (high ? 4 : 2.2), high ? 0 : 1.25, bike.z + fz * (high ? 4 : 2.2));
+      this.look.set(bike.x + fx * (high ? 4 : 2.2), bike.y + (high ? 0 : 1.25), bike.z + fz * (high ? 4 : 2.2));
       cam.lookAt(this.look);
     }
     if (this.shake > 0.001) {

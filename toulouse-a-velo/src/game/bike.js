@@ -49,6 +49,8 @@ function makeWheel(mats) {
 export class Bike {
   constructor() {
     this.x = 0;
+    this.y = 0; // 地面の高さ（実写 3D のときだけ変わる）
+    this.grade = 0; // 坂の勾配（上りが正）
     this.z = 0;
     this.heading = 0;
     this.speed = 0;
@@ -245,9 +247,11 @@ export class Bike {
     }
   }
 
-  place(x, z, heading) {
+  place(x, z, heading, y = this.y) {
     this.x = x;
     this.z = z;
+    this.y = y;
+    this.grade = 0;
     this.heading = heading;
     this.speed = 0;
     this.steer = 0;
@@ -263,9 +267,24 @@ export class Bike {
   update(dt, input, world) {
     this.acc += Math.min(dt, 0.1);
     const step = 1 / 120;
+    const px = this.x, pz = this.z;
     while (this.acc >= step) {
       this.step(step, input, world);
       this.acc -= step;
+    }
+    // 実写 3D の地面に沿って高さを変え、坂の勾配を求める
+    if (world.groundAt) {
+      const g = world.groundAt(this.x, this.z, this.y);
+      if (g !== null) {
+        const moved = Math.hypot(this.x - px, this.z - pz);
+        const prev = this.y;
+        this.y += (g - this.y) * Math.min(1, dt * 14);
+        if (moved > 0.02) {
+          const dir = Math.sign(this.speed) || 1;
+          const grade = Math.max(-0.3, Math.min(0.3, ((this.y - prev) / moved) * dir));
+          this.grade += (grade - this.grade) * Math.min(1, dt * 4);
+        }
+      }
     }
     this.surfaceTimer -= dt;
     if (this.surfaceTimer <= 0) {
@@ -284,6 +303,7 @@ export class Bike {
     else if (input.throttle > 0) F += input.throttle * fMax;
     const crr = this.surface === 'grass' ? 0.035 : this.surface === 'gravel' ? 0.018 : this.surface === 'paving' ? 0.009 : 0.006;
     F -= 0.5 * 1.2 * 0.55 * v * Math.abs(v);
+    if (Math.abs(v) > 0.05 || input.throttle > 0) F -= MASS * G * this.grade; // 坂（grade は前向きの勾配）
     F -= crr * MASS * G * Math.sign(v);
     let a = F / MASS;
     if (input.brake > 0) {
@@ -356,7 +376,8 @@ export class Bike {
   }
 
   syncModel() {
-    this.root.position.set(this.x, 0, this.z);
+    this.root.position.set(this.x, this.y, this.z);
+    this.root.rotation.x = Math.atan(this.grade);
     this.root.rotation.y = -this.heading;
     this.leanGroup.rotation.z = -this.lean;
     this.steerGroup.rotation.y = -this.steer;
