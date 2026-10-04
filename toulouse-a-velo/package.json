@@ -1,0 +1,23 @@
+{
+  "name": "toulouse-a-velo",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "実在のトゥールーズの街を3Dで再現したサイクリングゲーム（OpenStreetMap + IGN BD TOPO）",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "fetch-data": "node scripts/fetch-data.mjs",
+    "test": "node --test test/unit/*.test.mjs",
+    "test:e2e": "node test/e2e.mjs"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "playwright": "1.56.1",
+    "vite": "^8.3.2"
+  }
+}

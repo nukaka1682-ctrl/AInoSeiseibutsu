@@ -1,0 +1,63 @@
+# Toulouse à vélo をビルドして GitHub Pages に公開する。
+# 使う前に: リポジトリの Settings → Pages → Source を「GitHub Actions」にする。
+name: Toulouse à vélo (GitHub Pages)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'toulouse-a-velo/**'
+      - '.github/workflows/toulouse-a-velo.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: toulouse-a-velo
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: toulouse-a-velo/package-lock.json
+      - run: npm ci
+      - run: npm test
+      # 地図データを事前に取得して同梱する（失敗してもゲームはブラウザ側で取得するので続行）
+      - name: Fetch OpenStreetMap + IGN data
+        run: npm run fetch-data -- centre
+        continue-on-error: true
+      - run: npm run build
+      - name: Assemble site
+        run: |
+          mkdir -p ../_site
+          cp -r dist ../_site/toulouse-a-velo
+          cat > ../_site/index.html <<'HTML'
+          <!doctype html><meta charset="utf-8"><title>AInoSeiseibutsu</title>
+          <meta http-equiv="refresh" content="0; url=toulouse-a-velo/">
+          <a href="toulouse-a-velo/">Toulouse à vélo</a>
+          HTML
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}toulouse-a-velo/
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

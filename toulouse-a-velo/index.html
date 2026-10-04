@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <title>Toulouse à vélo — トゥールーズ自転車散歩</title>
+    <meta name="description" content="実在のトゥールーズの街を OpenStreetMap と IGN のデータから 3D で再現したサイクリングゲーム" />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚲</text></svg>" />
+    <link rel="stylesheet" href="./src/style.css" />
+  </head>
+  <body>
+    <div id="app"></div>
+
+    <!-- タイトル画面 -->
+    <section id="title-screen" class="screen">
+      <div class="panel title-panel">
+        <h1>Toulouse <em>à vélo</em></h1>
+        <p class="subtitle">ばら色の街トゥールーズを、自転車で走ろう。<br />街並み・通り・川・橋は実際の地図データから 3D で作られています。</p>
+
+        <h2>エリア</h2>
+        <div id="area-list" class="choices"></div>
+
+        <h2>モード</h2>
+        <div class="choices">
+          <label class="choice"><input type="radio" name="mode" value="free" checked />
+            <span><b>自由走行</b><small>好きなところを走って名所を発見しよう。地図から目的地を選ぶとナビします</small></span></label>
+          <label class="choice"><input type="radio" name="mode" value="tour" />
+            <span><b>名所めぐりタイムアタック</b><small>キャピトル → サン・セルナン → … 名所を順番に回るタイムを競う</small></span></label>
+        </div>
+
+        <details class="settings">
+          <summary>グラフィック設定</summary>
+          <label><input type="checkbox" id="opt-shadows" checked /> 影を描画する</label>
+          <label><input type="checkbox" id="opt-hires" /> 高解像度（重い）</label>
+          <label><input type="checkbox" id="opt-refresh" /> 地図データを再ダウンロードする</label>
+        </details>
+
+        <button id="start-btn" class="primary">走り出す 🚲</button>
+
+        <div class="controls-help">
+          <div><kbd>W</kbd>/<kbd>↑</kbd> こぐ　<kbd>S</kbd>/<kbd>↓</kbd> ブレーキ・後退　<kbd>A</kbd><kbd>D</kbd>/<kbd>←</kbd><kbd>→</kbd> ハンドル</div>
+          <div><kbd>Shift</kbd> 立ちこぎ　<kbd>Space</kbd> ベル　<kbd>C</kbd> カメラ　<kbd>M</kbd> 地図　<kbd>R</kbd> 道路に戻る　<kbd>Esc</kbd> ポーズ</div>
+          <div class="muted">ゲームパッド・スマホのタッチ操作にも対応</div>
+        </div>
+        <p class="credits">地図データ © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a>（ODbL）／建物の高さ: IGN BD TOPO®（Licence Ouverte）</p>
+      </div>
+    </section>
+
+    <!-- 読み込み画面 -->
+    <section id="loading-screen" class="screen hidden">
+      <div class="panel loading-panel">
+        <div class="spinner">🚲</div>
+        <h2>トゥールーズを組み立て中…</h2>
+        <pre id="loading-text"></pre>
+        <div class="bar"><div id="loading-bar"></div></div>
+        <p class="muted small">初回は地図データのダウンロードに 30 秒〜数分かかることがあります（2 回目からはキャッシュで速くなります）。</p>
+      </div>
+    </section>
+
+    <!-- エラー -->
+    <section id="error-screen" class="screen hidden">
+      <div class="panel">
+        <h2>読み込みに失敗しました</h2>
+        <pre id="error-text"></pre>
+        <p class="muted">地図サーバー（Overpass API）が混み合っていることがあります。少し待ってから再試行してください。</p>
+        <button id="retry-btn" class="primary">もう一度試す</button>
+      </div>
+    </section>
+
+    <!-- HUD -->
+    <div id="hud" class="hidden">
+      <div id="hud-speed"><span id="speed-value">0</span><small>km/h</small></div>
+      <div id="hud-stats"></div>
+      <div id="hud-street"></div>
+      <canvas id="minimap" width="220" height="220"></canvas>
+      <div id="hud-target" class="hidden">
+        <div id="target-arrow">➤</div>
+        <div><div id="target-name"></div><div id="target-dist"></div></div>
+      </div>
+      <div id="hud-mode"></div>
+      <div id="labels"></div>
+      <div id="toast"></div>
+      <div id="hud-buttons">
+        <button data-action="map" title="地図 (M)">🗺️</button>
+        <button data-action="camera" title="カメラ切替 (C)">🎥</button>
+        <button data-action="bell" title="ベル (Space)">🔔</button>
+        <button data-action="pause" title="ポーズ (Esc)">⏸</button>
+      </div>
+      <div id="touch-controls">
+        <div class="touch-left">
+          <button data-touch="left">◀</button>
+          <button data-touch="right">▶</button>
+        </div>
+        <div class="touch-right">
+          <button data-touch="brake">ブレーキ</button>
+          <button data-touch="pedal">こぐ</button>
+        </div>
+      </div>
+      <div id="attribution">© OpenStreetMap contributors · IGN BD TOPO</div>
+    </div>
+
+    <!-- 全体地図 -->
+    <section id="map-screen" class="screen hidden">
+      <div class="map-wrap">
+        <canvas id="fullmap"></canvas>
+        <aside class="map-side">
+          <h3>名所 <span id="discovered-count"></span></h3>
+          <p class="muted small">クリックで目的地に設定（ナビ表示）。地図をクリックするとその近くの道へワープします。</p>
+          <ul id="landmark-list"></ul>
+          <button id="clear-target">目的地を解除</button>
+          <button id="close-map" class="primary">閉じる (M)</button>
+        </aside>
+      </div>
+    </section>
+
+    <!-- ポーズ -->
+    <section id="pause-screen" class="screen hidden">
+      <div class="panel">
+        <h2>ポーズ</h2>
+        <div id="pause-info"></div>
+        <button id="resume-btn" class="primary">再開 (Esc)</button>
+        <button id="mute-btn">音: オン</button>
+        <button id="title-btn">タイトルに戻る</button>
+      </div>
+    </section>
+
+    <!-- 結果 -->
+    <section id="result-screen" class="screen hidden">
+      <div class="panel">
+        <h2>🏁 ゴール！</h2>
+        <div id="result-text"></div>
+        <button id="again-btn" class="primary">もう一度</button>
+        <button id="free-btn">自由走行で続ける</button>
+      </div>
+    </section>
+
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
