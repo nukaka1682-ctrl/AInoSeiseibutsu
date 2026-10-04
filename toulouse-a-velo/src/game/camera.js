@@ -49,8 +49,8 @@ export class CameraRig {
     } else {
       cam.up.set(0, 1, 0);
       const high = this.mode === 'high';
-      const dist = high ? 20 : 5.2 + Math.min(sp, 12) * 0.12;
-      const height = high ? 58 : 2.3 + Math.min(sp, 12) * 0.03;
+      const dist = high ? 12 : 5.2 + Math.min(sp, 12) * 0.12;
+      const height = high ? 34 : 2.3 + Math.min(sp, 12) * 0.03;
       let tx = bike.x - cx * dist, tz = bike.z - cz * dist;
       let ty = height;
       let pulled = false;

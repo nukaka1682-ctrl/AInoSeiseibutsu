@@ -58,7 +58,6 @@ export class RoadNetwork {
     this.nx = [];
     this.nz = [];
     this.adj = [];
-    this.nodeGrid = new Grid(25);
     this.maxHalfWidth = 0;
     for (const road of roads) {
       if (road.tunnel) continue;
@@ -66,7 +65,7 @@ export class RoadNetwork {
       this.maxHalfWidth = Math.max(this.maxHalfWidth, road.width / 2);
       for (let i = 0; i + 1 < road.pts.length; i++) {
         const a = road.pts[i], b = road.pts[i + 1];
-        const s = { ax: a[0], az: a[1], bx: b[0], bz: b[1], road, bike };
+        const s = { ax: a[0], az: a[1], bx: b[0], bz: b[1], road, bike, ia: -1, ib: -1 };
         this.segGrid.insertSegment(a[0], a[1], b[0], b[1], this.segs.length);
         this.segs.push(s);
         if (bike) {
@@ -74,10 +73,41 @@ export class RoadNetwork {
           const cost = Math.hypot(b[0] - a[0], b[1] - a[1]) * (COST[road.type] || 1.1);
           this.adj[ia].push(ib, cost);
           this.adj[ib].push(ia, cost);
+          s.ia = ia;
+          s.ib = ib;
         }
       }
     }
     this.maxHalfWidth = Math.min(this.maxHalfWidth, 20);
+    this.labelComponents();
+  }
+
+  // つながっている道のまとまり（連結成分）を調べ、一番大きいものを「本線網」とする。
+  // OSM には孤立した短い道（橋の歩道だけ、敷地内の通路など）があり、そこからはルートが引けないため
+  labelComponents() {
+    const n = this.nx.length;
+    this.comp = new Int32Array(n).fill(-1);
+    const sizes = [];
+    for (let i = 0; i < n; i++) {
+      if (this.comp[i] >= 0) continue;
+      const c = sizes.length;
+      let size = 0;
+      const stack = [i];
+      this.comp[i] = c;
+      while (stack.length) {
+        const u = stack.pop();
+        size++;
+        const a = this.adj[u];
+        for (let k = 0; k < a.length; k += 2) {
+          if (this.comp[a[k]] < 0) {
+            this.comp[a[k]] = c;
+            stack.push(a[k]);
+          }
+        }
+      }
+      sizes.push(size);
+    }
+    this.mainComp = sizes.length ? sizes.indexOf(Math.max(...sizes)) : -1;
   }
 
   node(id, p) {
@@ -88,7 +118,6 @@ export class RoadNetwork {
       this.nx.push(p[0]);
       this.nz.push(p[1]);
       this.adj.push([]);
-      this.nodeGrid.insertPoint(p[0], p[1], i);
     }
     return i;
   }
@@ -140,18 +169,11 @@ export class RoadNetwork {
     return best;
   }
 
+  // (x,z) から本線網に乗るノード: 一番近い道路の線分の、近い方の端
   nearestNode(x, z) {
-    for (const r of [30, 80, 200, 600]) {
-      let best = -1, bestD = Infinity;
-      this.nodeGrid.queryPoint(x, z, r, (i) => {
-        if (!this.adj[i].length) return;
-        const d = (this.nx[i] - x) ** 2 + (this.nz[i] - z) ** 2;
-        if (d < bestD) {
-          bestD = d;
-          best = i;
-        }
-      });
-      if (best >= 0) return best;
+    for (const r of [30, 100, 300, 900]) {
+      const s = this.nearestSegment(x, z, r, (q) => q.bike && this.comp[q.ia] === this.mainComp);
+      if (s) return s.t < 0.5 ? s.seg.ia : s.seg.ib;
     }
     return -1;
   }

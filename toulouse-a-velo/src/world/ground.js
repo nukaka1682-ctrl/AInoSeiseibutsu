@@ -5,7 +5,7 @@
 import * as THREE from 'three';
 import { MeshWriter, writeFlatPolygon } from './meshwriter.js';
 import { CAR_ROADS } from './parse.js';
-import { Grid, clipPolylineToRect, pointInPolygon, signedArea } from '../geo.js';
+import { Grid, clipPolylineToRect, closestOnSegment, pointInPolygon, signedArea } from '../geo.js';
 
 export const ORDER = {
   waterMask: -50,
@@ -340,39 +340,57 @@ export function buildGround(parsed, rect, mats) {
 function buildBridges(bridges, mats, waterDepthAt, clipRect) {
   const deck = new MeshWriter();
   const body = new MeshWriter();
-  const topY = 0.08, bottomY = -1.3;
+  const bottomY = -1.3;
   const stoneColor = c3('#c58a6e');
   const parapetColor = c3('#d39a7d');
+  const deckHalf = (road) => road.width / 2 + (CAR_ROADS.has(road.type) ? 2 : 0.3);
+  // 歩道が別の way として並んでいる橋（ポン・ヌフなど）では、隣の橋床の上に欄干を立てない
+  const segGrid = new Grid(20);
+  const segs = [];
   for (const road of bridges) {
+    for (let i = 0; i + 1 < road.pts.length; i++) {
+      const [ax, az] = road.pts[i], [bx, bz] = road.pts[i + 1];
+      segGrid.insertSegment(ax, az, bx, bz, segs.length);
+      segs.push({ ax, az, bx, bz, half: deckHalf(road), road });
+    }
+  }
+  const onOtherDeck = (x, z, self) => {
+    let hit = false;
+    segGrid.queryPoint(x, z, 25, (i) => {
+      const s = segs[i];
+      if (hit || s.road === self) return;
+      if (closestOnSegment(x, z, s.ax, s.az, s.bx, s.bz).d2 < (s.half - 0.1) ** 2) hit = true;
+    });
+    return hit;
+  };
+  for (const road of bridges) {
+    // 歩道橋は車道の橋より少し高くして、重なっても Z ファイティングしないように
+    const topY = CAR_ROADS.has(road.type) ? 0.08 : 0.14;
     for (const pts of clipPolylineToRect(road.pts, ...clipRect)) {
       if (pts.length < 2) continue;
-      const half = road.width / 2 + (CAR_ROADS.has(road.type) ? 2 : 0.3);
+      const half = deckHalf(road);
       const st = roadStyle(road);
       writeRibbon(deck, pts, half, topY, st.tex === 'asphalt' ? st.color : c3('#c9c4ba'));
       const { L, R } = offsets(pts, half);
       const inner = offsets(pts, half - 0.4);
-      // 側面
-      for (const [side, sgn] of [[L, 1], [R, -1]]) {
+      for (const [side, innerSide, sgn] of [[L, inner.L, 1], [R, inner.R, -1]]) {
         for (let i = 0; i + 1 < side.length; i++) {
           const a = side[i], b = side[i + 1];
           const dx = b[0] - a[0], dz = b[1] - a[1];
           const l = Math.hypot(dx, dz) || 1;
-          const n = [(-dz / l) * sgn, 0, (dx / l) * sgn];
-          body.quad([a[0], topY + 1.0, a[1]], [b[0], topY + 1.0, b[1]], [b[0], bottomY, b[1]], [a[0], bottomY, a[1]], n,
+          const n = [(-dz / l) * sgn, 0, (dx / l) * sgn]; // 外向き
+          const parapet = !onOtherDeck((a[0] + b[0]) / 2 + n[0] * 0.8, (a[1] + b[1]) / 2 + n[2] * 0.8, road);
+          const top = parapet ? topY + 1.0 : topY;
+          // 側面
+          body.quad([a[0], top, a[1]], [b[0], top, b[1]], [b[0], bottomY, b[1]], [a[0], bottomY, a[1]], n,
             [0, 0.5], [l / 3, 0.5], [l / 3, 0], [0, 0], stoneColor);
-        }
-      }
-      // 欄干（内側の面と天端）
-      for (const [outer, innerSide, sgn] of [[L, inner.L, 1], [R, inner.R, -1]]) {
-        for (let i = 0; i + 1 < outer.length; i++) {
-          const a = innerSide[i], b = innerSide[i + 1];
-          const dx = b[0] - a[0], dz = b[1] - a[1];
-          const l = Math.hypot(dx, dz) || 1;
-          const n = [(dz / l) * sgn, 0, (-dx / l) * sgn];
-          body.quad([a[0], topY, a[1]], [b[0], topY, b[1]], [b[0], topY + 1.0, b[1]], [a[0], topY + 1.0, a[1]], n,
+          if (!parapet) continue;
+          // 欄干（内側の面と天端）
+          const ia = innerSide[i], ib = innerSide[i + 1];
+          const ni = [-n[0], 0, -n[2]];
+          body.quad([ia[0], topY, ia[1]], [ib[0], topY, ib[1]], [ib[0], topY + 1.0, ib[1]], [ia[0], topY + 1.0, ia[1]], ni,
             [0, 0], [l / 3, 0], [l / 3, 0.3], [0, 0.3], parapetColor);
-          const oa = outer[i], ob = outer[i + 1];
-          body.quad([oa[0], topY + 1.0, oa[1]], [ob[0], topY + 1.0, ob[1]], [b[0], topY + 1.0, b[1]], [a[0], topY + 1.0, a[1]], [0, 1, 0],
+          body.quad([a[0], topY + 1.0, a[1]], [b[0], topY + 1.0, b[1]], [ib[0], topY + 1.0, ib[1]], [ia[0], topY + 1.0, ia[1]], [0, 1, 0],
             [0, 0], [l / 3, 0], [l / 3, 0.1], [0, 0.1], parapetColor);
         }
       }
@@ -382,8 +400,14 @@ function buildBridges(bridges, mats, waterDepthAt, clipRect) {
         body.quad([a[0], bottomY, a[1]], [b[0], bottomY, b[1]], [c[0], bottomY, c[1]], [d[0], bottomY, d[1]], [0, -1, 0],
           [0, 0], [1, 0], [1, 1], [0, 1], stoneColor);
       }
-      // 橋脚（水の上だけ、約 30 m おき）
-      let acc = 15;
+      // 橋脚（水の上だけ、約 30 m おき）。車道の橋に並ぶ歩道橋には付けない
+      const [m0, m1] = [pts[0], pts[pts.length - 1]];
+      const mx = (m0[0] + m1[0]) / 2, mz = (m0[1] + m1[1]) / 2;
+      const ml = Math.hypot(m1[0] - m0[0], m1[1] - m0[1]) || 1;
+      const nx = -(m1[1] - m0[1]) / ml, nz = (m1[0] - m0[0]) / ml;
+      const alongside = !CAR_ROADS.has(road.type) &&
+        (onOtherDeck(mx + nx * (half + 0.8), mz + nz * (half + 0.8), road) || onOtherDeck(mx - nx * (half + 0.8), mz - nz * (half + 0.8), road));
+      let acc = alongside ? Infinity : 15;
       for (let i = 0; i + 1 < pts.length; i++) {
         const [ax, az] = pts[i], [bx, bz] = pts[i + 1];
         const len = Math.hypot(bx - ax, bz - az);

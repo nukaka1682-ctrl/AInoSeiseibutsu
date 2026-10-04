@@ -57,6 +57,8 @@ export function makeFixture(presetId = 'light', { split = 3 } = {}) {
   });
   // ポン・ヌフ（橋）と左岸の河岸道路
   way([[-640, 450], [-330, 450]], { highway: 'primary', bridge: 'yes', layer: '1', name: 'Pont Neuf' });
+  // 橋の歩道が別の way として並んでいる（実際の OSM によくある形）
+  for (const dz of [-8.5, 8.5]) way([[-640, 450 + dz], [-330, 450 + dz]], { highway: 'footway', footway: 'sidewalk', bridge: 'yes', layer: '1' });
   way([[-640, -650], [-640, 450], [-640, 650]], { highway: 'secondary', name: 'Quai de Tounis Test' });
   // 右岸の河岸の歩道
   way([[-380, -600], [-380, 600]], { highway: 'footway', name: 'Quai de la Daurade' });
