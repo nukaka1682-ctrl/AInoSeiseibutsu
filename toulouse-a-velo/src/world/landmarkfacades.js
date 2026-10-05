@@ -1,7 +1,7 @@
 // 名所の建物の正面に、専用のテクスチャ（facades.js）を貼る場所を決める。
 // いまはキャピトル（市庁舎）: キャピトル広場に面した、いちばん長い建物の壁を正面とする。
 import { closestOnSegment, signedArea } from '../geo.js';
-import { CAPITOLE_HEIGHT } from './facades.js';
+import { CAPITOLE_HEIGHT, STYLE } from './facades.js';
 
 /**
  * @returns {{ building, origin:number[], dir:number[], normal:number[], t0:number, t1:number, height:number } | null}
@@ -71,4 +71,22 @@ export function facadeSpan(f, a, c, n) {
   if (!onFacade(a) || !onFacade(c)) return null;
   const u = (p) => ((p[0] - f.origin[0]) * f.dir[0] + (p[1] - f.origin[1]) * f.dir[1] - f.t0) / (f.t1 - f.t0);
   return [u(a), u(c)];
+}
+
+// レンガ造りの歴史的な建物群（IGN のデータに壁の材料がないことが多い）。中心から半径 r m の大きな建物は
+// ばら色のレンガに白い石の窓枠の様式にする
+const BRICK_SITES = [
+  { name: 'Hôtel-Dieu Saint-Jacques', lat: 43.59935, lon: 1.43655, r: 85 },
+  { name: 'Hôpital de La Grave', lat: 43.60095, lon: 1.43405, r: 110 },
+];
+export function markBrickSites(proj, buildings) {
+  for (const s of BRICK_SITES) {
+    const [x, z] = proj.project(s.lat, s.lon);
+    for (const b of buildings) {
+      if (b.info.area > 150 && Math.hypot(b.inside[0] - x, b.inside[1] - z) < s.r) {
+        b.tags['building:material'] = 'brick';
+        b.style = STYLE.brickStone;
+      }
+    }
+  }
 }

@@ -1,61 +1,26 @@
 // トゥールーズの八角形の鐘楼（サン・セルナン大聖堂、ジャコバン修道院）を、写真を手本に組み立てる。
-// LiDAR の表面モデルでは鐘楼は「とがった塊」にしかならないので、表面モデルの最も高い点の位置・高さと、
-// 屋根の高さ（鐘楼の付け根）を測り、その寸法で段（アーケードの層）・冠・尖塔を作る。
+// 位置・高さ・太さ・付け根（屋根から出る高さ）は IGN LiDAR HD の表面モデル（0.5 m）で測った値。
+// その寸法で段（アーケードの層）・冠・尖塔を作る。高さは地面から（m）。
 //   サン・セルナン: 半円アーチの層 ×3 ＋ 尖頭（ミトラ形）アーチの層 ×2、小塔の付いた冠、石の尖塔
 //   ジャコバン:     ミトラ形アーチの層 ×4、平らな冠（尖塔なし）
 import * as THREE from 'three';
 import { mulberry32 } from '../geo.js';
 
 export const TOWERS = [
-  { id: 'saint-sernin', lat: 43.60846, lon: 1.44212, search: 30, tiers: ['round', 'round', 'round', 'mitre', 'mitre'], spire: true },
-  { id: 'jacobins', lat: 43.60370, lon: 1.44010, search: 40, tiers: ['mitre', 'mitre', 'mitre', 'mitre'], spire: false },
+  { id: 'saint-sernin', lat: 43.60848, lon: 1.442154, base: 22.4, top: 67, radius: 6.3, tiers: ['round', 'round', 'round', 'mitre', 'mitre'], spire: true },
+  { id: 'jacobins', lat: 43.603612, lon: 1.440426, base: 28, top: 46, radius: 4, tiers: ['mitre', 'mitre', 'mitre', 'mitre'], spire: false },
 ];
 
-// 表面モデルから鐘楼を探す。buildings の中に鐘楼の位置があるものだけ
-export function findTowers(proj, buildings, dsm, dtm) {
+// buildings（教会）のそばにある鐘楼。buildings に教会がないとき（別のタイル）は作らない
+export function findTowers(proj, buildings) {
   const out = [];
   for (const spec of TOWERS) {
-    const [hx, hz] = proj.project(spec.lat, spec.lon);
-    const b = buildings.find((q) => hx > q.bounds.minX - spec.search && hx < q.bounds.maxX + spec.search && hz > q.bounds.minZ - spec.search && hz < q.bounds.maxZ + spec.search && q.info.isChurch);
-    if (!b) continue;
-    // いちばん高い点 = 尖塔（または鐘楼の頂上）
-    let top = -Infinity, tx = hx, tz = hz;
-    for (let dz = -spec.search; dz <= spec.search; dz += 1) {
-      for (let dx = -spec.search; dx <= spec.search; dx += 1) {
-        if (dx * dx + dz * dz > spec.search * spec.search) continue;
-        const h = dsm.sample(hx + dx, hz + dz);
-        if (h > top) [top, tx, tz] = [h, hx + dx, hz + dz];
-      }
-    }
-    const ground = dtm.sample(tx, tz);
-    if (top - ground < 30) continue; // 鐘楼が見つからない
-    // 鐘楼の太さ: 頂上と地面の間の高さを保つ範囲（8 方向の平均）。尖塔の場合は少し下で測る
-    const probe = ground + (top - ground) * (spec.spire ? 0.55 : 0.8);
-    let rsum = 0;
-    for (let k = 0; k < 8; k++) {
-      const a = (k / 8) * Math.PI * 2;
-      let r = 1;
-      while (r < 12 && dsm.sample(tx + Math.cos(a) * r, tz + Math.sin(a) * r) > probe) r += 0.5;
-      rsum += r;
-    }
-    const radius = Math.max(4, Math.min(8, rsum / 8 + 0.6));
-    // 付け根: 鐘楼のまわり（半径 + 2〜6 m）の屋根の高さ
-    const ring = [];
-    for (let k = 0; k < 16; k++) {
-      const a = (k / 16) * Math.PI * 2;
-      for (const d of [radius + 2, radius + 4, radius + 6]) ring.push(dsm.sample(tx + Math.cos(a) * d, tz + Math.sin(a) * d));
-    }
-    ring.sort((p, q) => p - q);
-    const base = Math.max(ground + 12, ring[Math.floor(ring.length * 0.6)]);
-    out.push({ spec, building: b, x: tx, z: tz, ground, base, top, radius });
+    const [x, z] = proj.project(spec.lat, spec.lon);
+    const m = 15;
+    const b = buildings.find((q) => q.info.isChurch && x > q.bounds.minX - m && x < q.bounds.maxX + m && z > q.bounds.minZ - m && z < q.bounds.maxZ + m);
+    if (b) out.push({ spec, building: b, x, z, ground: 0, base: spec.base, top: spec.top, radius: spec.radius });
   }
   return out;
-}
-
-// 屋根の三角形のうち、鐘楼に隠れるもの（中心から鐘楼の半径 + 1 m 以内で、付け根より高い）
-export function hiddenByTower(towers, x, z, y) {
-  for (const t of towers) if (Math.hypot(x - t.x, z - t.z) < t.radius + 1 && y > t.base - 1.5) return true;
-  return false;
 }
 
 // 鐘楼のメッシュを W.tower（テクスチャの区画は TOWER_CELLS）に書く

@@ -1,6 +1,7 @@
 // IGN LiDAR HD（航空機からのレーザー測量）の標高データを Géoplateforme の WMS から取得する（Licence Ouverte）。
-// - MNS（表面モデル）: 屋根・塔・木・橋を含む表面の高さ → 屋根の形、木、橋の高さに使う
-// - MNT（地形モデル）: 地面の高さ → 地形（川岸の高低差など）に使う
+// - MNS（表面モデル）: 屋根・塀・木を含む表面の高さ
+// - MNT（地形モデル）: 地面の高さ
+// 差（地面からの高さ）で、敷地の塀と木を見つける（walls.js。地図データの事前取得のときに使う）
 // 値は 32bit 浮動小数（BIL 形式）で、緯度経度の格子（北が上）。
 
 export const ELEVATION_WMS = 'https://data.geopf.fr/wms-r/wms';
@@ -130,25 +131,4 @@ export class HeightGrid {
     for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) m = Math.max(m, this.at(c, r));
     return m;
   }
-}
-
-// エリアの大きさから格子の細かさを決める（1 辺 2400 点まで。最も細かくて DSM 0.5 m）
-export function lidarResolution(rect) {
-  const size = Math.max(rect.maxX - rect.minX, rect.maxZ - rect.minZ);
-  const dsm = Math.max(0.5, Math.ceil((size / 2400) * 10) / 10);
-  return { dsm, dtm: Math.max(1, dsm * 2) };
-}
-
-export async function fetchLidar(bbox, rect, { onStatus } = {}) {
-  const res = lidarResolution(rect);
-  const w = rect.maxX - rect.minX, h = rect.maxZ - rect.minZ;
-  const grid = (r) => [Math.round(w / r), Math.round(h / r)];
-  const [dc, dr] = grid(res.dsm), [tc, tr] = grid(res.dtm);
-  let p1 = 0, p2 = 0;
-  const report = () => onStatus?.((p1 * 0.8 + p2 * 0.2));
-  const [dsm, dtm] = await Promise.all([
-    fetchElevation(LIDAR_LAYERS.dsm, bbox, dc, dr, { onProgress: (p) => { p1 = p; report(); } }),
-    fetchElevation(LIDAR_LAYERS.dtm, bbox, tc, tr, { onProgress: (p) => { p2 = p; report(); }, concurrency: 1 }),
-  ]);
-  return { dsm, dtm, res };
 }

@@ -8,7 +8,6 @@ import { fetchOverpass } from './overpass.js';
 import { fetchBdTopo } from './bdtopo.js';
 import { fetchIgnArea } from './ign.js';
 import { cacheGet, cachePut } from './cache.js';
-import { fetchLidar, lidarResolution } from './lidar.js';
 import { DATA_VERSION } from '../config.js';
 
 export const PROVIDER_LABEL = { osm: 'OpenStreetMap + IGN（建物の高さ）', ign: 'IGN BD TOPO' };
@@ -103,17 +102,4 @@ export async function loadAreaData({ bbox, presetId, onStatus, forceNetwork = fa
   const data = await fetchAreaData(bbox, { provider, onStatus });
   cachePut(areaKey(bbox, provider), data);
   return { ...data, source: 'ダウンロード' };
-}
-
-// LiDAR HD（表面・地形モデル）。IndexedDB にキャッシュする
-export async function loadLidar(bbox, rect, { onStatus, forceNetwork = false } = {}) {
-  const res = lidarResolution(rect);
-  const key = `lidar:v1:${res.dsm}:${bbox.s},${bbox.w},${bbox.n},${bbox.e}`;
-  if (!forceNetwork) {
-    const cached = await cacheGet(key);
-    if (cached) return cached;
-  }
-  const lidar = await fetchLidar(bbox, rect, { onStatus });
-  cachePut(key, lidar);
-  return lidar;
 }

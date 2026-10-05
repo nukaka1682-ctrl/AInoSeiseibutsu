@@ -219,8 +219,7 @@ test('橋の下で切り抜かれた水面を埋める', () => {
 });
 
 // ---- LiDAR（表面・地形モデル）----
-import { HeightGrid, fillNoData, lidarResolution } from '../../src/data/lidar.js';
-import { roofFromDsm } from '../../src/world/lidarroof.js';
+import { HeightGrid, fillNoData } from '../../src/data/lidar.js';
 import { detectTrees } from '../../src/world/lidartrees.js';
 
 // 100 m × 100 m、1 m 格子の合成データ: 平らな地面 140 m、切妻屋根の建物（軒 10 m・棟 13 m）、木 1 本（高さ 12 m）
@@ -240,28 +239,13 @@ function syntheticLidar() {
   return { rect, dsm: { data: dsm, cols, rows }, dtm: { data: dtm, cols, rows } };
 }
 
-test('LiDAR: 格子の補間・欠測の穴埋め・解像度', () => {
+test('LiDAR: 格子の補間・欠測の穴埋め', () => {
   const g = new HeightGrid({ data: new Float32Array([0, 10, 20, 30]), cols: 2, rows: 2 }, { minX: 0, maxX: 2, minZ: 0, maxZ: 2 }, 5);
   assert.equal(g.sample(1, 0.5), 0); // セルの中心同士の真ん中: (0 + 10) / 2 - 5
   assert.equal(g.sample(1, 1), 10);
   const d = new Float32Array([1, -99999, 3, 4, 5, 6, 7, 8, 9]);
   fillNoData(d, 3, 3);
   assert.ok(Math.abs(d[1] - (1 + 3 + 5) / 3) < 1e-6);
-  assert.deepEqual(lidarResolution({ minX: -1200, maxX: 1200, minZ: -1200, maxZ: 1200 }), { dsm: 1, dtm: 2 });
-});
-
-test('LiDAR: 表面モデルから切妻屋根の形を作る', () => {
-  const L = syntheticLidar();
-  const dsm = new HeightGrid(L.dsm, L.rect, 140);
-  const outer = [[-20, -10], [0, -10], [0, 10], [-20, 10]];
-  const roof = roofFromDsm(outer, [], (x, z) => dsm.sample(x, z));
-  assert.ok(roof.triangles.length >= 6 && roof.triangles.length % 3 === 0);
-  const ridge = Math.max(...roof.heights), eave = Math.min(...roof.heights);
-  assert.ok(ridge > 12 && ridge <= 13.01, `棟 ${ridge}`);
-  assert.ok(eave > 9.9 && eave < 11, `軒 ${eave}`);
-  // 平らな面の上の点は省かれる（棟の上の点だけ残る）
-  const steiner = roof.points.length - roof.rings[0].count;
-  assert.ok(steiner < 20, `内部の点 ${steiner}`);
 });
 
 test('LiDAR: 樹冠から木を見つける（建物の上は除く）', () => {
@@ -276,7 +260,7 @@ test('LiDAR: 樹冠から木を見つける（建物の上は除く）', () => {
 });
 
 // ---- 広いエリアのタイル ----
-import { boundsToBbox, featureTile, tileAt, tileBounds, tileLayout } from '../../src/data/tiles.js';
+import { boundsToBbox, featureTile, splitTileFeatures, tileAt, tileBounds, tileLayout } from '../../src/data/tiles.js';
 import { areaFrame } from '../../src/world/assemble.js';
 
 test('タイル: 並び・位置・緯度経度・建物の割り当て', () => {
@@ -298,4 +282,64 @@ test('タイル: 並び・位置・緯度経度・建物の割り当て', () => 
   const latLon = { geometry: { type: 'Polygon', coordinates: [[[lat, lon], [lat, lon + 1e-4], [lat + 1e-4, lon]]] } };
   assert.deepEqual(featureTile(lonLat, L, bbox), tileAt(L, 10, 10));
   assert.deepEqual(featureTile(latLon, L, bbox), tileAt(L, 10, 10));
+});
+
+test('タイル: 隣のタイルの境近くの建物を ctx に分ける', () => {
+  const bbox = bboxAround(43.5994, 1.4395, 5000);
+  const { proj, rect } = areaFrame(bbox);
+  const L = tileLayout(rect);
+  const [i, j] = tileAt(L, 0, 0);
+  const b = tileBounds(L, i, j);
+  const sq = (x, z) => {
+    const ring = [[x, z], [x + 5, z], [x + 5, z + 5], [x, z + 5], [x, z]].map(([px, pz]) => proj.unproject(px, pz).reverse());
+    return { geometry: { type: 'Polygon', coordinates: [ring] } };
+  };
+  const own = sq(b.minX + 50, b.minZ + 50), close = sq(b.maxX + 10, b.minZ + 50), far = sq(b.maxX + 100, b.minZ + 50);
+  const out = splitTileFeatures([own, close, far], L, bbox, i, j);
+  assert.deepEqual(out.own, [own]);
+  assert.deepEqual(out.ctx, [close]);
+});
+
+// ---- 塀・隣と接する壁 ----
+import { detectWalls } from '../../src/data/walls.js';
+import { makePartyIndex } from '../../src/world/buildings.js';
+
+test('塀: 敷地の境界に沿った細い盛り上がりだけを塀にする', () => {
+  // 40 m 四方・0.5 m 格子。x = 20 m に高さ 2.5 m・幅 0.5 m の塀（z = 5〜30 m）、x = 10 m の境界には何もない、
+  // x = 30 m の境界には幅 6 m の高い木の塊（塀ではない）
+  const bbox = { s: 43.6, n: 43.6 + 40 / 110574, w: 1.44, e: 1.44 + 40 / (111320 * Math.cos((43.6 * Math.PI) / 180)) };
+  const cols = 80, rows = 80;
+  const dsm = new Float32Array(cols * rows).fill(140), dtm = new Float32Array(cols * rows).fill(140);
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const x = (c + 0.5) * 0.5, z = (r + 0.5) * 0.5;
+      if (Math.abs(x - 20) < 0.3 && z > 5 && z < 30) dsm[r * cols + c] = 142.5;
+      if (Math.abs(x - 30) < 3 && z > 5 && z < 30) dsm[r * cols + c] = 148;
+    }
+  }
+  const lon = (x) => bbox.w + (x / 40) * (bbox.e - bbox.w), lat = (z) => bbox.n - (z / 40) * (bbox.n - bbox.s);
+  const parcel = (x0, x1) => [[[lon(x0), lat(0)], [lon(x1), lat(0)], [lon(x1), lat(40)], [lon(x0), lat(40)], [lon(x0), lat(0)]]];
+  const walls = detectWalls({
+    bbox, parcels: [parcel(0, 10), parcel(10, 20), parcel(20, 30), parcel(30, 40)], buildings: [],
+    dsm: { data: dsm, cols, rows }, dtm: { data: dtm, cols, rows },
+  });
+  assert.equal(walls.length, 1, JSON.stringify(walls));
+  const [lon1, lat1, lon2, lat2, h] = walls[0];
+  const x = ((lon1 - bbox.w) / (bbox.e - bbox.w)) * 40;
+  const len = (Math.abs(lat2 - lat1) / (bbox.n - bbox.s)) * 40;
+  assert.ok(Math.abs(x - 20) < 0.6, `x=${x}`);
+  assert.ok(len > 23 && len < 27, `長さ ${len}`);
+  assert.ok(Math.abs(h - 2.5) < 0.2, `高さ ${h}`);
+});
+
+test('隣と接する壁: 同じ線上にある別の建物の辺と高さ', () => {
+  const mk = (id, outer, height) => ({ id, outer, holes: [], info: { height, minHeight: 0, kind: 'yes' } });
+  const a = mk(1, [[0, 0], [10, 0], [10, 10], [0, 10]], 15);
+  const b = mk(2, [[10.3, 2], [20, 2], [20, 8], [10.3, 8]], 9);
+  const party = makePartyIndex([a, b]);
+  const cover = party(a, [10, 0], [10, 10]); // a の東の壁
+  assert.equal(cover.length, 1);
+  const [t0, t1, h] = cover[0];
+  assert.ok(Math.abs(t0 - 2) < 0.01 && Math.abs(t1 - 8) < 0.01 && h === 9);
+  assert.deepEqual(party(a, [0, 0], [10, 0]), []); // 南の壁は通りに面している
 });
