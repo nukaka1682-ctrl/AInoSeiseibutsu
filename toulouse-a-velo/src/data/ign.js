@@ -6,7 +6,7 @@
 // 高さと屋根の再現度は OSM より高い。一方、街路樹や細かな歩道は含まれない。
 import { fetchWfsLayer, normalizeCoords, polygonsOf } from './bdtopo.js';
 
-const LAYERS = {
+export const IGN_LAYERS = {
   batiment: ['geometrie', 'hauteur', 'nombre_d_etages', 'nature', 'usage_1', 'materiaux_des_murs', 'materiaux_de_la_toiture', 'altitude_minimale_toit', 'altitude_maximale_toit'],
   troncon_de_route: ['geometrie', 'nature', 'importance', 'largeur_de_chaussee', 'nombre_de_voies', 'position_par_rapport_au_sol', 'sens_de_circulation', 'acces_vehicule_leger', 'nom_voie_ban_gauche', 'nom_voie_ban_droite', 'nom_collaboratif_gauche', 'fictif'],
   surface_hydrographique: ['geometrie', 'nature', 'position_par_rapport_au_sol'],
@@ -66,6 +66,7 @@ function buildingTags(p) {
   const t0 = Number(p.altitude_minimale_toit), t1 = Number(p.altitude_maximale_toit);
   let roofH = Number.isFinite(t0) && Number.isFinite(t1) ? Math.max(0, t1 - t0) : 0;
   if (roof === 4) roofH = 0; // コンクリートの屋根 = 陸屋根
+  if (Number.isFinite(t1) && t1 > 0) tags['roof:max_ele'] = String(t1); // 屋根の最高点の標高（LiDAR に写った木を除くのに使う）
   if (roof === 2) tags['roof:colour'] = '#5f646b'; // スレート
   if (roof === 3) tags['roof:colour'] = '#8d949b'; // 亜鉛・アルミ
   if (Number.isFinite(h) && h > 0) {
@@ -250,8 +251,9 @@ export function ignToOsm(layers, bbox) {
   return { elements: b.elements };
 }
 
-export async function fetchIgnArea(bbox, { onStatus } = {}) {
-  const names = Object.keys(LAYERS);
+// layers: 取得するレイヤー（省略時はすべて）
+export async function fetchIgnArea(bbox, { onStatus, layers: only = null } = {}) {
+  const names = only || Object.keys(IGN_LAYERS);
   const counts = {};
   const report = () => onStatus?.({ count: Object.values(counts).reduce((a, n) => a + n, 0) });
   const layers = {};
@@ -261,7 +263,7 @@ export async function fetchIgnArea(bbox, { onStatus } = {}) {
     while (queue.length) {
       const name = queue.shift();
       layers[name] = await fetchWfsLayer(name, bbox, {
-        propertyNames: LAYERS[name],
+        propertyNames: IGN_LAYERS[name],
         onPage: (n) => {
           counts[name] = n;
           report();

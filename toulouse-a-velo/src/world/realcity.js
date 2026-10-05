@@ -19,9 +19,41 @@ import { Grid, closestOnSegment, hash01, pointInPolygon, signedArea } from '../g
 const CHUNK_TARGET = 250; // 区画の大きさ（m）
 const pause = () => new Promise((r) => setTimeout(r, 0));
 
-function median(arr) {
+export function median(arr) {
   const a = arr.filter(Number.isFinite).sort((x, y) => x - y);
   return a.length ? a[a.length >> 1] : NaN;
+}
+
+// 川・運河ごとに、内側の地形の高さの中央値を水面の高さ（a.level）にする。橋の下を埋めたパッチは重なる川の高さにそろえる
+export function levelWater(parsed, dtm) {
+  const waters = parsed.areas.filter((a) => a.type === 'water' && !a.patch);
+  for (const a of waters) {
+    const samples = [];
+    for (let i = 0; i < 40; i++) {
+      const x = a.bounds.minX + hash01(a.id, i) * (a.bounds.maxX - a.bounds.minX);
+      const z = a.bounds.minZ + hash01(a.id, i + 100) * (a.bounds.maxZ - a.bounds.minZ);
+      if (pointInPolygon(x, z, a)) samples.push(dtm.sample(x, z));
+    }
+    const level = median(samples);
+    if (Number.isFinite(level)) a.level = level;
+  }
+  for (const a of parsed.areas) {
+    if (!a.patch) continue;
+    const levels = waters.filter((w) => Number.isFinite(w.level) && w.bounds.minX < a.bounds.maxX && w.bounds.maxX > a.bounds.minX && w.bounds.minZ < a.bounds.maxZ && w.bounds.maxZ > a.bounds.minZ).map((w) => w.level);
+    if (levels.length) a.level = Math.min(...levels);
+  }
+  return parsed.areas.filter((a) => a.type === 'water' && Number.isFinite(a.level));
+}
+
+// 水の中の地形は水面より下に下げる（橋の下の地形モデルは岸から補間されていて水面より上に出ることがあり、
+// そこに航空写真の橋が写って見えてしまうため）
+export function clampUnderwater(waterAreas, dtm) {
+  for (const a of waterAreas) {
+    const top = a.level + dtm.base - 0.6;
+    forEachCellIn(a, dtm, (i) => {
+      if (dtm.data[i] > top) dtm.data[i] = top;
+    });
+  }
 }
 
 export async function buildRealCity({ parsed, rect, proj, lidar, materials, waterMaterial, facade = null, progress = () => {} }) {
@@ -87,32 +119,8 @@ export async function buildRealCity({ parsed, rect, proj, lidar, materials, wate
   };
 
   // ---- 水面の高さ ----
-  // 川・運河ごとに、内側の地形の高さの中央値。橋の下を埋めたパッチは重なる川の高さにそろえる
-  const waters = parsed.areas.filter((a) => a.type === 'water' && !a.patch);
-  for (const a of waters) {
-    const samples = [];
-    for (let i = 0; i < 40; i++) {
-      const x = a.bounds.minX + hash01(a.id, i) * (a.bounds.maxX - a.bounds.minX);
-      const z = a.bounds.minZ + hash01(a.id, i + 100) * (a.bounds.maxZ - a.bounds.minZ);
-      if (pointInPolygon(x, z, a)) samples.push(dtm.sample(x, z));
-    }
-    const level = median(samples);
-    if (Number.isFinite(level)) a.level = level;
-  }
-  for (const a of parsed.areas) {
-    if (!a.patch) continue;
-    const levels = waters.filter((w) => Number.isFinite(w.level) && w.bounds.minX < a.bounds.maxX && w.bounds.maxX > a.bounds.minX && w.bounds.minZ < a.bounds.maxZ && w.bounds.maxZ > a.bounds.minZ).map((w) => w.level);
-    if (levels.length) a.level = Math.min(...levels);
-  }
-  const waterAreas = parsed.areas.filter((a) => a.type === 'water' && Number.isFinite(a.level));
-  // 水の中の地形は水面より下に下げる（橋の下の地形モデルは岸から補間されていて水面より上に出ることがあり、
-  // そこに航空写真の橋が写って見えてしまうため）
-  for (const a of waterAreas) {
-    const top = a.level + base - 0.6;
-    forEachCellIn(a, dtm, (i) => {
-      if (dtm.data[i] > top) dtm.data[i] = top;
-    });
-  }
+  const waterAreas = levelWater(parsed, dtm);
+  clampUnderwater(waterAreas, dtm);
 
   // ---- 地形 ----
   progress('地形を作成中…', 0.05);
@@ -261,7 +269,7 @@ export async function buildRealCity({ parsed, rect, proj, lidar, materials, wate
 }
 
 // 建物 1 棟: 壁（地面から屋根の端まで）と、LiDAR の屋根（ゆるい面は航空写真、急な面は壁の材質）
-function writeLidarBuilding(b, photo, W, image, dtm, dsmAt, facade) {
+export function writeLidarBuilding(b, photo, W, image, dtm, dsmAt, facade) {
   const info = b.info;
   const roof = roofFromDsm(b.outer, b.holes, dsmAt);
   const groundYs = b.outer.map(([x, z]) => dtm.sample(x, z));
@@ -269,7 +277,11 @@ function writeLidarBuilding(b, photo, W, image, dtm, dsmAt, facade) {
   const groundMed = groundYs.sort((x, y) => x - y)[groundYs.length >> 1];
   // LiDAR が取れていない（または低すぎる）所は IGN / OSM の高さで補う
   const fallbackTop = groundMed + info.height;
-  const hs = roof.heights.map((h) => (Number.isFinite(h) && h > groundMed + 2 ? h : fallbackTop));
+  // 屋根に覆いかぶさる木を拾わないよう、IGN の屋根の最高点（なければ建物の高さから推定）より上は切る。
+  // 教会は IGN に最高点がなく、鐘楼・尖塔が高いので切らない
+  const maxEle = Number(b.tags['roof:max_ele']);
+  const cap = Math.max(fallbackTop, maxEle > 0 ? maxEle - dtm.base + 1.5 : info.isChurch ? Infinity : groundMed + Math.max(info.height * 1.6, info.height + 8));
+  const hs = roof.heights.map((h) => (Number.isFinite(h) && h > groundMed + 2 ? Math.min(h, cap) : fallbackTop));
   const color = wallColor(b); // 窓のない壁（教会など）の色
   const sv = facadeStyle(b) * 1000; // ファサードの様式（v に入れる。facades.js）
   const tint = facadeTint(b);
@@ -362,7 +374,7 @@ function writeLidarBuilding(b, photo, W, image, dtm, dsmAt, facade) {
 }
 
 // 橋: 表面の高さ（MNS）から橋面の高さの断面を作り、橋面に写真。高い所は橋脚の間をレンガのアーチにする
-function writeBridge(road, photo, body, dtm, dsm) {
+export function writeBridge(road, photo, body, dtm, dsm) {
   const half = road.width / 2 + (CAR_ROADS.has(road.type) ? 2 : 0.3);
   // 2 m ごとに点を取り直す
   const pts = [];

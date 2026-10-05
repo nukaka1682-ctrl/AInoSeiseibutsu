@@ -35,9 +35,11 @@ jobs:
       - run: npm ci
       - run: npm test
       # 地図データを事前に取得して同梱する（失敗してもゲームはブラウザ側で取得するので続行）
+      # トゥールーズ全体（半径 5 km）は、道路などの基本データと 500 m ごとの建物のタイル（約 80 MB）
       - name: Fetch OpenStreetMap + IGN data
-        run: npm run fetch-data -- centre
+        run: npm run fetch-data -- all
         continue-on-error: true
+        timeout-minutes: 30
       - run: npm run build
       - name: Assemble site
         run: |

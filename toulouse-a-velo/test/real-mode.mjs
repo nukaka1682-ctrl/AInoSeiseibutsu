@@ -103,20 +103,24 @@ for (const v of views) {
     document.getElementById('toast').classList.remove('show');
   }, v);
   // 近くの区画の高解像度の航空写真が届くのを待つ
-  for (let i = 0; i < (v.wait || 20); i++) {
+  for (let i = 0; i < (v.wait || 40); i++) {
     await page.waitForTimeout(1000);
     const pending = await page.evaluate(() => {
-      const o = window.__tav.world.real?.ortho;
-      return o ? o.chunks.filter((c) => c.want > c.level).length + o.active : 0;
+      const w = window.__tav.world;
+      const o = w.real?.ortho;
+      const tiles = w.stream ? [...w.stream.tiles.values()].filter((t) => t.state === 'queued' || t.state === 'loading').length : 0;
+      return (o ? o.chunks.filter((c) => c.want > c.level).length + o.active : 0) + tiles;
     });
-    if (pending === 0 && i > 2) break;
+    if (pending === 0 && i > 5) break;
   }
   await page.waitForTimeout(600);
   const info = await page.evaluate(() => {
     const o = window.__tav.world.real?.ortho;
     const lv = [0, 0, 0, 0];
     for (const c of o?.chunks || []) lv[c.level]++;
-    return `y=${window.__tav.bike.y.toFixed(1)}、航空写真の解像度別の区画数 ${lv.join('/')}・失敗 ${o?.failures}`;
+    const st = window.__tav.world.stream;
+    const tiles = st ? `、タイル ${st.readyCount} 枚（建物 ${st.totals.buildings}・三角形 ${st.totals.triangles}）` : '';
+    return `y=${window.__tav.bike.y.toFixed(1)}、航空写真の解像度別の区画数 ${lv.join('/')}・失敗 ${o?.failures}${tiles}`;
   });
   await page.screenshot({ path: join(out, `${v.name}.jpg`), type: 'jpeg', quality: 85, timeout: 240000 });
   console.log(`  ${v.name}: 自転車の高さ ${info}`);
