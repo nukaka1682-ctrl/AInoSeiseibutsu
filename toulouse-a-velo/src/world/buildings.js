@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { MeshWriter, writeFlatPolygon } from './meshwriter.js';
 import { centroid, hash01, isConvex, signedArea } from '../geo.js';
-import { STYLE, useFacadeAtlas } from './facades.js';
+import { CHURCH_TILE, STYLE, useFacadeAtlas } from './facades.js';
 import { facadeSpan } from './landmarkfacades.js';
 
 const CHUNK = 300;
@@ -91,6 +91,7 @@ function writeWalls(W, ring, sign, b, plainColor, facade) {
   const bayShift = Math.floor(hash01(b.id, 9) * 4);
   const sv = facadeStyle(b) * 1000; // v に様式の番号を入れる（facades.js）
   const tint = facadeTint(b);
+  let along = 0;
   const n = ring.length;
   for (let i = 0; i < n; i++) {
     const a = ring[i], c = ring[(i + 1) % n];
@@ -104,6 +105,13 @@ function writeWalls(W, ring, sign, b, plainColor, facade) {
     if (span) {
       const top = Math.max(y1, y0 + facade.height);
       W.capitole.quad(A(y0), C(y0), C(top), A(top), nrm, [span[0], 0], [span[1], 0], [span[1], (top - y0) / facade.height], [span[0], (top - y0) / facade.height]);
+      continue;
+    }
+    if (info.isChurch && L >= 1.6) {
+      // 教会の壁: 地面からの高さで窓の段がそろう
+      const s0 = along / CHURCH_TILE.w, s1 = (along + L) / CHURCH_TILE.w;
+      W.church.quad(A(y0), C(y0), C(y1), A(y1), nrm, [s0, y0 / CHURCH_TILE.h], [s1, y0 / CHURCH_TILE.h], [s1, y1 / CHURCH_TILE.h], [s0, y1 / CHURCH_TILE.h], tint);
+      along += L;
       continue;
     }
     if (info.isChurch || L < 1.6 || info.kind === 'roof') {
@@ -232,6 +240,8 @@ export function createBuildingMaterials(tex) {
     ground: useFacadeAtlas(std(tex.shopfront)),
     plain: std(tex.plain),
     capitole: std(tex.capitole, { alphaTest: 0.5 }), // キャピトルの正面（屋上の手すりの上は透明）
+    tower: std(tex.tower), // サン・セルナン・ジャコバンの八角形の鐘楼
+    church: std(tex.church), // 教会の壁（石の縞・控え壁・半円アーチの窓）
     roof: std(tex.roof, { roughness: 0.85 }),
     flat: std(tex.flatRoof),
   };
@@ -247,7 +257,7 @@ export async function buildBuildings(parsed, materials, onProgress, facade = nul
     const key = `${Math.floor(x / CHUNK)},${Math.floor(z / CHUNK)}`;
     let c = chunks.get(key);
     if (!c) {
-      c = { upper: new MeshWriter(), ground: new MeshWriter(), plain: new MeshWriter(), capitole: new MeshWriter(), roof: new MeshWriter(), flat: new MeshWriter() };
+      c = { upper: new MeshWriter(), ground: new MeshWriter(), plain: new MeshWriter(), capitole: new MeshWriter(), church: new MeshWriter(), roof: new MeshWriter(), flat: new MeshWriter() };
       chunks.set(key, c);
     }
     return c;
@@ -280,7 +290,7 @@ export async function buildBuildings(parsed, materials, onProgress, facade = nul
   }
 
   for (const c of chunks.values()) {
-    for (const key of ['upper', 'ground', 'plain', 'capitole', 'roof', 'flat']) {
+    for (const key of ['upper', 'ground', 'plain', 'capitole', 'church', 'roof', 'flat']) {
       if (c[key].empty) continue;
       const mesh = new THREE.Mesh(c[key].toGeometry(), materials[key]);
       mesh.castShadow = true;

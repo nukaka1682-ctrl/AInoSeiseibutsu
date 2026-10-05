@@ -7,11 +7,13 @@
 import * as THREE from 'three';
 import { MeshWriter, writeFlatPolygon } from './meshwriter.js';
 import { BAY, facadeStyle, facadeTint, wallColor } from './buildings.js';
+import { CHURCH_TILE } from './facades.js';
 import { CAR_ROADS } from './parse.js';
 import { offsets } from './ground.js';
 import { roofFromDsm } from './lidarroof.js';
 import { forEachCellIn } from './lidartrees.js';
 import { facadeSpan } from './landmarkfacades.js';
+import { findTowers, hiddenByTower, writeTower } from './towers.js';
 import { HeightGrid } from '../data/lidar.js';
 import { OrthoManager, orthoUV } from './ortho.js';
 import { Grid, closestOnSegment, hash01, pointInPolygon, signedArea } from '../geo.js';
@@ -114,7 +116,7 @@ export async function buildRealCity({ parsed, rect, proj, lidar, materials, wate
   const wallChunks = new Map(); // 区画ごとの壁（視錐台カリングのため）
   const wallsOf = (c) => {
     let w = wallChunks.get(c);
-    if (!w) wallChunks.set(c, (w = { upper: new MeshWriter(), ground: new MeshWriter(), plain: new MeshWriter(), capitole: new MeshWriter() }));
+    if (!w) wallChunks.set(c, (w = { upper: new MeshWriter(), ground: new MeshWriter(), plain: new MeshWriter(), capitole: new MeshWriter(), tower: new MeshWriter(), church: new MeshWriter() }));
     return w;
   };
 
@@ -172,11 +174,13 @@ export async function buildRealCity({ parsed, rect, proj, lidar, materials, wate
 
   // ---- 建物 ----
   const dsmAt = (x, z) => dsm.sample(x, z);
+  const towers = findTowers(proj, buildings, dsm, dtm); // 八角形の鐘楼は専用のモデルにする
+  for (const t of towers) writeTower(t, wallsOf(chunkAt(t.x, t.z)).tower);
   let tris = 0;
   for (let k = 0; k < buildings.length; k++) {
     const b = buildings[k];
     const c = chunkAt(b.inside[0], b.inside[1]);
-    writeLidarBuilding(b, photoW.get(c), wallsOf(c), c.image, dtm, dsmAt, facade);
+    writeLidarBuilding(b, photoW.get(c), wallsOf(c), c.image, dtm, dsmAt, facade, towers);
     if (k % 600 === 599) {
       progress(`建物を建てています（屋根は LiDAR の実測）… ${Math.round((k / buildings.length) * 100)}%`, 0.15 + (k / buildings.length) * 0.65);
       await pause();
@@ -205,7 +209,7 @@ export async function buildRealCity({ parsed, rect, proj, lidar, materials, wate
     }
     const ws = wallChunks.get(c);
     if (!ws) continue;
-    for (const key of ['upper', 'ground', 'plain', 'capitole']) {
+    for (const key of ['upper', 'ground', 'plain', 'capitole', 'tower', 'church']) {
       if (ws[key].empty) continue;
       const m = new THREE.Mesh(ws[key].toGeometry(), materials[key]);
       m.castShadow = true;
@@ -269,7 +273,7 @@ export async function buildRealCity({ parsed, rect, proj, lidar, materials, wate
 }
 
 // 建物 1 棟: 壁（地面から屋根の端まで）と、LiDAR の屋根（ゆるい面は航空写真、急な面は壁の材質）
-export function writeLidarBuilding(b, photo, W, image, dtm, dsmAt, facade) {
+export function writeLidarBuilding(b, photo, W, image, dtm, dsmAt, facade, towers = []) {
   const info = b.info;
   const roof = roofFromDsm(b.outer, b.holes, dsmAt);
   const groundYs = b.outer.map(([x, z]) => dtm.sample(x, z));
@@ -329,6 +333,14 @@ export function writeLidarBuilding(b, photo, W, image, dtm, dsmAt, facade) {
           [span[0], v(baseY)], [span[1], v(baseY)], [span[1], v(Math.max(top, yc))], [span[0], v(Math.max(top, ya))]);
         continue;
       }
+      if (info.isChurch && !narrow) {
+        // 教会の壁: 地面からの高さで窓の段がそろう（facades.js の CHURCH_TILE）
+        const s0 = (along - L) / CHURCH_TILE.w, s1 = along / CHURCH_TILE.w;
+        const v = (y) => (y - groundMed) / CHURCH_TILE.h;
+        W.church.quad([a[0], baseY, a[1]], [c[0], baseY, c[1]], [c[0], yc, c[1]], [a[0], ya, a[1]], nrm,
+          [s0, v(baseY)], [s1, v(baseY)], [s1, v(yc)], [s0, v(ya)], tint);
+        continue;
+      }
       if (info.isChurch || narrow) {
         W.plain.quad([a[0], baseY, a[1]], [c[0], baseY, c[1]], [c[0], yc, c[1]], [a[0], ya, a[1]], nrm,
           [u0 * 3.5, baseY / 4], [u1 * 3.5, baseY / 4], [u1 * 3.5, yc / 4], [u0 * 3.5, ya / 4], color);
@@ -356,6 +368,8 @@ export function writeLidarBuilding(b, photo, W, image, dtm, dsmAt, facade) {
     const C = [pts[t[i + 2]][0], hs[t[i + 2]], pts[t[i + 2]][1]];
     const ux = B[0] - A[0], uy = B[1] - A[1], uz = B[2] - A[2];
     const vx = C[0] - A[0], vy = C[1] - A[1], vz = C[2] - A[2];
+    // 鐘楼のモデルに置き換える所の屋根は作らない
+    if (towers.length && hiddenByTower(towers, (A[0] + B[0] + C[0]) / 3, (A[2] + B[2] + C[2]) / 3, Math.max(A[1], B[1], C[1]))) continue;
     let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
     const l = Math.hypot(nx, ny, nz) || 1;
     nx /= l; ny /= l; nz /= l;

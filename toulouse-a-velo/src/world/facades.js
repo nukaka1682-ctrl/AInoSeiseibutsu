@@ -755,3 +755,89 @@ export function makeCapitoleTexture() {
   t.anisotropy = 8;
   return t;
 }
+
+// ---- 教会の壁（サン・セルナンなど南仏のレンガの教会）----
+// 8 m × 16 m を 512 × 1024 px に描く（u = 壁に沿って 8 m、v = 地面から 16 m で繰り返す）。
+// 下は石の腰と白い石の縞、端に控え壁（石とレンガの交互積み）、中ほどに半円アーチの高窓、軒下に小さな窓の列
+export const CHURCH_TILE = { w: 8, h: 16 };
+export function makeChurchTexture() {
+  const PX = 64, WIDTH = CHURCH_TILE.w * PX, HEIGHT = CHURCH_TILE.h * PX;
+  const [c, ctx] = canvas(WIDTH, HEIGHT);
+  const rnd = mulberry32(1080);
+  const Y = (m) => HEIGHT - m * PX;
+  const BR = ['#c9785a', '#c27154', '#cf8263', '#b9694f', '#d08867', '#c47658'];
+  const STONE = '#e9e0cf', STONE_D = '#d4c8b2', DARK = '#2c2f33';
+  // レンガ
+  ctx.fillStyle = '#dcbca7';
+  ctx.fillRect(0, 0, WIDTH, HEIGHT);
+  for (let y = 0, row = 0; y < HEIGHT; y += 4, row++) {
+    for (let x = -26 + (row % 2 ? 13 : 0); x < WIDTH; x += 26) {
+      ctx.fillStyle = BR[Math.floor(rnd() * BR.length)];
+      ctx.fillRect(x, y, 25, 3);
+    }
+  }
+  // 腰石と白い石の縞
+  ctx.fillStyle = STONE_D;
+  ctx.fillRect(0, Y(0.8), WIDTH, 0.8 * PX);
+  for (const m of [1.5, 2.6, 3.7]) {
+    ctx.fillStyle = '#dfd4bf';
+    ctx.fillRect(0, Y(m + 0.15), WIDTH, 0.15 * PX);
+  }
+  // 控え壁（左右の端）: 少し濃いレンガで、張り出した影を付ける
+  for (const x0 of [0, WIDTH - 0.5 * PX]) {
+    ctx.fillStyle = 'rgba(70,30,20,0.16)';
+    ctx.fillRect(x0, 0, 0.5 * PX, HEIGHT);
+    ctx.fillStyle = 'rgba(0,0,0,0.12)';
+    ctx.fillRect(x0 === 0 ? 0.5 * PX - 3 : x0, 0, 3, HEIGHT);
+  }
+  // 半円アーチの高窓（石の縁取り）
+  const arched = (cx, w, y0, y1, ring) => {
+    const r = w / 2;
+    ctx.fillStyle = STONE;
+    ctx.beginPath();
+    ctx.moveTo(cx - r - ring, Y(y0));
+    ctx.lineTo(cx - r - ring, Y(y1 - r / PX));
+    ctx.arc(cx, Y(y1) + r, r + ring, Math.PI, 0);
+    ctx.lineTo(cx + r + ring, Y(y0));
+    ctx.fill();
+    ctx.fillStyle = DARK;
+    ctx.beginPath();
+    ctx.moveTo(cx - r, Y(y0));
+    ctx.lineTo(cx - r, Y(y1 - r / PX));
+    ctx.arc(cx, Y(y1) + r, r, Math.PI, 0);
+    ctx.lineTo(cx + r, Y(y0));
+    ctx.fill();
+    // 鉛の桟
+    ctx.strokeStyle = 'rgba(160,170,180,0.35)';
+    ctx.lineWidth = 1.5;
+    for (let m = y0 + 0.4; m < y1 - 0.4; m += 0.45) {
+      ctx.beginPath();
+      ctx.moveTo(cx - r, Y(m));
+      ctx.lineTo(cx + r, Y(m));
+      ctx.stroke();
+    }
+    ctx.beginPath();
+    ctx.moveTo(cx, Y(y0));
+    ctx.lineTo(cx, Y(y1) + r);
+    ctx.stroke();
+    ctx.fillStyle = STONE_D;
+    ctx.fillRect(cx - r - ring - 4, Y(y0) - 2, 2 * (r + ring) + 8, 8); // 窓台
+  };
+  arched(WIDTH / 2, 1.5 * PX, 5.6, 11.4, 14);
+  for (const cx of [WIDTH * 0.32, WIDTH * 0.68]) arched(cx, 0.55 * PX, 13.0, 14.6, 8);
+  // 軒の石の帯
+  ctx.fillStyle = STONE;
+  ctx.fillRect(0, Y(15.75), WIDTH, 0.3 * PX);
+  ctx.fillStyle = 'rgba(0,0,0,0.18)';
+  ctx.fillRect(0, Y(15.45), WIDTH, 3);
+  // 汚れ
+  for (let i = 0; i < 260; i++) {
+    ctx.fillStyle = `rgba(50,35,25,${0.02 + rnd() * 0.05})`;
+    ctx.fillRect(rnd() * WIDTH, rnd() * HEIGHT, 2 + rnd() * 5, 20 + rnd() * 80);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
+  return t;
+}

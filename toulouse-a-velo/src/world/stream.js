@@ -13,6 +13,7 @@ import { clampUnderwater, levelWater, median, writeBridge, writeLidarBuilding } 
 import { detectTrees } from './lidartrees.js';
 import { buildTrees } from './trees.js';
 import { findCapitoleFacade } from './landmarkfacades.js';
+import { findTowers, writeTower } from './towers.js';
 import { areaFrame, makeSurfaceAt } from './assemble.js';
 import { makeWaterTest } from './ground.js';
 import { CollisionWorld } from '../game/collision.js';
@@ -304,7 +305,7 @@ class TileStreamer {
     }
     this.ortho.addChunks(chunks);
     const photoW = new Map(chunks.map((c) => [c, new MeshWriter()]));
-    const walls = new Map(chunks.map((c) => [c, { upper: new MeshWriter(), ground: new MeshWriter(), plain: new MeshWriter(), capitole: new MeshWriter() }]));
+    const walls = new Map(chunks.map((c) => [c, { upper: new MeshWriter(), ground: new MeshWriter(), plain: new MeshWriter(), capitole: new MeshWriter(), tower: new MeshWriter(), church: new MeshWriter() }]));
 
     // 地形（建物の真下に隠れるマスは作らない）
     const bGrid = new Grid(30);
@@ -341,10 +342,12 @@ class TileStreamer {
     // 建物（キャピトルの正面には専用のテクスチャ）
     const facade = findCapitoleFacade({ areas: this.parsed.areas, buildings });
     const dsmAt = (x, z) => surfaceGrid.sample(x, z);
+    const towers = dsm ? findTowers(this.proj, buildings, dsm, groundGrid) : []; // 八角形の鐘楼は専用のモデル
+    for (const tw of towers) writeTower(tw, walls.get(chunkAt(tw.x, tw.z)).tower);
     for (let k = 0; k < buildings.length; k++) {
       const b = buildings[k];
       const c = home.get(b);
-      writeLidarBuilding(b, photoW.get(c), walls.get(c), c.image, groundGrid, dsmAt, facade);
+      writeLidarBuilding(b, photoW.get(c), walls.get(c), c.image, groundGrid, dsmAt, facade, towers);
       if (k % 40 === 39) {
         await pause();
         if (t.state !== 'loading') return this.abandon(t, chunks);
@@ -381,7 +384,7 @@ class TileStreamer {
         group.add(m);
       }
       const ws = walls.get(c);
-      for (const key of ['upper', 'ground', 'plain', 'capitole']) {
+      for (const key of ['upper', 'ground', 'plain', 'capitole', 'tower', 'church']) {
         if (ws[key].empty) continue;
         const m = new THREE.Mesh(ws[key].toGeometry(), this.materials[key]);
         m.castShadow = m.receiveShadow = true;
