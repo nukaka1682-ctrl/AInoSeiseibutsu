@@ -9,6 +9,8 @@ import { makeTextures } from './world/textures.js';
 import { createBuildingMaterials } from './world/buildings.js';
 import { ORDER, createGroundMaterials } from './world/ground.js';
 import { areaFrame, assembleWorld } from './world/assemble.js';
+import { assembleStreamWorld } from './world/stream.js';
+import { loadBaseData, loadCoarseElevation } from './data/tiles.js';
 import { Bike } from './game/bike.js';
 import { CAMERA_LABELS, CameraRig } from './game/camera.js';
 import { Input } from './game/input.js';
@@ -189,6 +191,10 @@ async function startGame() {
   disposeWorld();
   try {
     const bbox = bboxAround(area.lat, area.lon, area.radius);
+    if (area.stream) {
+      await startStream(bbox);
+      return;
+    }
     const data = await loadAreaData({
       bbox,
       presetId: area.custom ? null : state.presetId,
@@ -221,9 +227,36 @@ async function startGame() {
   }
 }
 
+// 広いエリア（トゥールーズ全体）: 道路などの基本データと粗い高さを読み込み、スタート地点の周りのタイルを組み立ててから始める
+async function startStream(bbox) {
+  const forceNetwork = $('opt-refresh').checked;
+  const base = await loadBaseData({ bbox, presetId: state.presetId, forceNetwork, onStatus: (t) => setLoading(t, 0.08) });
+  setLoading('IGN LiDAR HD（エリア全体の粗い表面・地形モデル）を取得中…', 0.2);
+  const coarse = await loadCoarseElevation({
+    areaBbox: bbox,
+    rect: areaFrame(bbox).rect,
+    onStatus: (p) => setLoading(`IGN LiDAR HD（エリア全体の粗い表面・地形モデル）を取得中… ${Math.round(p * 100)}%`, 0.2 + p * 0.1),
+  });
+  const world = await assembleStreamWorld({
+    base, coarse, bbox, presetId: state.presetId, buildingMats, groundMats,
+    progress: (t, p) => setLoading(`地図データ: IGN BD TOPO（${base.source}）\n${t}`, 0.3 + p * 0.3),
+  });
+  state.world = finishWorld(world);
+  world.stream.onTileReady = (t, buildings) => world.map.addBuildings(buildings); // 地図にも建物を描き足す
+  if (!$('opt-real').checked) state.lidarNote = 'トゥールーズ全体は本物そっくりモード（LiDAR と航空写真）で表示します';
+  const sp = spawnPoint(world);
+  await world.stream.ensure(sp.x, sp.z, 320, (done, total) =>
+    setLoading(`スタート地点の周りの街並みを組み立て中… ${done}/${total}\n（建物・屋根・木は LiDAR の実測、地面と屋根は航空写真）`, 0.6 + (0.4 * done) / Math.max(1, total)));
+  beginPlay();
+}
+
 // ---------------------------------------------------------------- 3D 都市の構築
 async function buildWorld(data, bbox, progress) {
-  const world = await assembleWorld(data, bbox, { buildingMats, groundMats, progress, pause: nextFrame });
+  return finishWorld(await assembleWorld(data, bbox, { buildingMats, groundMats, progress, pause: nextFrame }));
+}
+
+// ミニマップ・目的地の光の柱・ルートの帯を加えて、シーンに置く
+function finishWorld(world) {
   for (const lm of world.landmarks) lm.discovered = state.discovered.has(lm.id);
   world.map = new MapRenderer(world.parsed, world.rect);
 
@@ -318,6 +351,10 @@ function beginPlay() {
   if (w.stats.fallbackReason) toast('OpenStreetMap のサーバーにつながらなかったため、IGN（フランス国土地理院）の地図で街を作りました', 6);
   const st = w.stats.buildings;
   const pct = (n) => Math.round(((n || 0) / Math.max(1, st.total)) * 100);
+  if (w.stream) {
+    toast(`<b>Bienvenue à Toulouse !</b><br>ポン・ヌフから半径 5 km（${w.landmarks.length} か所の名所）。走る先の街並みを LiDAR の実測と航空写真で組み立てながら進みます<br>W でこぎ出そう。M で地図、C でカメラ切替。`, 8);
+    return;
+  }
   toast(w.real
     ? `<b>Bienvenue à Toulouse !</b><br>建物 ${st.total.toLocaleString()} 棟・木 ${w.stats.trees.toLocaleString()} 本。屋根の形・地形・木は LiDAR の実測、地面と屋根は航空写真です<br>W でこぎ出そう。M で地図、C でカメラ切替。`
     : `<b>Bienvenue à Toulouse !</b><br>建物 ${st.total.toLocaleString()} 棟（高さ: IGN 実測 ${pct(st.IGN)}% / OSM ${pct(st.OSM) + pct(st['OSM（階数）'])}% / 推定 ${pct(st['推定'])}%）<br>W でこぎ出そう。M で地図、C でカメラ切替。`, 7);
@@ -479,11 +516,22 @@ function update(dt, forced) {
   const w = state.world;
   const bike = state.bike;
   const ctl = forced || input.read(dt);
-  bike.update(dt, ctl, {
-    collision: w.collision,
-    surfaceAt: w.surfaceAt,
-    groundAt: w.groundAt || null,
-  });
+  // 広いエリア: 自転車の周りのタイルを読み込む。いるタイルがまだなら止めて待つ
+  let holding = false;
+  if (w.stream) {
+    w.stream.update(bike.x, bike.z);
+    holding = !w.stream.readyAt(bike.x, bike.z);
+    if (holding && !state.holdNotice) toast('この先の街並みを読み込み中…', 2, true);
+    state.holdNotice = holding;
+  }
+  if (holding) bike.speed = 0;
+  else {
+    bike.update(dt, ctl, {
+      collision: w.collision,
+      surfaceAt: w.surfaceAt,
+      groundAt: w.groundAt || null,
+    });
+  }
   state.playTime += dt;
 
   for (const ev of bike.events.splice(0)) {
@@ -602,7 +650,12 @@ function togglePause(force) {
   const pause = force ?? state.phase === 'play';
   state.phase = pause ? 'paused' : 'play';
   input.enabled = !pause;
-  if (pause) {
+  if (pause && state.world.stream) {
+    const s = state.world.stats, t = state.world.stream.totals;
+    $('pause-info').innerHTML = `<p>トゥールーズ全体（${s.tiles} タイル）のうち、自転車の周りの ${state.world.stream.readyCount} タイルを表示中<br>
+      建物 ${t.buildings.toLocaleString()} 棟 · 木 ${t.trees.toLocaleString()} 本（LiDAR の実測）· 道 ${s.roads.toLocaleString()} 本<br>
+      地図: IGN BD TOPO（${s.source}）· 高さ: IGN LiDAR HD · 航空写真: IGN BD ORTHO</p>`;
+  } else if (pause) {
     const s = state.world.stats;
     const b = s.buildings;
     $('pause-info').innerHTML = `<p>建物 ${b.total.toLocaleString()} 棟 · 道 ${s.roads.toLocaleString()} 本 · 木 ${s.trees.toLocaleString()} 本<br>

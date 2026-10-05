@@ -20,25 +20,41 @@ export function orthoUrl(proj, b, size) {
 }
 
 // 区画: bounds = 区画の正方形、image = 写真の範囲（区画に属する建物・橋がはみ出す分を含む）
+// 広いエリアでは、タイルの読み込み・破棄に合わせて区画を足し引きする（addChunks / removeChunks）
 export class OrthoManager {
-  constructor(proj, rect, chunks, { maxAnisotropy = 8 } = {}) {
+  constructor(proj, rect, chunks = [], { maxAnisotropy = 8 } = {}) {
     this.proj = proj;
     this.rect = rect;
-    this.chunks = chunks;
+    this.chunks = [];
     this.loader = new THREE.TextureLoader();
     this.loader.setCrossOrigin('anonymous');
     this.anisotropy = maxAnisotropy;
     this.overview = null;
-    this.queue = [];
     this.active = 0;
     this.timer = 0;
     this.failures = 0;
-    const detail = typeof document !== 'undefined' ? detailTexture() : null; // Node（テスト）では作らない
+    this.detail = typeof document !== 'undefined' ? detailTexture() : null; // Node（テスト）では作らない
+    this.addChunks(chunks);
+  }
+
+  addChunks(chunks) {
     for (const c of chunks) {
       c.material = new THREE.MeshBasicMaterial({ color: '#9a9488', toneMapped: false });
-      if (detail) addDetail(c.material, detail);
+      if (this.detail) addDetail(c.material, this.detail);
       c.level = 0;
       c.want = 0;
+      if (this.overview) this.applyOverview(c);
+      this.chunks.push(c);
+    }
+  }
+
+  removeChunks(chunks) {
+    const gone = new Set(chunks);
+    this.chunks = this.chunks.filter((c) => !gone.has(c));
+    for (const c of chunks) {
+      c.removed = true;
+      c.material.map?.dispose();
+      c.material.dispose();
     }
   }
 
@@ -50,6 +66,7 @@ export class OrthoManager {
     tex.anisotropy = this.anisotropy;
     this.overview = tex;
     for (const c of this.chunks) this.applyOverview(c);
+    return tex;
   }
 
   // 区画の UV（区画の写真範囲で 0〜1）を全体写真の範囲に変換して貼る
@@ -104,7 +121,7 @@ export class OrthoManager {
         tex.anisotropy = this.anisotropy;
         c.loading = false;
         this.active--;
-        if (c.want >= level || c.level > level) this.setMap(c, tex, level);
+        if (!c.removed && (c.want >= level || c.level > level)) this.setMap(c, tex, level);
         else tex.dispose();
       },
       undefined,

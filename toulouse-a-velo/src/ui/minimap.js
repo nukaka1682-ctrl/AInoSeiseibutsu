@@ -59,14 +59,7 @@ export class MapRenderer {
       poly(a);
       ctx.fill('evenodd');
     }
-    ctx.fillStyle = COLORS.building;
-    ctx.strokeStyle = COLORS.buildingStroke;
-    ctx.lineWidth = 0.5;
-    for (const b of parsed.buildings) {
-      poly(b);
-      ctx.fill('evenodd');
-      ctx.stroke();
-    }
+    this.addBuildings(parsed.buildings);
     const line = (pts) => {
       ctx.beginPath();
       pts.forEach(([x, z], i) => (i ? ctx.lineTo(this.px(x), this.pz(z)) : ctx.moveTo(this.px(x), this.pz(z))));
@@ -102,6 +95,23 @@ export class MapRenderer {
     ctx.setLineDash([]);
   }
 }
+
+// 建物を描き足す（広いエリアでは、タイルを読み込むたびに）
+MapRenderer.prototype.addBuildings = function (buildings) {
+  const ctx = this.canvas.getContext('2d');
+  ctx.fillStyle = COLORS.building;
+  ctx.strokeStyle = COLORS.buildingStroke;
+  ctx.lineWidth = 0.5;
+  for (const b of buildings) {
+    ctx.beginPath();
+    for (const ring of [b.outer, ...(b.holes || [])]) {
+      ring.forEach(([x, z], i) => (i ? ctx.lineTo(this.px(x), this.pz(z)) : ctx.moveTo(this.px(x), this.pz(z))));
+      ctx.closePath();
+    }
+    ctx.fill('evenodd');
+    ctx.stroke();
+  }
+};
 
 // 画面右上の円形ミニマップ
 export function drawMinimap(canvas, map, view) {

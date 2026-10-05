@@ -2,7 +2,8 @@
 // 建物の正面（窓のある壁）は facades.js で色付きで描く。それ以外は色を頂点カラーで付けるので、ほぼ白で描いておく。
 import * as THREE from 'three';
 import { mulberry32 } from '../geo.js';
-import { makeCapitoleTexture, makeFacadeAtlases } from './facades.js';
+import { makeCapitoleTexture, makeChurchTexture, makeFacadeAtlases } from './facades.js';
+import { makeTowerTexture } from './towers.js';
 
 function canvas(w, h) {
   const c = document.createElement('canvas');
@@ -133,6 +134,8 @@ export function makeTextures() {
     upper: facades.upper,
     shopfront: facades.ground,
     capitole: makeCapitoleTexture(),
+    tower: makeTowerTexture(),
+    church: makeChurchTexture(),
     plain: makePlainWallTexture(),
     roof: makeRoofTileTexture(),
     flatRoof: makeNoiseTexture({ base: '#ffffff', spots: ['#777', '#999', '#555'], seed: 4, count: 3000, alpha: 0.3 }),

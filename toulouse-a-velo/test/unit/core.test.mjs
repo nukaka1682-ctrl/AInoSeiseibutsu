@@ -274,3 +274,28 @@ test('LiDAR: 樹冠から木を見つける（建物の上は除く）', () => {
   assert.ok(trees[0].h > 10 && trees[0].h < 12.5, `高さ ${trees[0].h}`);
   assert.ok(trees[0].r > 2 && trees[0].r < 6, `半径 ${trees[0].r}`);
 });
+
+// ---- 広いエリアのタイル ----
+import { boundsToBbox, featureTile, tileAt, tileBounds, tileLayout } from '../../src/data/tiles.js';
+import { areaFrame } from '../../src/world/assemble.js';
+
+test('タイル: 並び・位置・緯度経度・建物の割り当て', () => {
+  const bbox = bboxAround(43.5994, 1.4395, 5000);
+  const { proj, rect } = areaFrame(bbox);
+  const L = tileLayout(rect);
+  assert.ok(L.cols >= 20 && L.cols <= 21 && L.rows >= 20 && L.rows <= 21, `${L.cols}×${L.rows}`);
+  const [i, j] = tileAt(L, 0, 0);
+  const b = tileBounds(L, i, j);
+  assert.ok(b.minX <= 0 && b.maxX > 0 && b.minZ <= 0 && b.maxZ > 0);
+  assert.equal(tileAt(L, rect.maxX + 1, 0), null);
+  // タイルの範囲 → 緯度経度 → ローカル座標に戻る
+  const bb = boundsToBbox(bbox, rect, b);
+  const [x0, z0] = proj.project(bb.n, bb.w);
+  assert.ok(Math.abs(x0 - b.minX) < 0.5 && Math.abs(z0 - b.minZ) < 0.5);
+  // 建物（GeoJSON、[lon, lat] でも [lat, lon] でも）を最初の点のタイルに割り当てる
+  const [lat, lon] = proj.unproject(10, 10);
+  const lonLat = { geometry: { type: 'Polygon', coordinates: [[[lon, lat], [lon + 1e-4, lat], [lon, lat + 1e-4]]] } };
+  const latLon = { geometry: { type: 'Polygon', coordinates: [[[lat, lon], [lat, lon + 1e-4], [lat + 1e-4, lon]]] } };
+  assert.deepEqual(featureTile(lonLat, L, bbox), tileAt(L, 10, 10));
+  assert.deepEqual(featureTile(latLon, L, bbox), tileAt(L, 10, 10));
+});

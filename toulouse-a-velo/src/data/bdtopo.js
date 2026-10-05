@@ -32,10 +32,10 @@ export function normalizeCoords(coords, bbox) {
 }
 
 // レイヤーの地物をページングしながらすべて取得する
-export async function fetchWfsLayer(layer, bbox, { propertyNames = null, onPage, timeoutMs = 90000 } = {}) {
+export async function fetchWfsLayer(layer, bbox, { propertyNames = null, onPage, timeoutMs = 90000, maxPages = MAX_PAGES } = {}) {
   let props = propertyNames;
   const all = [];
-  for (let page = 0; page < MAX_PAGES; page++) {
+  for (let page = 0; page < maxPages; page++) {
     let fc;
     for (let attempt = 0; ; attempt++) {
       const ctrl = new AbortController();

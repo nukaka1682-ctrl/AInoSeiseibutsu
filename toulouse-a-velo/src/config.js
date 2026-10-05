@@ -3,19 +3,20 @@
 // 見つかればその実際の位置に置き換える（src/game/landmarks.js）。
 
 export const AREA_PRESETS = {
+  toulouse: {
+    label: 'トゥールーズ全体（標準）',
+    description: 'ポン・ヌフを中心に半径 5 km。旧市街からパーパン、サン・シプリアン、ミニム、ランギュイユまで。近くの街並みから順に読み込みます（本物そっくりモード）',
+    lat: 43.5994,
+    lon: 1.4395,
+    radius: 5000,
+    stream: true, // タイルに分けて、自転車の周りだけ詳しく作る（world/stream.js）
+  },
   centre: {
-    label: '旧市街（標準）',
-    description: 'キャピトル広場を中心に半径 1.2 km。ガロンヌ川・運河・主な名所を含む',
+    label: '旧市街',
+    description: 'キャピトル広場を中心に半径 1.2 km をまとめて読み込む。地図から生成する見た目も選べます',
     lat: 43.6020,
     lon: 1.4430,
     radius: 1200,
-  },
-  large: {
-    label: '広域（重い）',
-    description: '半径 1.8 km。読み込みに時間がかかり、メモリも多く使います',
-    lat: 43.6020,
-    lon: 1.4430,
-    radius: 1800,
   },
   light: {
     label: '軽量',
@@ -26,7 +27,7 @@ export const AREA_PRESETS = {
   },
 };
 
-export const DEFAULT_AREA = 'centre';
+export const DEFAULT_AREA = 'toulouse';
 
 // 地図データ形式のバージョン（変えると同梱データ・キャッシュが無効になる）
 export const DATA_VERSION = 1;
@@ -176,6 +177,87 @@ export const LANDMARKS = [
     lat: 43.60800, lon: 1.45330,
     match: /^Canal du Midi$/i,
     text: '17世紀にピエール＝ポール・リケが建設した、大西洋と地中海を結ぶ水路の一部。世界遺産。',
+  },
+  // ---- ここから下は「トゥールーズ全体（半径 5 km）」のエリアで出てくる名所 ----
+  {
+    id: 'la-grave',
+    name: 'Hôpital de la Grave',
+    ja: 'ラ・グラーヴ病院',
+    lat: 43.60022, lon: 1.43198,
+    match: /^H[ôo]pital de la Grave$/i,
+    text: 'ガロンヌ川左岸の旧救護院。サン＝ジョゼフ礼拝堂の大きなドームが、川の向こうからもよく見える。',
+  },
+  {
+    id: 'abattoirs',
+    name: 'Les Abattoirs',
+    ja: 'レ・ザバトワール（美術館）',
+    lat: 43.60093, lon: 1.42836,
+    match: /^((Les )?Abattoirs|Place des Abattoirs)$/i,
+    text: '旧食肉処理場のレンガ建築を使った近現代美術館。裏はガロンヌ川沿いの庭園。',
+  },
+  {
+    id: 'bazacle',
+    name: 'Le Bazacle',
+    ja: 'バザクル',
+    lat: 43.60459, lon: 1.43236,
+    match: /^(Espaces E[Dd][Ff] )?Bazacle$/i,
+    text: 'ガロンヌ川の堰と、中世の水車から続く水力発電所。川の流れを間近に見られる。',
+  },
+  {
+    id: 'jardin-japonais',
+    name: 'Jardin Japonais',
+    ja: '日本庭園',
+    lat: 43.61261, lon: 1.43205,
+    match: /^Jardin Japonais/i,
+    text: 'コンパン＝カファレリ公園の中の日本庭園。池と赤い太鼓橋、茶室がある。',
+  },
+  {
+    id: 'ponts-jumeaux',
+    name: 'Les Ponts-Jumeaux',
+    ja: 'ポン・ジュモー（運河の合流点）',
+    lat: 43.61060, lon: 1.41857,
+    match: /^Les Ponts[- ]Jumeaux$/i,
+    text: 'ミディ運河・ブリエンヌ運河・ガロンヌ側運河の 3 つの運河が出会う所。',
+  },
+  {
+    id: 'ernest-wallon',
+    name: 'Stade Ernest-Wallon',
+    ja: 'エルネスト・ワロン競技場',
+    lat: 43.62188, lon: 1.41562,
+    match: /^Stade Ernest[- ]Wallon$/i,
+    text: 'ラグビーの強豪スタッド・トゥールーザンの本拠地。',
+  },
+  {
+    id: 'purpan',
+    name: 'Hôpital Purpan',
+    ja: 'パーパン病院',
+    lat: 43.61032, lon: 1.40122,
+    match: /^H[ôo]pital Purpan$/i,
+    text: 'トゥールーズ大学病院（CHU）の大きな病院。市の西、パーパン地区にある。',
+  },
+  {
+    id: 'amphi-purpan',
+    name: 'Amphithéâtre romain de Purpan',
+    ja: 'パーパンのローマ円形闘技場',
+    lat: 43.61483, lon: 1.39771,
+    match: /^Amphith[ée][âa]tre Romain de Purpan$/i,
+    text: '1 世紀ごろに造られたローマ時代の円形闘技場の遺跡。古代都市トロサ（トゥールーズ）の郊外にあった。',
+  },
+  {
+    id: 'stadium',
+    name: 'Stadium de Toulouse',
+    ja: 'スタディアム',
+    lat: 43.58413, lon: 1.43423,
+    match: /^Stadium( de Toulouse)?$/i,
+    text: 'ガロンヌ川の中州（ラミエ島）にあるスタジアム。サッカーのトゥールーズ FC の本拠地。',
+  },
+  {
+    id: 'cite-espace',
+    name: "Cité de l'Espace",
+    ja: 'シテ・ド・レスパス（宇宙公園）',
+    lat: 43.58670, lon: 1.49324,
+    match: /^Cit[ée] de l.Espace$/i,
+    text: '宇宙のテーマパーク。アリアン 5 ロケットの実物大の模型が立っている。',
   },
 ];
 

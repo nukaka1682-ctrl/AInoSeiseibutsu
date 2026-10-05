@@ -112,24 +112,7 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
     if (!roadnet.onRoad(x, z, 0.3)) collision.addCircle(x, z, 0.3);
   }
 
-  // 路面の種類（転がり抵抗用）
-  const greenGrid = new Grid(40);
-  const greens = parsed.areas.filter((a) => a.type === 'grass' || a.type === 'forest' || a.type === 'pitch');
-  greens.forEach((a, i) => greenGrid.insertBounds(a.bounds.minX, a.bounds.minZ, a.bounds.maxX, a.bounds.maxZ, i));
-  const surfaceAt = (x, z) => {
-    const s = roadnet.nearestSegment(x, z, roadnet.maxHalfWidth + 0.5);
-    if (s && Math.sqrt(s.d2) < s.seg.road.width / 2 + 0.3) {
-      const r = s.seg.road;
-      if (/^(gravel|fine_gravel|compacted|dirt|ground|earth|grass|sand|unpaved)$/.test(r.surface)) return 'gravel';
-      if (r.type === 'pedestrian' || r.type === 'living_street' || /^(paving_stones|sett|cobblestone)$/.test(r.surface)) return 'paving';
-      return 'road';
-    }
-    let g = false;
-    greenGrid.queryPoint(x, z, 0, (i) => {
-      if (!g && pointInPolygon(x, z, greens[i])) g = true;
-    });
-    return g ? 'grass' : 'paving';
-  };
+  const surfaceAt = makeSurfaceAt(parsed, roadnet);
 
   progress('名所を探しています…', 0.95);
   await pause();
@@ -152,6 +135,27 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
       lidar: !!real,
       triangles: real?.stats.triangles,
     },
+  };
+}
+
+// 路面の種類（転がり抵抗用）
+export function makeSurfaceAt(parsed, roadnet) {
+  const greenGrid = new Grid(40);
+  const greens = parsed.areas.filter((a) => a.type === 'grass' || a.type === 'forest' || a.type === 'pitch');
+  greens.forEach((a, i) => greenGrid.insertBounds(a.bounds.minX, a.bounds.minZ, a.bounds.maxX, a.bounds.maxZ, i));
+  return (x, z) => {
+    const s = roadnet.nearestSegment(x, z, roadnet.maxHalfWidth + 0.5);
+    if (s && Math.sqrt(s.d2) < s.seg.road.width / 2 + 0.3) {
+      const r = s.seg.road;
+      if (/^(gravel|fine_gravel|compacted|dirt|ground|earth|grass|sand|unpaved)$/.test(r.surface)) return 'gravel';
+      if (r.type === 'pedestrian' || r.type === 'living_street' || /^(paving_stones|sett|cobblestone)$/.test(r.surface)) return 'paving';
+      return 'road';
+    }
+    let g = false;
+    greenGrid.queryPoint(x, z, 0, (i) => {
+      if (!g && pointInPolygon(x, z, greens[i])) g = true;
+    });
+    return g ? 'grass' : 'paving';
   };
 }
 
