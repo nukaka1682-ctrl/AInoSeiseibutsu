@@ -2,18 +2,16 @@
 // - 基本データ: 道路・水域・緑地・名所などはエリア全体を最初に 1 回だけ取得（ナビ・地図・通りの名前に使う）
 // - 建物: 500 m 四方のタイルごと。public/data/<エリア>-tiles/<i>_<j>.json（scripts/fetch-data.mjs で作成）を
 //   優先し、なければ IGN の WFS から取得する
-// - LiDAR: タイルごと。エリア全体に共通の格子（1 m / 2 m）の一部を切り出すので、隣のタイルと高さがぴったり合う
-// - 粗い高さ（10 m 格子）: エリア全体。遠景の街並みと、タイルを読み込む前の地面の高さに使う
+// - 塀と木: タイルごと。地籍の敷地の境界と LiDAR から見つけたもの（data/walls.js）を同じファイルに入れておく
+// - 隣のタイルの、境から CONTEXT m 以内の建物（ctx）: 隣と接する壁（窓のない境界の壁）を見分けるのに使う
 import { fetchWfsLayer, normalizeCoords } from './bdtopo.js';
 import { IGN_LAYERS, fetchIgnArea, ignToOsm } from './ign.js';
-import { LIDAR_LAYERS, fetchElevation } from './lidar.js';
+import { fetchSiteFeatures, grow } from './walls.js';
 import { cacheGet, cachePut } from './cache.js';
 import { DATA_VERSION } from '../config.js';
 
 export const TILE_SIZE = 500; // m
-export const DSM_RES = 1; // タイルの表面モデルの格子（m）
-export const DTM_RES = 2;
-export const COARSE_RES = 10;
+export const CONTEXT = 30; // 隣のタイルの建物を含める幅（m）
 
 export function tileLayout(rect) {
   return {
@@ -93,65 +91,49 @@ export function featureTile(feature, layout, areaBbox) {
   return tileAt(layout, x, z);
 }
 
-export async function loadTileBuildings({ presetId, areaBbox, layout, i, j }) {
-  const key = `tile-b:v${DATA_VERSION}:${presetId}:${areaBbox.s},${areaBbox.w}:${i}_${j}`;
-  let features = null;
+// 建物の地物を、タイル自身のもの（own）と、隣のタイルのうち境から CONTEXT m 以内のもの（ctx）に分ける
+export function splitTileFeatures(features, layout, areaBbox, i, j) {
+  const own = [], ctx = [];
+  const tb = boundsToBbox(areaBbox, layout.rect, tileBounds(layout, i, j));
+  const near = grow(tb, CONTEXT);
+  for (const f of features) {
+    const t = featureTile(f, layout, areaBbox);
+    if (t && t[0] === i && t[1] === j) {
+      own.push(f);
+      continue;
+    }
+    const g = f.geometry;
+    const rings = g?.type === 'MultiPolygon' ? g.coordinates.flat() : g?.coordinates || [];
+    const hit = rings.some((ring) => normalizeCoords(ring.map((c) => c.slice(0, 2)), areaBbox).some(([lon, lat]) => lon > near.w && lon < near.e && lat > near.s && lat < near.n));
+    if (hit) ctx.push(f);
+  }
+  return { own, ctx };
+}
+
+// タイルのデータ: 建物（own・ctx）と塀・木。同梱ファイル → キャッシュ → IGN から取得して作る
+export async function loadTileData({ presetId, areaBbox, layout, i, j }) {
+  const key = `tile:v${DATA_VERSION}:${presetId}:${areaBbox.s},${areaBbox.w}:${i}_${j}`;
+  let data = null;
   const baked = await loadBakedJson(`${presetId}-tiles/${i}_${j}.json`);
-  if (baked?.version === DATA_VERSION) features = baked.features;
-  if (!features) {
-    const cached = await cacheGet(key);
-    if (cached) features = cached;
+  if (baked?.version === DATA_VERSION) data = baked;
+  if (!data) data = await cacheGet(key);
+  if (!data) {
+    const tb = boundsToBbox(areaBbox, layout.rect, tileBounds(layout, i, j));
+    const all = await fetchWfsLayer('batiment', grow(tb, CONTEXT), { propertyNames: IGN_LAYERS.batiment });
+    const { own, ctx } = splitTileFeatures(all, layout, areaBbox, i, j);
+    let site = { walls: [], trees: [] };
+    try {
+      site = await fetchSiteFeatures(tb, all);
+    } catch (err) {
+      console.warn(`タイル ${i}_${j} の塀と木を見つけられませんでした`, err);
+    }
+    data = { version: DATA_VERSION, features: own, ctx, ...site };
+    cachePut(key, data);
   }
-  if (!features) {
-    const bbox = boundsToBbox(areaBbox, layout.rect, tileBounds(layout, i, j));
-    const all = await fetchWfsLayer('batiment', bbox, { propertyNames: IGN_LAYERS.batiment });
-    features = all.filter((f) => {
-      const t = featureTile(f, layout, areaBbox);
-      return t && t[0] === i && t[1] === j;
-    });
-    cachePut(key, features);
-  }
-  return ignToOsm({ batiment: features }, areaBbox);
-}
-
-// ---- LiDAR（エリア共通の格子の一部を切り出す）----
-// res m の格子でエリア全体を覆ったとき、範囲 b を含む画素の窓を取得する。戻り値の rect はその窓のローカル座標
-export async function fetchElevationWindow(layer, areaBbox, rect, b, res) {
-  const cols = Math.round((rect.maxX - rect.minX) / res), rows = Math.round((rect.maxZ - rect.minZ) / res);
-  const dx = (rect.maxX - rect.minX) / cols, dz = (rect.maxZ - rect.minZ) / rows;
-  const c0 = Math.max(0, Math.floor((b.minX - rect.minX) / dx)), c1 = Math.min(cols, Math.ceil((b.maxX - rect.minX) / dx));
-  const r0 = Math.max(0, Math.floor((b.minZ - rect.minZ) / dz)), r1 = Math.min(rows, Math.ceil((b.maxZ - rect.minZ) / dz));
-  const win = { minX: rect.minX + c0 * dx, maxX: rect.minX + c1 * dx, minZ: rect.minZ + r0 * dz, maxZ: rect.minZ + r1 * dz };
-  const grid = await fetchElevation(layer, boundsToBbox(areaBbox, rect, win), c1 - c0, r1 - r0);
-  return { ...grid, rect: win };
-}
-
-export async function loadTileLidar({ areaBbox, rect, bounds, key }) {
-  const cacheKey = `lidar-tile:v1:${areaBbox.s},${areaBbox.w}:${key}`;
-  const cached = await cacheGet(cacheKey);
-  if (cached) return cached;
-  const [dsm, dtm] = await Promise.all([
-    fetchElevationWindow(LIDAR_LAYERS.dsm, areaBbox, rect, bounds, DSM_RES),
-    fetchElevationWindow(LIDAR_LAYERS.dtm, areaBbox, rect, bounds, DTM_RES),
-  ]);
-  const lidar = { dsm, dtm };
-  cachePut(cacheKey, lidar);
-  return lidar;
-}
-
-// エリア全体の粗い表面・地形モデル（10 m 格子）
-export async function loadCoarseElevation({ areaBbox, rect, onStatus }) {
-  const cacheKey = `coarse:v1:${areaBbox.s},${areaBbox.w},${areaBbox.n},${areaBbox.e}`;
-  const cached = await cacheGet(cacheKey);
-  if (cached) return cached;
-  const cols = Math.round((rect.maxX - rect.minX) / COARSE_RES), rows = Math.round((rect.maxZ - rect.minZ) / COARSE_RES);
-  let done = 0;
-  const step = () => onStatus?.(++done / 2);
-  const [dsm, dtm] = await Promise.all([
-    fetchElevation(LIDAR_LAYERS.dsm, areaBbox, cols, rows).then((g) => (step(), g)),
-    fetchElevation(LIDAR_LAYERS.dtm, areaBbox, cols, rows).then((g) => (step(), g)),
-  ]);
-  const coarse = { dsm: { ...dsm, rect }, dtm: { ...dtm, rect } };
-  cachePut(cacheKey, coarse);
-  return coarse;
+  return {
+    osm: ignToOsm({ batiment: data.features }, areaBbox),
+    ctx: ignToOsm({ batiment: data.ctx || [] }, areaBbox),
+    walls: data.walls || [],
+    trees: data.trees || [],
+  };
 }

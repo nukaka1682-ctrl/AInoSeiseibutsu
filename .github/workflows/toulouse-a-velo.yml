@@ -35,11 +35,12 @@ jobs:
       - run: npm ci
       - run: npm test
       # 地図データを事前に取得して同梱する（失敗してもゲームはブラウザ側で取得するので続行）
-      # トゥールーズ全体（半径 5 km）は、道路などの基本データと 500 m ごとの建物のタイル（約 80 MB）
+      # トゥールーズ全体（半径 5 km）は、道路などの基本データと 500 m ごとの建物・塀・木のタイル（約 115 MB）
+      # 塀と木は IGN の地籍と LiDAR HD から見つける
       - name: Fetch OpenStreetMap + IGN data
         run: npm run fetch-data -- all
         continue-on-error: true
-        timeout-minutes: 30
+        timeout-minutes: 50
       - run: npm run build
       - name: Assemble site
         run: |

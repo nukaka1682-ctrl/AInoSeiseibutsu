@@ -2,7 +2,8 @@
 // 300 m 四方のチャンクごとにまとめて描画コールを減らし、視錐台カリングを効かせる。
 import * as THREE from 'three';
 import { MeshWriter, writeFlatPolygon } from './meshwriter.js';
-import { centroid, hash01, isConvex, signedArea } from '../geo.js';
+import { Grid, centroid, hash01, isConvex, signedArea } from '../geo.js';
+import { writeTower } from './towers.js';
 import { CHURCH_TILE, STYLE, useFacadeAtlas } from './facades.js';
 import { facadeSpan } from './landmarkfacades.js';
 
@@ -57,6 +58,7 @@ const STYLE_MIX = {
   other: [[STYLE.brickStone, 0.2], [STYLE.brickShutters, 0.22], [STYLE.ochre, 0.12], [STYLE.taupe, 0.11], [STYLE.salmon, 0.12], [STYLE.cream, 0.1], [STYLE.rose, 0.13]],
 };
 export function facadeStyle(b) {
+  if (b.style != null) return b.style; // 決まった様式（landmarkfacades.js の歴史的な建物）
   const mat = b.tags['building:material'];
   const mix = STYLE_MIX[mat === 'sandstone' || mat === 'limestone' ? 'stone' : mat === 'plaster' || mat === 'render' ? 'other' : mat] || STYLE_MIX.other;
   let r = hash01(b.id, 21);
@@ -81,7 +83,65 @@ function outwardSign(ring) {
   return signedArea(ring) > 0 ? 1 : -1;
 }
 
-function writeWalls(W, ring, sign, b, plainColor, facade) {
+// 隣の建物と接する壁（境界の壁）を見つけるための索引。
+// 壁の辺ごとに、ほぼ同じ線上（0.8 m 以内・平行）にある別の建物の辺と、その建物の高さを返す
+export function makePartyIndex(list) {
+  const grid = new Grid(20);
+  const segs = [];
+  for (const b of list) {
+    for (const ring of [b.outer, ...b.holes]) {
+      for (let i = 0; i < ring.length; i++) {
+        const p = ring[i], q = ring[(i + 1) % ring.length];
+        grid.insertSegment(p[0], p[1], q[0], q[1], segs.length);
+        segs.push({ p, q, b });
+      }
+    }
+  }
+  const TOL = 0.8;
+  // 辺 a→c のうち、隣の建物に接している区間 [t0, t1]（m）と、そこを隠す高さ
+  return (b, a, c) => {
+    const L = Math.hypot(c[0] - a[0], c[1] - a[1]);
+    if (L < 0.3) return [];
+    const ux = (c[0] - a[0]) / L, uz = (c[1] - a[1]) / L;
+    const out = [];
+    const seen = new Set();
+    grid.query(Math.min(a[0], c[0]) - TOL, Math.min(a[1], c[1]) - TOL, Math.max(a[0], c[0]) + TOL, Math.max(a[1], c[1]) + TOL, (k) => {
+      if (seen.has(k)) return;
+      seen.add(k);
+      const s = segs[k];
+      if (s.b === b || s.b.info.minHeight > 1 || s.b.info.kind === 'roof') return;
+      const sl = Math.hypot(s.q[0] - s.p[0], s.q[1] - s.p[1]);
+      if (sl < 0.3) return;
+      if (Math.abs(((s.q[0] - s.p[0]) * ux + (s.q[1] - s.p[1]) * uz) / sl) < 0.97) return;
+      const d = (pt) => Math.abs((pt[0] - a[0]) * -uz + (pt[1] - a[1]) * ux);
+      if (d(s.p) > TOL || d(s.q) > TOL) return;
+      const tp = (s.p[0] - a[0]) * ux + (s.p[1] - a[1]) * uz, tq = (s.q[0] - a[0]) * ux + (s.q[1] - a[1]) * uz;
+      const t0 = Math.max(0, Math.min(tp, tq)), t1 = Math.min(L, Math.max(tp, tq));
+      if (t1 - t0 > 0.3) out.push([t0, t1, s.b.info.height]);
+    });
+    return out;
+  };
+}
+
+// 辺を、隣の建物に隠れる高さが同じ区間に分ける: [[t0, t1, 隠れる高さ], ...]
+function coverIntervals(L, covers) {
+  if (!covers.length) return [[0, L, 0]];
+  const cuts = [...new Set([0, L, ...covers.flatMap(([t0, t1]) => [t0, t1])])].sort((x, y) => x - y);
+  const out = [];
+  for (let i = 0; i + 1 < cuts.length; i++) {
+    const t0 = cuts[i], t1 = cuts[i + 1];
+    if (t1 - t0 < 0.05) continue;
+    const m = (t0 + t1) / 2;
+    let h = 0;
+    for (const [c0, c1, ch] of covers) if (m > c0 && m < c1) h = Math.max(h, ch);
+    const last = out[out.length - 1];
+    if (last && last[2] === h) last[1] = t1;
+    else out.push([t0, t1, h]);
+  }
+  return out;
+}
+
+function writeWalls(W, ring, sign, b, plainColor, facade, party = null) {
   const info = b.info;
   const y0 = info.minHeight;
   const y1 = info.height;
@@ -107,31 +167,43 @@ function writeWalls(W, ring, sign, b, plainColor, facade) {
       W.capitole.quad(A(y0), C(y0), C(top), A(top), nrm, [span[0], 0], [span[1], 0], [span[1], (top - y0) / facade.height], [span[0], (top - y0) / facade.height]);
       continue;
     }
-    if (info.isChurch && L >= 1.6) {
-      // 教会の壁: 地面からの高さで窓の段がそろう
-      const s0 = along / CHURCH_TILE.w, s1 = (along + L) / CHURCH_TILE.w;
-      W.church.quad(A(y0), C(y0), C(y1), A(y1), nrm, [s0, y0 / CHURCH_TILE.h], [s1, y0 / CHURCH_TILE.h], [s1, y1 / CHURCH_TILE.h], [s0, y1 / CHURCH_TILE.h], tint);
-      along += L;
-      continue;
+    // 隣の建物に接する所: 隣の高さまでは隠れるので作らず、それより上は窓のない壁（境界の壁）
+    const parts = coverIntervals(L, party ? party(b, a, c) : []);
+    for (const [t0, t1, cover] of parts) {
+      if (cover >= y1 - 0.2) continue;
+      const P = (t, y) => [a[0] + (dx / L) * t, y, a[1] + (dz / L) * t];
+      const l = t1 - t0;
+      if (cover > y0 + 0.3) {
+        const yc = cover;
+        W.plain.quad(P(t0, yc), P(t1, yc), P(t1, y1), P(t0, y1), nrm, [t0 / 4, yc / 4], [t1 / 4, yc / 4], [t1 / 4, y1 / 4], [t0 / 4, y1 / 4], plainColor);
+        continue;
+      }
+      if (info.isChurch && L >= 1.6) {
+        // 教会の壁: 地面からの高さで窓の段がそろう
+        const s0 = (along + t0) / CHURCH_TILE.w, s1 = (along + t1) / CHURCH_TILE.w;
+        W.church.quad(P(t0, y0), P(t1, y0), P(t1, y1), P(t0, y1), nrm, [s0, y0 / CHURCH_TILE.h], [s1, y0 / CHURCH_TILE.h], [s1, y1 / CHURCH_TILE.h], [s0, y1 / CHURCH_TILE.h], tint);
+        continue;
+      }
+      if (info.isChurch || L < 1.6 || info.kind === 'roof' || l < 1.2) {
+        W.plain.quad(P(t0, y0), P(t1, y0), P(t1, y1), P(t0, y1), nrm, [t0 / 4, y0 / 4], [t1 / 4, y0 / 4], [t1 / 4, y1 / 4], [t0 / 4, y1 / 4], plainColor);
+        continue;
+      }
+      const nb = L / BAY;
+      const e0 = (bayShift + 0.5 - nb / 2) / 4;
+      const u0 = e0 + t0 / BAY / 4, u1 = e0 + t1 / BAY / 4;
+      let yb = y0;
+      if (y0 < 0.5) {
+        const gt = Math.min(y1, y0 + groundH);
+        const v1 = (gt - y0) / groundH;
+        W.ground.quad(P(t0, y0), P(t1, y0), P(t1, gt), P(t0, gt), nrm, [u0, sv], [u1, sv], [u1, sv + v1], [u0, sv + v1], tint);
+        yb = gt;
+      }
+      if (y1 > yb + 0.05) {
+        const v1 = (y1 - yb) / floorH;
+        W.upper.quad(P(t0, yb), P(t1, yb), P(t1, y1), P(t0, y1), nrm, [u0, sv], [u1, sv], [u1, sv + v1], [u0, sv + v1], tint);
+      }
     }
-    if (info.isChurch || L < 1.6 || info.kind === 'roof') {
-      W.plain.quad(A(y0), C(y0), C(y1), A(y1), nrm, [0, y0 / 4], [L / 4, y0 / 4], [L / 4, y1 / 4], [0, y1 / 4], plainColor);
-      continue;
-    }
-    const nb = L / BAY;
-    const u0 = (bayShift + 0.5 - nb / 2) / 4;
-    const u1 = u0 + nb / 4;
-    let yb = y0;
-    if (y0 < 0.5) {
-      const gt = Math.min(y1, y0 + groundH);
-      const v1 = (gt - y0) / groundH;
-      W.ground.quad(A(y0), C(y0), C(gt), A(gt), nrm, [u0, sv], [u1, sv], [u1, sv + v1], [u0, sv + v1], tint);
-      yb = gt;
-    }
-    if (y1 > yb + 0.05) {
-      const v1 = (y1 - yb) / floorH;
-      W.upper.quad(A(yb), C(yb), C(y1), A(y1), nrm, [u0, sv], [u1, sv], [u1, sv + v1], [u0, sv + v1], tint);
-    }
+    along += L;
   }
 }
 
@@ -249,7 +321,8 @@ export function createBuildingMaterials(tex) {
 
 const nextFrame = () => new Promise((r) => setTimeout(r, 0));
 
-export async function buildBuildings(parsed, materials, onProgress, facade = null) {
+// context: 隣のタイルの建物（作らないが、接する壁を見分けるのに使う）、towers: 八角形の鐘楼（towers.js）
+export async function buildBuildings(parsed, materials, onProgress, facade = null, { context = [], towers = [] } = {}) {
   const group = new THREE.Group();
   group.name = 'buildings';
   const chunks = new Map();
@@ -257,7 +330,7 @@ export async function buildBuildings(parsed, materials, onProgress, facade = nul
     const key = `${Math.floor(x / CHUNK)},${Math.floor(z / CHUNK)}`;
     let c = chunks.get(key);
     if (!c) {
-      c = { upper: new MeshWriter(), ground: new MeshWriter(), plain: new MeshWriter(), capitole: new MeshWriter(), church: new MeshWriter(), roof: new MeshWriter(), flat: new MeshWriter() };
+      c = { upper: new MeshWriter(), ground: new MeshWriter(), plain: new MeshWriter(), capitole: new MeshWriter(), church: new MeshWriter(), tower: new MeshWriter(), roof: new MeshWriter(), flat: new MeshWriter() };
       chunks.set(key, c);
     }
     return c;
@@ -265,6 +338,8 @@ export async function buildBuildings(parsed, materials, onProgress, facade = nul
 
   const list = parsed.buildings.filter((b) => !b.hasParts).concat(parsed.parts);
   const stats = { total: list.length, OSM: 0, IGN: 0, 'OSM（階数）': 0, 推定: 0 };
+  const party = makePartyIndex(list.concat(context.filter((b) => !b.hasParts)));
+  for (const t of towers) writeTower(t, getChunk(t.x, t.z).tower);
   for (let i = 0; i < list.length; i++) {
     const b = list[i];
     stats[b.info.heightSource] = (stats[b.info.heightSource] || 0) + 1;
@@ -276,8 +351,8 @@ export async function buildBuildings(parsed, materials, onProgress, facade = nul
     }
     const color = wallColor(b);
     const plainColor = color;
-    writeWalls(W, b.outer, outwardSign(b.outer), b, plainColor, facade);
-    for (const h of b.holes) writeWalls(W, h, -outwardSign(h), b, plainColor); // 中庭の壁は内向き
+    writeWalls(W, b.outer, outwardSign(b.outer), b, plainColor, facade, party);
+    for (const h of b.holes) writeWalls(W, h, -outwardSign(h), b, plainColor, null, party); // 中庭の壁は内向き
     if (b.info.minHeight > 0.5) {
       // 浮いているパーツ（張り出しなど）の底面
       writeFlatPolygon(W.plain, b.outer, b.holes, b.info.minHeight, 4, plainColor, false);
@@ -290,7 +365,7 @@ export async function buildBuildings(parsed, materials, onProgress, facade = nul
   }
 
   for (const c of chunks.values()) {
-    for (const key of ['upper', 'ground', 'plain', 'capitole', 'church', 'roof', 'flat']) {
+    for (const key of ['upper', 'ground', 'plain', 'capitole', 'church', 'tower', 'roof', 'flat']) {
       if (c[key].empty) continue;
       const mesh = new THREE.Mesh(c[key].toGeometry(), materials[key]);
       mesh.castShadow = true;

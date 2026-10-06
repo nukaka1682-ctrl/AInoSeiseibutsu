@@ -11,7 +11,7 @@ function buildUrl(layer, bbox, startIndex, propertyNames) {
     SERVICE: 'WFS',
     VERSION: '2.0.0',
     REQUEST: 'GetFeature',
-    TYPENAMES: `BDTOPO_V3:${layer}`,
+    TYPENAMES: layer.includes(':') ? layer : `BDTOPO_V3:${layer}`, // 「データ:レイヤー」の形ならそのまま
     OUTPUTFORMAT: 'application/json',
     SRSNAME: 'urn:ogc:def:crs:EPSG::4326',
     BBOX: `${bbox.s},${bbox.w},${bbox.n},${bbox.e},urn:ogc:def:crs:EPSG::4326`,

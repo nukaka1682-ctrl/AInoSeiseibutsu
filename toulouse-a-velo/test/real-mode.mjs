@@ -1,6 +1,6 @@
-// 「本物そっくりモード」を本物のネットワーク（IGN の地図・LiDAR・航空写真）で開き、指定の場所で撮影する。
+// ゲームを本物の地図データ（同梱データ、なければ IGN）で開き、指定の場所で撮影する。
 //   npm run build && node test/real-mode.mjs '[{"name":"a","lm":"place-capitole"}]'
-//   AREA=centre で標準エリア（既定は light）。地図データは public/data/<area>.json があればそれを使う。
+//   AREA=toulouse でトゥールーズ全体、AREA=centre で旧市街（既定は light）。地図データは public/data/<area>.json があればそれを使う。
 //   IGN への通信は Node 経由（NODE_USE_ENV_PROXY=1 でプロキシを使う）で、test/output/cache にキャッシュする。
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -56,7 +56,7 @@ await page.route('https://data.geopf.fr/**', async (r) => {
   r.fulfill({ body, contentType: type, headers: { 'access-control-allow-origin': '*' } });
 });
 const t0 = Date.now();
-await page.goto(`http://game.test/?area=${process.env.AREA || 'light'}&autostart=1`);
+await page.goto(`http://game.test/?area=${process.env.AREA || 'light'}&autostart=1${process.env.REAL === '0' ? '&real=0' : ''}`);
 const ticker = setInterval(async () => {
   try {
     const t = await page.textContent('#loading-text');
@@ -128,7 +128,7 @@ for (const v of views) {
     }, v.cam);
     for (let i = 0; i < 25; i++) {
       await page.waitForTimeout(1000);
-      const pending = await page.evaluate(() => window.__tav.world.real.ortho.chunks.filter((c) => c.want > c.level).length + window.__tav.world.real.ortho.active);
+      const pending = await page.evaluate(() => { const o = window.__tav.world.real?.ortho; return o ? o.chunks.filter((c) => c.want > c.level).length + o.active : 0; });
       if (pending === 0 && i > 5) break;
     }
   }

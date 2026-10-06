@@ -5,7 +5,7 @@
 import * as THREE from 'three';
 import { MeshWriter, writeFlatPolygon } from './meshwriter.js';
 import { CAR_ROADS } from './parse.js';
-import { Grid, clipPolylineToRect, closestOnSegment, pointInPolygon, signedArea } from '../geo.js';
+import { Grid, clipPolylineToRect, clipRingToRect, closestOnSegment, pointInPolygon, signedArea } from '../geo.js';
 
 export const ORDER = {
   waterMask: -50,
@@ -185,18 +185,19 @@ export function makeWaterTest(areas) {
   };
 }
 
+// 地図から生成する地面（エリア全体をまとめて作る）
 export function buildGround(parsed, rect, mats) {
+  const base = buildGroundBase(parsed, rect, mats);
+  const pad = 120;
+  const detail = buildGroundDetail(parsed, { minX: rect.minX - pad, minZ: rect.minZ - pad, maxX: rect.maxX + pad, maxZ: rect.maxZ + pad }, mats, base.waterDepthAt);
+  base.group.add(detail.group);
+  return { ...base, bridges: detail.bridges };
+}
+
+// 地面の板と水（エリア全体で 1 回だけ作る）
+export function buildGroundBase(parsed, rect, mats) {
   const group = new THREE.Group();
   group.name = 'ground';
-  const writers = new Map();
-  const W = (order, tex) => {
-    const k = `${order}|${tex}`;
-    let w = writers.get(k);
-    if (!w) writers.set(k, (w = { order, tex, w: new MeshWriter() }));
-    return w.w;
-  };
-  const pad = 120;
-  const clipRect = [rect.minX - pad, rect.minZ - pad, rect.maxX + pad, rect.maxZ + pad];
 
   // ---- 地面（水面部分はステンシルで抜く） ----
   {
@@ -213,7 +214,6 @@ export function buildGround(parsed, rect, mats) {
     ground.name = 'ground-plane';
     group.add(ground);
   }
-
   // ---- 水 ----
   const water = parsed.areas.filter((a) => a.type === 'water');
   const waterGrid = new Grid(50);
@@ -289,20 +289,45 @@ export function buildGround(parsed, rect, mats) {
     }
   }
 
+  return { group, water, inWater, waterDepthAt };
+}
+
+// 緑地・広場・駐車場・道路・線路・橋を、範囲 clip の中だけ作る（広いエリアではタイルごとに呼ぶ）。
+// 範囲をまたぐ緑地は切り取り、道路は範囲の端で切る。橋は中ほどの点が範囲に入るものだけ
+export function buildGroundDetail(parsed, clip, mats, waterDepthAt) {
+  const group = new THREE.Group();
+  group.name = 'ground-detail';
+  const writers = new Map();
+  const W = (order, tex) => {
+    const k = `${order}|${tex}`;
+    let w = writers.get(k);
+    if (!w) writers.set(k, (w = { order, tex, w: new MeshWriter() }));
+    return w.w;
+  };
+  const clipRect = [clip.minX, clip.minZ, clip.maxX, clip.maxZ];
+  const overlaps = (b) => b.maxX > clip.minX && b.minX < clip.maxX && b.maxZ > clip.minZ && b.minZ < clip.maxZ;
+  const contains = (b) => b.minX >= clip.minX && b.maxX <= clip.maxX && b.minZ >= clip.minZ && b.maxZ <= clip.maxZ;
+
   // ---- 緑地・広場・駐車場 ----
   for (const a of parsed.areas) {
-    if (a.type === 'water') continue;
-    if (a.type === 'plaza') writeFlatPolygon(W(ORDER.plaza, 'paving'), a.outer, a.holes, 0, 4, c3('#ffffff'));
-    else if (a.type === 'parking') writeFlatPolygon(W(ORDER.parking, 'asphalt'), a.outer, a.holes, 0, 4, c3('#d0d0d0'));
-    else writeFlatPolygon(W(ORDER.green, 'grass'), a.outer, a.holes, 0, 6, GREEN_COLOR[a.type] || GREEN_COLOR.grass);
+    if (a.type === 'water' || !overlaps(a.bounds)) continue;
+    let outer = a.outer, holes = a.holes;
+    if (!contains(a.bounds)) {
+      outer = clipRingToRect(outer, ...clipRect);
+      if (outer.length < 3) continue;
+      holes = holes.map((h) => clipRingToRect(h, ...clipRect)).filter((h) => h.length >= 3);
+    }
+    if (a.type === 'plaza') writeFlatPolygon(W(ORDER.plaza, 'paving'), outer, holes, 0, 4, c3('#ffffff'));
+    else if (a.type === 'parking') writeFlatPolygon(W(ORDER.parking, 'asphalt'), outer, holes, 0, 4, c3('#d0d0d0'));
+    else writeFlatPolygon(W(ORDER.green, 'grass'), outer, holes, 0, 6, GREEN_COLOR[a.type] || GREEN_COLOR.grass);
   }
-
   // ---- 道路 ----
   const bridges = [];
   for (const road of parsed.roads) {
     if (road.tunnel) continue;
     if (road.bridge) {
-      bridges.push(road);
+      const mid = road.pts[road.pts.length >> 1];
+      if (mid[0] >= clip.minX && mid[0] < clip.maxX && mid[1] >= clip.minZ && mid[1] < clip.maxZ) bridges.push(road);
       continue;
     }
     const parts = clipPolylineToRect(road.pts, ...clipRect);
@@ -346,10 +371,10 @@ export function buildGround(parsed, rect, mats) {
   }
 
   // ---- 橋 ----
-  const bridgeGroup = buildBridges(bridges, mats, waterDepthAt, clipRect);
-  group.add(bridgeGroup);
+  const big = [clip.minX - 2000, clip.minZ - 2000, clip.maxX + 2000, clip.maxZ + 2000];
+  group.add(buildBridges(bridges, mats, waterDepthAt, big));
 
-  return { group, water, inWater, bridges };
+  return { group, bridges };
 }
 
 function buildBridges(bridges, mats, waterDepthAt, clipRect) {

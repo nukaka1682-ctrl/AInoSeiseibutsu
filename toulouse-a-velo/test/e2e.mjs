@@ -6,7 +6,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { preview } from 'vite';
 import { chromium } from 'playwright';
-import { fakeIgnRaster, fakeTerrain, makeFixture } from './fixture.mjs';
+import { fakeIgnRaster, makeFixture } from './fixture.mjs';
+import { DATA_VERSION } from '../src/config.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const out = join(root, 'test', 'output');
@@ -25,8 +26,10 @@ const check = (cond, msg) => {
   if (!cond) failed = true;
 };
 
-async function newPage(query) {
+async function newPage(query, baked = null) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+  // 同梱データ（data/light.json）の代わり
+  if (baked) await page.route('**/data/light.json', (r) => r.fulfill({ contentType: 'application/json', body: JSON.stringify(baked) }));
   page.on('console', (m) => {
     if (m.type() === 'error') errors.push(m.text());
   });
@@ -154,37 +157,27 @@ try {
   await tour.screenshot({ path: join(out, '10-tour.png') });
   await tour.close();
 
-  // ---- 本物そっくりモード（合成の LiDAR・航空写真）----
-  const real = await newPage('&refresh=1');
-  const rs = await real.evaluate(() => {
-    const w = window.__tav.world;
+  // ---- 塀（同梱データの、地籍と LiDAR から見つけた塀）----
+  // スタート地点の 10 m 先に、道を横切る長さ 16 m の塀を置く: 道路の上は切り取られて通れ、道の外の部分は当たり判定がある
+  const ahead = (d, side) => [start.x + Math.sin(start.heading) * d + Math.cos(start.heading) * side, start.z - Math.cos(start.heading) * d + Math.sin(start.heading) * side];
+  const lonLat = ([x, z]) => fx.proj.unproject(x, z).reverse();
+  const fence = [...lonLat(ahead(10, -8)), ...lonLat(ahead(10, 8)), 2.4];
+  const baked = { version: DATA_VERSION, bbox: fx.bbox, provider: 'osm', osm: fx.osm, bdtopo: [], walls: [fence], trees: [[...lonLat(ahead(-20, 6)), 11, 3.5]] };
+  const wp = await newPage('', baked);
+  const ws = await wp.evaluate(() => ({ walls: window.__tav.world.stats.walls, trees: window.__tav.world.stats.trees }));
+  check(ws.walls >= 1 && ws.walls <= 2 && ws.trees === 1, `同梱データの塀と木を置く（道路の上を切り取って塀 ${ws.walls}・木 ${ws.trees}）`);
+  const [p0, p1] = [ahead(5, -7.5), ahead(15, -7.5)];
+  const hit = await wp.evaluate(([a, b]) => window.__tav.world.collision.raycast(a[0], a[1], b[0], b[1]), [p0, p1]);
+  check(hit > 0.4 && hit < 0.6, `道の外の塀には当たる（${hit.toFixed(2)}）`);
+  await wp.evaluate((s) => window.__tav.bike.place(s.x, s.z, s.heading), start);
+  await wp.evaluate(() => window.__tavSimulate(6, { throttle: 1 }));
+  const passed = await wp.evaluate((s) => {
     const b = window.__tav.bike;
-    return { lidar: w.stats.lidar, base: w.real?.base, y: b.y, x: b.x, z: b.z, trees: w.stats.trees, tris: w.stats.triangles };
-  });
-  check(rs.lidar, `LiDAR の実測データで街を作る（三角形 ${rs.tris?.toLocaleString()}・木 ${rs.trees} 本）`);
-  check(Math.abs(rs.base + rs.y - fakeTerrain(rs.x, rs.z)) < 0.3, `自転車が地面の上にいる（標高 ${(rs.base + rs.y).toFixed(1)} m）`);
-  check(rs.trees >= 15 && rs.trees <= 25, `樹冠から木を見つける（${rs.trees} 本、並木は 20 本）`);
-  check((await capitole(real)) >= 2, '本物そっくりモードでもキャピトルの正面に専用のファサード');
-  const roof = await real.evaluate(() => {
-    // 建物の中心の真上の高さ（屋根の上）
-    const w = window.__tav.world;
-    const b = w.parsed.buildings.find((q) => q.tags.name === 'Capitole de Toulouse');
-    const x = (b.bounds.minX + b.bounds.maxX) / 2, z = (b.bounds.minZ + b.bounds.maxZ) / 2;
-    const ray = new window.__tavDebug.THREE.Raycaster(new window.__tavDebug.THREE.Vector3(x, 200, z), new window.__tavDebug.THREE.Vector3(0, -1, 0));
-    const hit = ray.intersectObject(w.real.group, true)[0];
-    return hit ? hit.point.y + w.real.base : null;
-  });
-  check(roof != null && Math.abs(roof - 158) < 1, `屋根の高さが表面モデルと一致（${roof?.toFixed(1)} m、実測 158 m）`);
-  // ポン・ヌフ: 橋面（141 m）の上を走り、川（132 m）に落ちない
-  await real.evaluate(() => {
-    const s = window.__tav;
-    s.bike.place(-345, 450, -Math.PI / 2, s.world.heightAt(-345, 450));
-  });
-  await real.evaluate(() => window.__tavSimulate(14, { throttle: 1, sprint: true }));
-  const onBridge = await real.evaluate(() => ({ x: window.__tav.bike.x, y: window.__tav.bike.y + window.__tav.world.real.base }));
-  check(onBridge.x < -420 && Math.abs(onBridge.y - 141) < 0.6, `橋の上を走る（x=${onBridge.x.toFixed(1)}、標高 ${onBridge.y.toFixed(1)} m）`);
-  await real.screenshot({ path: join(out, '11-real-bridge.png') });
-  await real.close();
+    return (b.x - s.x) * Math.sin(s.heading) - (b.z - s.z) * Math.cos(s.heading);
+  }, start);
+  check(passed > 12, `道路の上は塀でふさがない（スタートから ${passed.toFixed(1)} m 進んだ）`);
+  await wp.screenshot({ path: join(out, '11-wall.png') });
+  await wp.close();
 } catch (err) {
   console.error(err);
   failed = true;

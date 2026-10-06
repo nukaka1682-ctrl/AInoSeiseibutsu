@@ -2,9 +2,7 @@
 // すべての名所にたどり着けるか（道が建物でふさがっていないか、川で止まらないか等）を確かめる。
 // 描画はせず、ゲームと同じコード（world/assemble.js・game/bike.js）で物理だけを動かす。
 //   npm run fetch-data && node test/autopilot.mjs [centre]
-//   LIDAR=1 で本物そっくりモード（IGN LiDAR HD の地形・橋の高さの上を走る。坂で速度が変わる）。
-//   LiDAR は test/output/ にキャッシュする。プロキシ環境では NODE_USE_ENV_PROXY=1 も付ける
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assembleWorld } from '../src/world/assemble.js';
@@ -21,24 +19,6 @@ try {
 } catch {
   console.log(`public/data/${area}.json がないのでスキップ（npm run fetch-data -- ${area} で作成）`);
   process.exit(0);
-}
-if (process.env.LIDAR === '1') {
-  const { fetchLidar } = await import('../src/data/lidar.js');
-  const { areaFrame } = await import('../src/world/assemble.js');
-  const file = join(root, 'test', 'output', `lidar-${area}.bin`);
-  const grid = (g, cols, rows) => ({ data: g, cols, rows });
-  try {
-    const buf = await readFile(file);
-    const [dc, dr, tc, tr] = new Uint32Array(buf.buffer, buf.byteOffset, 4);
-    const f = new Float32Array(buf.buffer.slice(buf.byteOffset + 16));
-    data.lidar = { dsm: grid(f.slice(0, dc * dr), dc, dr), dtm: grid(f.slice(dc * dr), tc, tr) };
-  } catch {
-    console.log('IGN LiDAR HD を取得中…');
-    data.lidar = await fetchLidar(data.bbox, areaFrame(data.bbox).rect);
-    const { dsm, dtm } = data.lidar;
-    await mkdir(dirname(file), { recursive: true });
-    await writeFile(file, Buffer.concat([Buffer.from(new Uint32Array([dsm.cols, dsm.rows, dtm.cols, dtm.rows]).buffer), Buffer.from(dsm.data.buffer), Buffer.from(dtm.data.buffer)]));
-  }
 }
 const noTex = new Proxy({}, { get: () => null });
 const { createBuildingMaterials } = await import('../src/world/buildings.js');

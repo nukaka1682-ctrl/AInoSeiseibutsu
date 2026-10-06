@@ -5,7 +5,7 @@
 export const AREA_PRESETS = {
   toulouse: {
     label: 'トゥールーズ全体（標準）',
-    description: 'ポン・ヌフを中心に半径 5 km。旧市街からパーパン、サン・シプリアン、ミニム、ランギュイユまで。近くの街並みから順に読み込みます（本物そっくりモード）',
+    description: 'ポン・ヌフを中心に半径 5 km。旧市街からパーパン、サン・シプリアン、ミニム、ランギュイユまで。近くの街並みから順に読み込みます',
     lat: 43.5994,
     lon: 1.4395,
     radius: 5000,
@@ -13,7 +13,7 @@ export const AREA_PRESETS = {
   },
   centre: {
     label: '旧市街',
-    description: 'キャピトル広場を中心に半径 1.2 km をまとめて読み込む。地図から生成する見た目も選べます',
+    description: 'キャピトル広場を中心に半径 1.2 km をまとめて読み込む',
     lat: 43.6020,
     lon: 1.4430,
     radius: 1200,
@@ -30,7 +30,7 @@ export const AREA_PRESETS = {
 export const DEFAULT_AREA = 'toulouse';
 
 // 地図データ形式のバージョン（変えると同梱データ・キャッシュが無効になる）
-export const DATA_VERSION = 1;
+export const DATA_VERSION = 2;
 
 // 名所。match は OSM の name タグに対する正規表現。
 export const LANDMARKS = [

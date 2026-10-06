@@ -7,7 +7,9 @@
 //   npm run fetch-data -- all             # すべてのプリセット
 //   npm run fetch-data -- centre --ign    # IGN BD TOPO だけで作る
 //   npm run fetch-data -- toulouse        # トゥールーズ全体（半径 5 km）: 道路などの基本データ（toulouse.json）と、
-//                                         # 建物を 500 m のタイルに分けたファイル（toulouse-tiles/<i>_<j>.json）
+//                                         # 建物・塀・木を 500 m のタイルに分けたファイル（toulouse-tiles/<i>_<j>.json）
+//
+// 塀と木は、地籍（敷地の境界）と LiDAR HD の表面モデルから見つける（src/data/walls.js）。
 //
 // npm run 経由では NODE_USE_ENV_PROXY=1 が付く（HTTPS_PROXY のある環境で Node の fetch をプロキシ経由にする）。
 import { mkdir, rm, writeFile } from 'node:fs/promises';
@@ -16,7 +18,8 @@ import { fileURLToPath } from 'node:url';
 import { AREA_PRESETS, DEFAULT_AREA } from '../src/config.js';
 import { bboxAround } from '../src/geo.js';
 import { fetchAreaData } from '../src/data/load.js';
-import { fetchBaseData, featureTile, tileLayout } from '../src/data/tiles.js';
+import { boundsToBbox, fetchBaseData, featureTile, splitTileFeatures, tileBounds, tileLayout } from '../src/data/tiles.js';
+import { fetchSiteFeatures, grow } from '../src/data/walls.js';
 import { fetchWfsLayer } from '../src/data/bdtopo.js';
 import { IGN_LAYERS } from '../src/data/ign.js';
 import { areaFrame } from '../src/world/assemble.js';
@@ -56,6 +59,15 @@ for (const id of ids) {
   });
   console.log(`\n  出典: ${data.provider}${data.fallbackReason ? `（OSM に接続できず IGN に切り替え: ${data.fallbackReason}）` : ''}`);
   console.log(`  要素: ${data.osm.elements.length.toLocaleString()} / IGN の建物の高さ: ${data.bdtopo.length.toLocaleString()}`);
+  // 塀と木（500 m ずつ）
+  try {
+    const site = await bakeSite(bbox);
+    data.walls = site.walls;
+    data.trees = site.trees;
+    console.log(`  塀 ${site.walls.length.toLocaleString()} か所、木 ${site.trees.length.toLocaleString()} 本`);
+  } catch (err) {
+    console.log(`  塀と木を見つけられませんでした: ${err.message}`);
+  }
   const out = join(root, 'public', 'data', `${id}.json`);
   await mkdir(dirname(out), { recursive: true });
   const save = { ...data };
@@ -112,11 +124,58 @@ async function bakeStream(id, bbox) {
   const dir = join(root, 'public', 'data', `${id}-tiles`);
   await rm(dir, { recursive: true, force: true });
   await mkdir(dir, { recursive: true });
-  let bytes = 0;
-  for (const [key, features] of tiles) {
-    const s = JSON.stringify({ version: DATA_VERSION, features });
-    bytes += s.length;
-    await writeFile(join(dir, `${key}.json`), s);
+
+  // タイルごと: 隣のタイルの境近くの建物（ctx）と、塀・木
+  const queue = [];
+  for (let j = 0; j < layout.rows; j++) for (let i = 0; i < layout.cols; i++) queue.push([i, j]);
+  let bytes = 0, finished = 0, walls = 0, trees = 0, failed = 0;
+  const total = queue.length;
+  const tileWorker = async () => {
+    while (queue.length) {
+      const [i, j] = queue.shift();
+      const near = [];
+      for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) near.push(...(tiles.get(`${i + di}_${j + dj}`) || []));
+      const { own, ctx } = splitTileFeatures(near, layout, bbox, i, j);
+      const tb = boundsToBbox(bbox, layout.rect, tileBounds(layout, i, j));
+      let site = { walls: [], trees: [] };
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          site = await fetchSiteFeatures(tb, own.concat(ctx));
+          break;
+        } catch (err) {
+          if (attempt === 2) {
+            failed++;
+            console.log(`\n  タイル ${i}_${j}: 塀と木を見つけられませんでした（${err.message}）`);
+          }
+        }
+      }
+      walls += site.walls.length;
+      trees += site.trees.length;
+      const s = JSON.stringify({ version: DATA_VERSION, features: own, ctx, walls: site.walls, trees: site.trees });
+      bytes += s.length;
+      await writeFile(join(dir, `${i}_${j}.json`), s);
+      process.stdout.write(`\r  タイル: ${++finished}/${total}、塀 ${walls.toLocaleString()} か所、木 ${trees.toLocaleString()} 本`.padEnd(80));
+    }
+  };
+  await Promise.all([tileWorker(), tileWorker(), tileWorker(), tileWorker()]);
+  console.log(`\n  保存: ${dir}（${total} タイル、${(bytes / 1048576).toFixed(1)} MB${failed ? `、塀と木なし ${failed} タイル` : ''}）`);
+}
+
+// 小さいエリア: 500 m ずつ、塀と木を見つける
+async function bakeSite(bbox) {
+  const { rect } = areaFrame(bbox);
+  const layout = tileLayout(rect);
+  const out = { walls: [], trees: [] };
+  for (let j = 0; j < layout.rows; j++) {
+    for (let i = 0; i < layout.cols; i++) {
+      const tb = boundsToBbox(bbox, rect, tileBounds(layout, i, j));
+      const buildings = await fetchWfsLayer('batiment', grow(tb, 30), { propertyNames: ['geometrie'] });
+      const site = await fetchSiteFeatures(tb, buildings);
+      out.walls.push(...site.walls);
+      out.trees.push(...site.trees);
+      process.stdout.write(`\r  塀と木: ${j * layout.cols + i + 1}/${layout.cols * layout.rows}`.padEnd(60));
+    }
   }
-  console.log(`\n  保存: ${dir}（${tiles.size} タイル、${(bytes / 1048576).toFixed(1)} MB）`);
+  process.stdout.write('\n');
+  return out;
 }
