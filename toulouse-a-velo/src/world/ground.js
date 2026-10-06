@@ -323,6 +323,51 @@ export function buildGroundDetail(parsed, clip, mats, waterDepthAt) {
   }
   // ---- 道路 ----
   const bridges = [];
+  // 縁石・側溝を交差点の中に引かないよう、範囲の近くの車道・歩行者道の中心線を索引にする
+  const near = new Grid(25);
+  const nearSegs = [];
+  for (const road of parsed.roads) {
+    if (road.tunnel || road.bridge || !(CAR_ROADS.has(road.type) || road.type === 'pedestrian' || road.type === 'living_street')) continue;
+    for (let i = 0; i + 1 < road.pts.length; i++) {
+      const [ax, az] = road.pts[i], [bx, bz] = road.pts[i + 1];
+      if (Math.max(ax, bx) < clip.minX - 30 || Math.min(ax, bx) > clip.maxX + 30 || Math.max(az, bz) < clip.minZ - 30 || Math.min(az, bz) > clip.maxZ + 30) continue;
+      near.insertSegment(ax, az, bx, bz, nearSegs.length);
+      nearSegs.push({ ax, az, bx, bz, road });
+    }
+  }
+  const inOtherRoad = (x, z, self) => {
+    let hit = false;
+    near.queryPoint(x, z, 15, (i) => {
+      const sg = nearSegs[i];
+      if (hit || sg.road === self) return;
+      if (closestOnSegment(x, z, sg.ax, sg.az, sg.bx, sg.bz).d2 < (sg.road.width / 2 + 0.6) ** 2) hit = true;
+    });
+    return hit;
+  };
+  // 線 line に沿って、ほかの道路の中に入らない区間ごとに帯を描く（縁石・側溝）
+  const edgeStrip = (w, line, half, color, road) => {
+    let run = [];
+    const flush = () => {
+      if (run.length >= 2) writeRibbon(w, run, half, 0, color, 2);
+      run = [];
+    };
+    for (let i = 0; i + 1 < line.length; i++) {
+      const [ax, az] = line[i], [bx, bz] = line[i + 1];
+      const L = Math.hypot(bx - ax, bz - az);
+      const n = Math.max(1, Math.ceil(L / 4));
+      for (let k = 0; k < n; k++) {
+        const p = [ax + ((bx - ax) * k) / n, az + ((bz - az) * k) / n], q = [ax + ((bx - ax) * (k + 1)) / n, az + ((bz - az) * (k + 1)) / n];
+        if (inOtherRoad((p[0] + q[0]) / 2, (p[1] + q[1]) / 2, road)) {
+          flush();
+          continue;
+        }
+        if (!run.length) run.push(p);
+        run.push(q);
+      }
+    }
+    flush();
+  };
+
   for (const road of parsed.roads) {
     if (road.tunnel) continue;
     if (road.bridge) {
@@ -347,6 +392,13 @@ export function buildGroundDetail(parsed, clip, mats, waterDepthAt) {
       writeDisc(w, pts[0], half, 0, st.color);
       writeDisc(w, pts[pts.length - 1], half, 0, st.color);
       if (isCar && road.width >= 7 && !road.oneway) writeDashes(W(ORDER.marking, 'plain'), pts, 3, 5, 0.15, 0, c3('#f2f2ee'));
+      if (isCar && road.sidewalk !== 'no' && road.sidewalk !== 'none' && pts.length >= 2) {
+        // 花崗岩の縁石（幅 25 cm）と、その内側の側溝（舗石の帯）
+        const { L, R } = offsets(pts, half + 0.12);
+        const g = offsets(pts, half - 0.25);
+        for (const line of [L, R]) edgeStrip(W(ORDER.road + 0.6, 'plain'), line, 0.13, c3('#c4bfb5'), road);
+        for (const line of [g.L, g.R]) edgeStrip(W(ORDER.road + 0.5, 'sidewalk'), line, 0.18, c3('#d6d2cb'), road);
+      }
     }
   }
 

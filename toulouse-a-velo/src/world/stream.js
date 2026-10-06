@@ -198,7 +198,7 @@ class TileStreamer {
     // 塀
     const cw = new CollisionWorld({ minX: B.minX - 80, maxX: B.maxX + 80, minZ: B.minZ - 80, maxZ: B.maxZ + 80 });
     const walls = clearRoads(projectWalls(data.walls, this.proj), (x, z) => this.roadnet.onRoad(x, z, 0.3));
-    group.add(buildEnclosures(walls, this.materials.plain, cw));
+    group.add(buildEnclosures(walls, this.materials, cw));
 
     // 木: LiDAR で見つけたもの（水の上・道路の真ん中・橋の上は除く）。なければ公園と並木道に植える
     const bGrid = new Grid(30);

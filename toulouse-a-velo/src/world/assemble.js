@@ -71,7 +71,7 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
 
   // 塀（地籍の敷地の境界と LiDAR から見つけたもの）
   const walls = clearRoads(projectWalls(data.walls || [], proj), (x, z) => roadnet.onRoad(x, z, 0.3));
-  group.add(buildEnclosures(walls, buildingMats.plain, collision));
+  group.add(buildEnclosures(walls, buildingMats, collision));
 
   progress('木を植えています…', 0.25);
   await pause();

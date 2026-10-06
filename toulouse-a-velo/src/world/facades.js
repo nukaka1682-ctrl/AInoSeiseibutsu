@@ -15,8 +15,8 @@ export const STYLE = { brickStone: 0, brickShutters: 1, ochre: 2, taupe: 3, salm
 const W = 1024, CELL = 256, BAYW = 256;
 
 const STYLES = [
-  { wall: 'brick', bricks: ['#c27058', '#cb7c62', '#b8644e', '#d08a6e', '#c4745c', '#ae5e4a', '#d4927a', '#c67960'], mortar: '#dcc5b0', trim: 'stone', shutters: null, panes: 4, balcony: [0, 0, 1, 0], lintel: true, band: 'stone', door: '#3e4a45', shop: '#2f3b36' },
-  { wall: 'brick', bricks: ['#c27a62', '#b96d55', '#cd8a70', '#b06450', '#c98168', '#d29178', '#bc735a'], mortar: '#e0c5b2', trim: 'brick', shutters: ['#8a9a9c', '#7d8f86', '#97a2a4', '#6f8592'], panes: 3, balcony: [1, 0, 1, 1], band: 'brick', door: '#5a3a2a', shop: '#6b2a2a' },
+  { wall: 'brick', bricks: ['#d27c52', '#da8a5e', '#c66e46', '#e09a70', '#d58258', '#bd6644', '#de9168', '#cc7a54'], mortar: '#dccaae', trim: 'stone', shutters: null, panes: 4, balcony: [0, 0, 1, 0], lintel: true, band: 'stone', door: '#3e4a45', shop: '#2f3b36' },
+  { wall: 'brick', bricks: ['#d48766', '#c97a5c', '#dc9675', '#c27056', '#d88e6e', '#e09e80', '#cd8060'], mortar: '#e0cbb4', trim: 'brick', shutters: ['#8a9a9c', '#7d8f86', '#97a2a4', '#6f8592'], panes: 3, balcony: [1, 0, 1, 1], band: 'brick', door: '#5a3a2a', shop: '#6b2a2a' },
   { wall: 'plaster', plaster: '#dca649', trim: 'brick', shutters: null, panes: 4, balcony: [0, 1, 0, 0], band: 'brick', door: '#2f4a3c', shop: '#24332c', keystone: true },
   { wall: 'plaster', plaster: '#8e8a74', trim: 'harpe', shutters: null, panes: 4, balcony: [0, 0, 0, 0], band: 'brick', door: '#4a3426', shop: '#3b3330' },
   { wall: 'plaster', plaster: '#c88a5a', trim: 'brick', shutters: ['#efeee8', '#e9e7df', '#f3f1ea', '#e5e3da'], panes: 3, balcony: [1, 0, 0, 1], band: 'brick', door: '#2a2d33', shop: '#1f2226' },
@@ -37,19 +37,32 @@ function shade(hex, k) {
   return `rgb(${Math.min(255, Math.round(c.r * 255 * k))},${Math.min(255, Math.round(c.g * 255 * k))},${Math.min(255, Math.round(c.b * 255 * k))})`;
 }
 
-// トゥールーズの薄いレンガ（brique foraine、約 40×5 cm）。1 段 5 px、長さ 32 px（横に 1024 px でぴったり繰り返す）
+// トゥールーズの薄いレンガ（brique foraine）。写真を手本に、1 段 5 px（約 7 cm）のうちレンガは 3.5 px で、
+// 目地（砂色の石灰モルタル）は太め。レンガの長さ 26〜34 px（約 36〜46 cm）で、縦目地の位置は段ごとに不規則
 function brickFill(ctx, x0, y0, w, h, st, rnd) {
   ctx.fillStyle = st.mortar;
   ctx.fillRect(x0, y0, w, h);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x0, y0, w, h);
+  ctx.clip();
   for (let y = y0, row = 0; y < y0 + h; y += 5, row++) {
-    const off = row % 2 ? 16 : 0;
-    for (let x = x0 - 32 + off; x < x0 + w; x += 32) {
+    let x = x0 - Math.floor(rnd() * 30);
+    while (x < x0 + w) {
+      const len = 26 + Math.floor(rnd() * 9);
       const base = st.bricks[Math.floor(rnd() * st.bricks.length)];
-      ctx.fillStyle = shade(base, 0.92 + rnd() * 0.16);
-      ctx.fillRect(Math.max(x0, x + 1), y, Math.min(x + 31, x0 + w) - Math.max(x0, x + 1), 4);
+      ctx.fillStyle = shade(base, 0.9 + rnd() * 0.2);
+      ctx.fillRect(x + 1, y + 0.7, len - 1.5, 3.5);
+      if (rnd() < 0.35) {
+        // 焼きムラ: 端が濃い
+        ctx.fillStyle = 'rgba(70,30,15,0.18)';
+        ctx.fillRect(rnd() < 0.5 ? x + 1 : x + len - 8, y + 0.7, 7, 3.5);
+      }
+      x += len;
     }
   }
-  // 焼きムラ・汚れ
+  ctx.restore();
+  // 汚れ・色あせ
   for (let i = 0; i < (w * h) / 900; i++) {
     ctx.fillStyle = `rgba(${rnd() < 0.5 ? '40,20,10' : '255,230,200'},${0.05 + rnd() * 0.07})`;
     ctx.fillRect(x0 + rnd() * w, y0 + rnd() * h, 6 + rnd() * 30, 3 + rnd() * 10);

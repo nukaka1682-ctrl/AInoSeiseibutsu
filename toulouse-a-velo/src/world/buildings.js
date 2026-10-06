@@ -11,7 +11,7 @@ const CHUNK = 300;
 export const BAY = 3.5; // 窓 1 列分の幅（m）
 
 // トゥールーズ「ばら色の街」の壁の色（レンガ）と、漆喰・石の色
-const BRICK = ['#c9846c', '#bf745b', '#d39277', '#b86c55', '#cc8b70', '#c27b63', '#d69c80'];
+const BRICK = ['#c47a58', '#bd6f4f', '#cf8763', '#b96b4c', '#c98260', '#c17656', '#d39270'];
 const STUCCO = ['#e4d6be', '#d9c6a5', '#ece2ce', '#d4bf9c', '#e8d2b3', '#dccbb4'];
 const STONE = ['#cfc5b3', '#c4b9a5', '#d8cfbf'];
 const GLASS = ['#8d9ba5', '#7f8f99'];
@@ -314,6 +314,8 @@ export function createBuildingMaterials(tex) {
     capitole: std(tex.capitole, { alphaTest: 0.5 }), // キャピトルの正面（屋上の手すりの上は透明）
     tower: std(tex.tower), // サン・セルナン・ジャコバンの八角形の鐘楼
     church: std(tex.church), // 教会の壁（石の縞・控え壁・半円アーチの窓）
+    enclosureBrick: std(tex.enclosureBrick, { roughness: 0.95 }), // 敷地の塀（レンガ）
+    enclosureRender: std(tex.enclosureRender, { roughness: 0.95 }), // 敷地の塀（漆喰）
     roof: std(tex.roof, { roughness: 0.85 }),
     flat: std(tex.flatRoof),
   };
