@@ -4,18 +4,19 @@ import * as THREE from 'three';
 import { MeshWriter, writeFlatPolygon } from './meshwriter.js';
 import { Grid, centroid, hash01, isConvex, signedArea } from '../geo.js';
 import { writeTower } from './towers.js';
-import { CHURCH_TILE, STYLE, useFacadeAtlas } from './facades.js';
+import { CHURCH_TILE, STYLE, stylePlainColor, useContactShade, useFacadeAtlas } from './facades.js';
+import { ORDER } from './ground.js';
 import { facadeSpan } from './landmarkfacades.js';
 
 const CHUNK = 300;
 export const BAY = 3.5; // 窓 1 列分の幅（m）
 
 // トゥールーズ「ばら色の街」の壁の色（レンガ）と、漆喰・石の色
-const BRICK = ['#c47a58', '#bd6f4f', '#cf8763', '#b96b4c', '#c98260', '#c17656', '#d39270'];
+const BRICK = ['#bb7c5f', '#b47257', '#c4876a', '#b06e54', '#bf8266', '#b8795d', '#c99173'];
 const STUCCO = ['#e4d6be', '#d9c6a5', '#ece2ce', '#d4bf9c', '#e8d2b3', '#dccbb4'];
 const STONE = ['#cfc5b3', '#c4b9a5', '#d8cfbf'];
 const GLASS = ['#8d9ba5', '#7f8f99'];
-const ROOF_TILE = ['#b4633f', '#a8573b', '#bb6e4a', '#9f5238', '#ad6244', '#b85f3c'];
+const ROOF_TILE = ['#b07a5e', '#a86e55', '#b8805f', '#9f6a55', '#a8634a', '#b06e4f']; // 古い瓦の茶色〜葺き替えたオレンジ（写真 #896450〜#bd8663）
 const FLAT_ROOF = ['#9b928a', '#8f8b86', '#a59c90', '#878079'];
 
 const tmpColor = new THREE.Color();
@@ -46,7 +47,9 @@ export function wallColor(b) {
   if (mat === 'plaster' || mat === 'render') return paletteColor(STUCCO, b.id, 1);
   if (mat === 'glass') return paletteColor(GLASS, b.id, 1);
   if (b.info.isChurch) return paletteColor(BRICK, b.id, 1); // 南仏ゴシックのレンガ造り
-  return hash01(b.id, 2) < 0.66 ? paletteColor(BRICK, b.id, 1) : paletteColor(STUCCO, b.id, 1);
+  // 窓のない壁（境界の壁・切妻）は、ファサードの様式と同じ色にそろえる（漆喰の家はその色、レンガの家はレンガ）
+  const plaster = stylePlainColor(facadeStyle(b));
+  return plaster ? paletteColor([plaster], b.id, 1) : paletteColor(BRICK, b.id, 1);
 }
 
 // ファサードの様式（facades.js）: 壁の材料ごとに、トゥールーズで見かける割合で選ぶ
@@ -55,12 +58,15 @@ const STYLE_MIX = {
   stone: [[STYLE.cream, 0.6], [STYLE.brickStone, 0.2], [STYLE.taupe, 0.2]],
   concrete: [[STYLE.modern, 0.6], [STYLE.cream, 0.25], [STYLE.ochre, 0.15]],
   wood: [[STYLE.modern, 1]],
-  other: [[STYLE.brickStone, 0.2], [STYLE.brickShutters, 0.22], [STYLE.ochre, 0.12], [STYLE.taupe, 0.11], [STYLE.salmon, 0.12], [STYLE.cream, 0.1], [STYLE.rose, 0.13]],
+  other: [[STYLE.brickStone, 0.2], [STYLE.brickShutters, 0.24], [STYLE.ochre, 0.1], [STYLE.taupe, 0.1], [STYLE.salmon, 0.12], [STYLE.cream, 0.1], [STYLE.rose, 0.14]],
+  // 旧市街のレンガ造り・材料の分からない建物: 写真の街並みのとおり 8 割はレンガ（ばら色の漆喰にレンガの窓枠を含む）
+  oldTown: [[STYLE.brickStone, 0.32], [STYLE.brickShutters, 0.34], [STYLE.rose, 0.14], [STYLE.ochre, 0.07], [STYLE.salmon, 0.07], [STYLE.cream, 0.06]],
 };
 export function facadeStyle(b) {
   if (b.style != null) return b.style; // 決まった様式（landmarkfacades.js の歴史的な建物）
   const mat = b.tags['building:material'];
-  const mix = STYLE_MIX[mat === 'sandstone' || mat === 'limestone' ? 'stone' : mat === 'plaster' || mat === 'render' ? 'other' : mat] || STYLE_MIX.other;
+  const key = mat === 'sandstone' || mat === 'limestone' ? 'stone' : mat === 'plaster' || mat === 'render' ? 'other' : mat;
+  const mix = (b.oldTown && (key === 'brick' || !STYLE_MIX[key]) ? STYLE_MIX.oldTown : STYLE_MIX[key]) || STYLE_MIX.other;
   let r = hash01(b.id, 21);
   for (const [style, p] of mix) {
     if ((r -= p) < 0) return style;
@@ -69,8 +75,12 @@ export function facadeStyle(b) {
 }
 // ファサードの色はテクスチャに描いてあるので、頂点カラーは建物ごとのわずかな明るさの違いだけ
 export function facadeTint(b) {
-  const k = 0.9 + hash01(b.id, 22) * 0.14, warm = hash01(b.id, 23) * 0.04;
+  const [k, warm] = facadeColor(b, 0);
   return [k, k * (1 - warm * 0.5), k * (1 - warm)];
+}
+// 窓のあるファサードの頂点カラー: （明るさ, 暖かさ, 軒の高さ）。シェーダーで色合いと軒下の陰にする（facades.js の useFacadeAtlas）
+export function facadeColor(b, eave) {
+  return [0.9 + hash01(b.id, 22) * 0.14, hash01(b.id, 23) * 0.04, eave];
 }
 
 function roofColor(b, flat) {
@@ -151,6 +161,7 @@ function writeWalls(W, ring, sign, b, plainColor, facade, party = null) {
   const bayShift = Math.floor(hash01(b.id, 9) * 4);
   const sv = facadeStyle(b) * 1000; // v に様式の番号を入れる（facades.js）
   const tint = facadeTint(b);
+  const fc = facadeColor(b, y1);
   let along = 0;
   const n = ring.length;
   for (let i = 0; i < n; i++) {
@@ -165,6 +176,7 @@ function writeWalls(W, ring, sign, b, plainColor, facade, party = null) {
     if (span) {
       const top = Math.max(y1, y0 + facade.height);
       W.capitole.quad(A(y0), C(y0), C(top), A(top), nrm, [span[0], 0], [span[1], 0], [span[1], (top - y0) / facade.height], [span[0], (top - y0) / facade.height]);
+      if (y0 < 0.5 && W.contact) writeContact(W.contact, A(0), C(0), nrm);
       continue;
     }
     // 隣の建物に接する所: 隣の高さまでは隠れるので作らず、それより上は窓のない壁（境界の壁）
@@ -178,6 +190,7 @@ function writeWalls(W, ring, sign, b, plainColor, facade, party = null) {
         W.plain.quad(P(t0, yc), P(t1, yc), P(t1, y1), P(t0, y1), nrm, [t0 / 4, yc / 4], [t1 / 4, yc / 4], [t1 / 4, y1 / 4], [t0 / 4, y1 / 4], plainColor);
         continue;
       }
+      if (y0 < 0.5 && W.contact && l >= 1.5 && info.kind !== 'roof') writeContact(W.contact, P(t0, 0), P(t1, 0), nrm);
       if (info.isChurch && L >= 1.6) {
         // 教会の壁: 地面からの高さで窓の段がそろう
         const s0 = (along + t0) / CHURCH_TILE.w, s1 = (along + t1) / CHURCH_TILE.w;
@@ -195,16 +208,24 @@ function writeWalls(W, ring, sign, b, plainColor, facade, party = null) {
       if (y0 < 0.5) {
         const gt = Math.min(y1, y0 + groundH);
         const v1 = (gt - y0) / groundH;
-        W.ground.quad(P(t0, y0), P(t1, y0), P(t1, gt), P(t0, gt), nrm, [u0, sv], [u1, sv], [u1, sv + v1], [u0, sv + v1], tint);
+        W.ground.quad(P(t0, y0), P(t1, y0), P(t1, gt), P(t0, gt), nrm, [u0, sv], [u1, sv], [u1, sv + v1], [u0, sv + v1], fc);
         yb = gt;
       }
       if (y1 > yb + 0.05) {
         const v1 = (y1 - yb) / floorH;
-        W.upper.quad(P(t0, yb), P(t1, yb), P(t1, y1), P(t0, y1), nrm, [u0, sv], [u1, sv], [u1, sv + v1], [u0, sv + v1], tint);
+        W.upper.quad(P(t0, yb), P(t1, yb), P(t1, y1), P(t0, y1), nrm, [u0, sv], [u1, sv], [u1, sv + v1], [u0, sv + v1], fc);
       }
     }
     along += L;
   }
+}
+
+const CONTACT_W = 1.1; // 壁際の地面の陰の幅（m）
+
+// 壁際の地面の陰（空が半分ふさがれて暗い）: 壁の足元から外へ CONTACT_W m の帯。濃さは UV の v（0 = 壁際）で決める
+function writeContact(w, a, c, nrm) {
+  const ox = nrm[0] * CONTACT_W, oz = nrm[2] * CONTACT_W, y = 0.02;
+  w.quad([a[0], y, a[2]], [c[0], y, c[2]], [c[0] + ox, y, c[2] + oz], [a[0] + ox, y, a[2] + oz], [0, 1, 0], [0.5, 0], [0.5, 0], [0.5, 1], [0.5, 1]);
 }
 
 // 傾斜した屋根の三角形。法線を計算し、瓦が勾配方向に流れるよう UV を合わせる
@@ -310,14 +331,21 @@ export function createBuildingMaterials(tex) {
   return {
     upper: useFacadeAtlas(std(tex.upper)),
     ground: useFacadeAtlas(std(tex.shopfront)),
-    plain: std(tex.plain),
+    plain: useContactShade(std(tex.plain)),
     capitole: std(tex.capitole, { alphaTest: 0.5 }), // キャピトルの正面（屋上の手すりの上は透明）
     tower: std(tex.tower), // サン・セルナン・ジャコバンの八角形の鐘楼
-    church: std(tex.church), // 教会の壁（石の縞・控え壁・半円アーチの窓）
+    church: useContactShade(std(tex.church)), // 教会の壁（石の縞・控え壁・半円アーチの窓）
     enclosureBrick: std(tex.enclosureBrick, { roughness: 0.95 }), // 敷地の塀（レンガ）
     enclosureRender: std(tex.enclosureRender, { roughness: 0.95 }), // 敷地の塀（漆喰）
     roof: std(tex.roof, { roughness: 0.85 }),
     flat: std(tex.flatRoof),
+    // 壁際の地面の陰（半透明の黒。川の上には描かない: 地面と同じステンシル）
+    contact: new THREE.MeshBasicMaterial({
+      color: '#1c1610', alphaMap: tex.contact, transparent: true, depthWrite: false,
+      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -8,
+      stencilWrite: true, stencilRef: 1, stencilFunc: THREE.NotEqualStencilFunc,
+      stencilFail: THREE.KeepStencilOp, stencilZFail: THREE.KeepStencilOp, stencilZPass: THREE.KeepStencilOp,
+    }),
   };
 }
 
@@ -328,11 +356,12 @@ export async function buildBuildings(parsed, materials, onProgress, facade = nul
   const group = new THREE.Group();
   group.name = 'buildings';
   const chunks = new Map();
+  const contact = new MeshWriter(); // 壁際の地面の陰はエリア（タイル）でひとつにまとめる
   const getChunk = (x, z) => {
     const key = `${Math.floor(x / CHUNK)},${Math.floor(z / CHUNK)}`;
     let c = chunks.get(key);
     if (!c) {
-      c = { upper: new MeshWriter(), ground: new MeshWriter(), plain: new MeshWriter(), capitole: new MeshWriter(), church: new MeshWriter(), tower: new MeshWriter(), roof: new MeshWriter(), flat: new MeshWriter() };
+      c = { upper: new MeshWriter(), ground: new MeshWriter(), plain: new MeshWriter(), capitole: new MeshWriter(), church: new MeshWriter(), tower: new MeshWriter(), roof: new MeshWriter(), flat: new MeshWriter(), contact };
       chunks.set(key, c);
     }
     return c;
@@ -375,6 +404,13 @@ export async function buildBuildings(parsed, materials, onProgress, facade = nul
       mesh.matrixAutoUpdate = false;
       group.add(mesh);
     }
+  }
+  if (!contact.empty && materials.contact) {
+    const mesh = new THREE.Mesh(contact.toGeometry(), materials.contact);
+    mesh.renderOrder = ORDER.marking + 0.5;
+    mesh.matrixAutoUpdate = false;
+    mesh.name = 'contact-shade';
+    group.add(mesh);
   }
   onProgress?.(1);
   return { group, stats };

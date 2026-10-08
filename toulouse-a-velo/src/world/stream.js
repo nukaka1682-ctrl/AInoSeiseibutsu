@@ -8,7 +8,7 @@ import { Grid, pointInRing } from '../geo.js';
 import { CAR_ROADS, parseOsm } from './parse.js';
 import { loadTileData, tileAt, tileBounds, tileLayout } from '../data/tiles.js';
 import { buildBuildings } from './buildings.js';
-import { buildTrees, fillParkTrees, streetTrees } from './trees.js';
+import { buildTrees, fillParkTrees, planeTreeTest, streetTrees } from './trees.js';
 import { buildEnclosures, clearRoads, projectTrees, projectWalls } from './enclosures.js';
 import { findCapitoleFacade, markBrickSites } from './landmarkfacades.js';
 import { findTowers } from './towers.js';
@@ -190,7 +190,7 @@ class TileStreamer {
     // 建物（キャピトルの正面・鐘楼は専用のモデル。隣のタイルの建物と接する壁は窓なし）
     const facade = findCapitoleFacade({ areas: this.parsed.areas, buildings });
     const towers = findTowers(this.proj, buildings);
-    markBrickSites(this.proj, buildings);
+    markBrickSites(this.proj, buildings, this.parsed.areas);
     const built = await buildBuildings(tp, this.materials, null, facade, { context, towers });
     group.add(built.group);
     if (t.state !== 'loading') return disposeGroup(group);
@@ -220,7 +220,12 @@ class TileStreamer {
       const roads = this.avenues.filter((r) => r.pts.some(([x, z]) => x > B.minX - 50 && x < B.maxX + 50 && z > B.minZ - 50 && z < B.maxZ + 50));
       treePts = fillParkTrees(parks, [], free).concat(streetTrees(roads, (x, z) => inB(x, z) && !this.roadnet.onRoad(x, z, 0.2) && !this.inWater(x, z) && !insideBuilding(x, z)));
     }
-    group.add(buildTrees(treePts));
+    // 街路・運河沿いはプラタナス。横に広い LiDAR の塊を分けた木は、道路・水・建物の上には置かない
+    const trees = buildTrees(treePts, {
+      isPlane: planeTreeTest(this.roadnet, this.inWater),
+      canPlace: (x, z) => !this.roadnet.onRoad(x, z, 0.3) && !this.inWater(x, z) && !insideBuilding(x, z),
+    });
+    group.add(trees);
 
     // 当たり判定（建物の壁。道路が横切る所は通路として開ける。道路の上でない木の幹）
     const isPassage = (a, b) => this.roadnet.crossesRoad(a[0], a[1], b[0], b[1]);
@@ -229,8 +234,7 @@ class TileStreamer {
       cw.addRing(b.outer, isPassage);
       for (const h of b.holes) cw.addRing(h, isPassage);
     }
-    for (const p of treePts) {
-      const x = p.x ?? p[0], z = p.z ?? p[1];
+    for (const [x, z] of trees.userData.trunks) {
       if (!this.roadnet.onRoad(x, z, 0.3)) cw.addCircle(x, z, 0.3);
     }
 

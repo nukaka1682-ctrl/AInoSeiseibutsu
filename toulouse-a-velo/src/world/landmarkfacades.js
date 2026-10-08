@@ -1,6 +1,8 @@
 // 名所の建物の正面に、専用のテクスチャ（facades.js）を貼る場所を決める。
 // いまはキャピトル（市庁舎）: キャピトル広場に面した、いちばん長い建物の壁を正面とする。
-import { closestOnSegment, signedArea } from '../geo.js';
+// あわせて、旧市街の建物・レンガ造りの歴史的な建物群・キャピトル広場を囲む建物に印を付ける（ファサードの様式を選ぶため）。
+import { closestOnSegment, pointInPolygon, signedArea } from '../geo.js';
+import { oldTownTest } from '../config.js';
 import { CAPITOLE_HEIGHT, STYLE } from './facades.js';
 
 /**
@@ -79,7 +81,11 @@ const BRICK_SITES = [
   { name: 'Hôtel-Dieu Saint-Jacques', lat: 43.59935, lon: 1.43655, r: 85 },
   { name: 'Hôpital de La Grave', lat: 43.60095, lon: 1.43405, r: 110 },
 ];
-export function markBrickSites(proj, buildings) {
+// areas: 広場など（キャピトル広場に面した建物を見つけるのに使う）
+export function markBrickSites(proj, buildings, areas = []) {
+  // 旧市街の中の建物（ファサードの様式の割合を変える。buildings.js の facadeStyle）
+  const inOld = oldTownTest(proj);
+  for (const b of buildings) b.oldTown = inOld(b.inside[0], b.inside[1]);
   for (const s of BRICK_SITES) {
     const [x, z] = proj.project(s.lat, s.lon);
     for (const b of buildings) {
@@ -89,4 +95,35 @@ export function markBrickSites(proj, buildings) {
       }
     }
   }
+  // キャピトル広場を囲む建物は、そろいのレンガ造り（1 階はアーケード）
+  const square = areas.find((a) => /^Place du Capitole$/i.test(a.name || ''));
+  if (square) {
+    for (const b of facingSquare(square, buildings)) {
+      b.tags['building:material'] = 'brick';
+      b.style = STYLE.arcade;
+    }
+  }
+}
+
+// 広場の方を向いた 6 m 以上の壁がある建物。広場の地図の範囲は、まわりの通りを除いた石畳だけのことが多いので、
+// 壁の前 4〜22 m のどこかが広場の中なら、広場に面しているとする
+export function facingSquare(square, buildings) {
+  const sb = square.bounds;
+  const out = [];
+  for (const b of buildings) {
+    const bb = b.bounds;
+    if (bb.maxX < sb.minX - 20 || bb.minX > sb.maxX + 20 || bb.maxZ < sb.minZ - 20 || bb.minZ > sb.maxZ + 20) continue;
+    const s = signedArea(b.outer) > 0 ? 1 : -1;
+    let facing = 0;
+    for (let i = 0; i < b.outer.length; i++) {
+      const a = b.outer[i], c = b.outer[(i + 1) % b.outer.length];
+      const L = Math.hypot(c[0] - a[0], c[1] - a[1]);
+      if (L < 1) continue;
+      const nx = ((c[1] - a[1]) / L) * s, nz = (-(c[0] - a[0]) / L) * s;
+      const mx = (a[0] + c[0]) / 2, mz = (a[1] + c[1]) / 2;
+      if ([4, 10, 16, 22].some((d) => pointInPolygon(mx + nx * d, mz + nz * d, square))) facing += L;
+    }
+    if (facing >= 6) out.push(b);
+  }
+  return out;
 }

@@ -86,7 +86,7 @@ export function makeEnclosureTexture(kind) {
   const [c, ctx] = canvas(S, S);
   const rnd = mulberry32(kind === 'brick' ? 21 : 22);
   brickWall(ctx, S, S, ppm, rnd, {
-    bricks: ['#cf8a62', '#d6956b', '#c27a52', '#dda07a', '#c98258', '#bb734e', '#d89470', '#c7845e'],
+    bricks: ['#c58a68', '#cc9471', '#b97c5a', '#d29e7e', '#bf835f', '#b27556', '#cd9374', '#bd8463'],
     mortar: '#cdb99b',
   });
   if (kind === 'render') {
@@ -369,33 +369,101 @@ function wrapEdges(ctx, S) {
   ctx.putImageData(img, 0, 0);
 }
 
-// 水面の法線マップ（スクロールさせて波に見せる）
+// 水面の法線マップ（スクロールさせて波に見せる。1 枚 = 約 6 m）。さざ波の高さを、向きのそろった（風下へ ±70°）
+// 多数の正弦波の和で作る。波長が短いほど小さく（波のスペクトル）、波数は整数で継ぎ目なく繰り返す
 export function makeWaterNormalTexture() {
   const S = 256;
   const [c, ctx] = canvas(S, S);
   const img = ctx.createImageData(S, S);
   const rnd = mulberry32(9);
-  const waves = Array.from({ length: 10 }, () => ({
-    kx: Math.round((rnd() - 0.5) * 12), kz: Math.round((rnd() - 0.5) * 12), ph: rnd() * Math.PI * 2, a: 0.3 + rnd() * 0.7,
-  }));
+  const waves = [];
+  for (let i = 0; i < 40; i++) {
+    const k = 2 + Math.pow(rnd(), 1.4) * 14; // 1 枚あたりの波の数
+    const ang = 0.35 + (rnd() - 0.5) * 2.4;
+    const kx = Math.round(Math.cos(ang) * k), kz = Math.round(Math.sin(ang) * k);
+    if (!kx && !kz) continue;
+    waves.push({ kx, kz, ph: rnd() * Math.PI * 2, a: (0.6 + rnd() * 0.8) / Math.pow(Math.hypot(kx, kz), 1.25) });
+  }
+  const gx = new Float32Array(S * S), gz = new Float32Array(S * S);
+  let max = 0;
   for (let y = 0; y < S; y++) {
     for (let x = 0; x < S; x++) {
       let dx = 0, dz = 0;
       for (const w of waves) {
-        const p = ((w.kx * x + w.kz * y) / S) * Math.PI * 2 + w.ph;
-        const d = Math.cos(p) * w.a;
+        const d = -Math.sin(((w.kx * x + w.kz * y) / S) * Math.PI * 2 + w.ph) * w.a;
         dx += d * w.kx;
         dz += d * w.kz;
       }
-      const i = (y * S + x) * 4;
-      img.data[i] = 128 + Math.max(-127, Math.min(127, dx * 2.2));
-      img.data[i + 1] = 128 + Math.max(-127, Math.min(127, dz * 2.2));
-      img.data[i + 2] = 255;
-      img.data[i + 3] = 255;
+      gx[y * S + x] = dx;
+      gz[y * S + x] = dz;
+      max = Math.max(max, Math.abs(dx), Math.abs(dz));
     }
+  }
+  const k = 0.9 / max;
+  for (let i = 0; i < S * S; i++) {
+    const nx = -gx[i] * k, nz = -gz[i] * k;
+    const l = Math.hypot(nx, nz, 1);
+    img.data[i * 4] = 128 + (nx / l) * 127;
+    img.data[i * 4 + 1] = 128 + (nz / l) * 127;
+    img.data[i * 4 + 2] = 128 + (1 / l) * 127;
+    img.data[i * 4 + 3] = 255;
   }
   ctx.putImageData(img, 0, 0);
   return toTexture(c, { srgb: false });
+}
+
+// プラタナスのまだらな樹皮（運河沿いの写真: クリーム色 #d6cdb0・オリーブ色 #8a866e・茶色がはがれたうろこ状に混ざる）。
+// 木の幹の 1 周 × 約 1 m で 1 枚。プラタナス以外の木は、暗い灰褐色を掛けて使う
+export function makeBarkTexture() {
+  const S = 256;
+  const [c, ctx] = canvas(S, S);
+  const rnd = mulberry32(31);
+  ctx.fillStyle = '#8c876c';
+  ctx.fillRect(0, 0, S, S);
+  const colors = ['#d4cbad', '#c9c29f', '#a6a283', '#7d7a58', '#958262', '#b8b394', '#6f6c50'];
+  for (let i = 0; i < 70; i++) {
+    const cx = rnd() * S, cy = rnd() * S;
+    const rx = 10 + rnd() * 34, ry = 8 + rnd() * 26;
+    const col = colors[Math.floor(rnd() * colors.length)];
+    const pts = [];
+    for (let k = 0; k < 9; k++) {
+      const a = (k / 9) * Math.PI * 2, f = 0.6 + rnd() * 0.5;
+      pts.push([Math.cos(a) * rx * f, Math.sin(a) * ry * f]);
+    }
+    for (const dx of [-S, 0, S]) {
+      for (const dy of [-S, 0, S]) {
+        ctx.beginPath();
+        pts.forEach(([px, py], k) => (k ? ctx.lineTo(cx + dx + px, cy + dy + py) : ctx.moveTo(cx + dx + px, cy + dy + py)));
+        ctx.closePath();
+        ctx.fillStyle = col;
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(60,55,40,0.35)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+    }
+  }
+  for (let i = 0; i < S * S * 0.25; i++) {
+    ctx.fillStyle = rnd() < 0.5 ? 'rgba(40,36,25,0.18)' : 'rgba(255,250,230,0.14)';
+    ctx.fillRect(rnd() * S, rnd() * S, 1, 1 + (rnd() < 0.3 ? 1 : 0));
+  }
+  return toTexture(c);
+}
+
+// 壁際の地面の陰の濃さ（alphaMap。v = 0 が壁際で濃く、v = 1 で消える）
+export function makeContactTexture() {
+  const H = 64;
+  const [c, ctx] = canvas(4, H);
+  for (let y = 0; y < H; y++) {
+    const v = 1 - (y + 0.5) / H; // 画像は上下が反転して貼られる（v = 0 が画像の下端）
+    const a = 0.42 * Math.pow(1 - v, 1.8);
+    const g = Math.round(a * 255);
+    ctx.fillStyle = `rgb(${g},${g},${g})`;
+    ctx.fillRect(0, y, 4, 1);
+  }
+  const t = toTexture(c, { repeat: false, srgb: false, anisotropy: 1 });
+  t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+  return t;
 }
 
 export function makeTextures() {
@@ -418,5 +486,6 @@ export function makeTextures() {
     ground: makeGroundTexture(),
     gravel: makeNoiseTexture({ base: '#c9b999', spots: ['#b5a585', '#ddd0b2', '#a39373'], seed: 16, count: 9000, spotSize: 2, alpha: 0.6 }),
     waterNormal: makeWaterNormalTexture(),
+    contact: makeContactTexture(),
   };
 }
