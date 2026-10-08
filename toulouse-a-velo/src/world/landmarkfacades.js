@@ -79,6 +79,8 @@ const BRICK_SITES = [
   { name: 'Hôtel-Dieu Saint-Jacques', lat: 43.59935, lon: 1.43655, r: 85 },
   { name: 'Hôpital de La Grave', lat: 43.60095, lon: 1.43405, r: 110 },
 ];
+// 屋根の材料がデータにない名所の屋根
+const SLATE_ROOFS = [{ name: 'Donjon du Capitole', lat: 43.60442, lon: 1.44478, r: 10, colour: '#5f5f61' }];
 export function markBrickSites(proj, buildings) {
   for (const s of BRICK_SITES) {
     const [x, z] = proj.project(s.lat, s.lon);
@@ -86,6 +88,16 @@ export function markBrickSites(proj, buildings) {
       if (b.info.area > 150 && Math.hypot(b.inside[0] - x, b.inside[1] - z) < s.r) {
         b.tags['building:material'] = 'brick';
         b.style = STYLE.brickStone;
+      }
+    }
+  }
+  // キャピトルの主塔（donjon）は急なスレートの屋根
+  for (const s of SLATE_ROOFS) {
+    const [x, z] = proj.project(s.lat, s.lon);
+    for (const b of buildings) {
+      if (Math.hypot(b.inside[0] - x, b.inside[1] - z) < s.r) {
+        b.tags['roof:material'] = 'slate';
+        b.tags['roof:colour'] = s.colour;
       }
     }
   }

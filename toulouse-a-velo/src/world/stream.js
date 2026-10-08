@@ -80,7 +80,7 @@ class TileStreamer {
     this.loading = 0;
     this.focus = [0, 0];
     this.building = Promise.resolve(); // 組み立ては 1 枚ずつ（通信は並行）
-    this.totals = { buildings: 0, trees: 0, walls: 0, triangles: 0, failed: 0 };
+    this.totals = { buildings: 0, trees: 0, walls: 0, triangles: 0, failed: 0, built: 0, buildMs: 0 };
   }
 
   key(i, j) {
@@ -174,6 +174,7 @@ class TileStreamer {
   }
 
   async build(t, data) {
+    const t0 = performance.now();
     const B = t.bounds;
     const tp = parseOsm(data.osm, this.proj, this.rect, []);
     const buildings = tp.buildings;
@@ -191,7 +192,9 @@ class TileStreamer {
     const facade = findCapitoleFacade({ areas: this.parsed.areas, buildings });
     const towers = findTowers(this.proj, buildings);
     markBrickSites(this.proj, buildings);
+    const tb = performance.now();
     const built = await buildBuildings(tp, this.materials, null, facade, { context, towers });
+    const buildingMs = performance.now() - tb;
     group.add(built.group);
     if (t.state !== 'loading') return disposeGroup(group);
 
@@ -239,7 +242,11 @@ class TileStreamer {
       if (o.isMesh && !o.isInstancedMesh && o.geometry.index == null) tris += o.geometry.attributes.position.count / 3;
     });
     if (t.state !== 'loading') return disposeGroup(group);
-    Object.assign(t, { group, cw, buildings: buildings.length, trees: treePts.length, walls: walls.length, triangles: tris, state: 'ready' });
+    // 組み立てにかかった時間（途中でフレームを譲った時間も含む）と三角形の数を記録する
+    const ms = performance.now() - t0;
+    const roofs = built.stats.roofs;
+    console.info(`タイル ${t.key}: 建物 ${buildings.length} 棟（傾斜屋根 ${roofs.pitched}・陸屋根 ${roofs.flat}・作れず陸屋根 ${roofs.fallback}）・三角形 ${tris}・組み立て ${ms.toFixed(0)} ms（建物の計算 ${built.stats.ms.toFixed(0)} ms、待ちを含め ${buildingMs.toFixed(0)} ms）`);
+    Object.assign(t, { group, cw, buildings: buildings.length, trees: treePts.length, walls: walls.length, triangles: tris, buildMs: ms, state: 'ready' });
     this.group.add(group);
     this.collision.add(cw);
     this.onTileReady?.(t, buildings);
@@ -247,6 +254,8 @@ class TileStreamer {
     this.totals.trees += treePts.length;
     this.totals.walls += walls.length;
     this.totals.triangles += tris;
+    this.totals.built++;
+    this.totals.buildMs += ms;
   }
 
   unload(t) {
