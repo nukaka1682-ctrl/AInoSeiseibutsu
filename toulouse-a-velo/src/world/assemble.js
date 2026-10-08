@@ -7,7 +7,7 @@ import { Grid, LocalProjection, pointInPolygon, pointInRing } from '../geo.js';
 import { CAR_ROADS, parseOsm } from './parse.js';
 import { buildBuildings } from './buildings.js';
 import { buildGround, makeWaterTest } from './ground.js';
-import { buildTrees, fillParkTrees, streetTrees } from './trees.js';
+import { buildTrees, fillParkTrees, planeTreeTest, streetTrees } from './trees.js';
 import { buildEnclosures, clearRoads, projectTrees, projectWalls } from './enclosures.js';
 import { findTowers } from './towers.js';
 import { findCapitoleFacade, markBrickSites } from './landmarkfacades.js';
@@ -90,16 +90,19 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
     treePts = parsed.trees.filter(inRect).concat(extra, avenue);
   }
   const towers = findTowers(proj, parsed.buildings); // 八角形の鐘楼は専用のモデル
-  markBrickSites(proj, parsed.buildings);
+  markBrickSites(proj, parsed.buildings, parsed.areas);
   const buildings = await buildBuildings(parsed, buildingMats, (p) => progress(`建物を建てています… ${Math.round(p * 100)}%`, 0.3 + p * 0.6), facade, { towers });
   group.add(buildings.group);
   const buildingStats = buildings.stats;
 
-  const trees = buildTrees(treePts);
+  // 街路・運河沿いはプラタナス。横に広い LiDAR の塊を分けた木は、道路・水・建物の上には置かない
+  const trees = buildTrees(treePts, {
+    isPlane: planeTreeTest(roadnet, inWater),
+    canPlace: (x, z) => !roadnet.onRoad(x, z, 0.3) && !inWater(x, z) && !insideBuilding(x, z),
+  });
   group.add(trees);
   // 木の幹は道路の上でなければ当たり判定を付ける（道路に張り出した枝の下は通れる）
-  for (const t of trees.userData.points || []) {
-    const x = t.x ?? t[0], z = t.z ?? t[1];
+  for (const [x, z] of trees.userData.trunks) {
     if (!roadnet.onRoad(x, z, 0.3)) collision.addCircle(x, z, 0.3);
   }
 

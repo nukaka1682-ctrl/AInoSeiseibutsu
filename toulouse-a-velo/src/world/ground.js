@@ -65,17 +65,51 @@ export function createGroundMaterials(tex) {
       stencilFunc: THREE.AlwaysStencilFunc,
       stencilZPass: THREE.ReplaceStencilOp,
     }),
-    water: new THREE.MeshStandardMaterial({
-      color: '#3d5a4f',
-      roughness: 0.16,
-      metalness: 0,
-      normalMap: waterNormal,
-      normalScale: new THREE.Vector2(0.25, 0.25),
+    water: waterMaterial(waterNormal),
+    // 岸壁の際の水面の陰（岸壁の影と、暗い岸壁の映り込み）
+    waterEdge: new THREE.MeshBasicMaterial({
+      color: '#141a12', alphaMap: tex.contact, transparent: true, opacity: 0.85, depthWrite: false,
+      polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4,
     }),
     quai: new THREE.MeshStandardMaterial({ map: tex.plain, vertexColors: true, roughness: 0.95 }),
     deck: new THREE.MeshStandardMaterial({ map: tex.asphalt, vertexColors: true, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -6 }),
     bridge: new THREE.MeshStandardMaterial({ map: tex.plain, vertexColors: true, roughness: 0.9 }),
   };
+}
+
+// 水面: ガロンヌ川はにごったオリーブ色の灰緑（写真 #4b5642〜#7b888a）、運河は暗い緑（#45523a）。色は頂点カラーで付ける。
+// 波の法線マップは 6 m ごとに繰り返し、大きさと向きの違う 2 枚を別々に流して、同じ模様の繰り返しを見えなくする。
+// 波は弱く（流れのゆるい川面）、少し粗くして空の映り込みをぼかす。空の映り込みは物理どおり真上からはほとんど映らず、
+// 斜めから見るほど強い（強さは main.js で水だけ別に決める）。にごった水に映る空は青くなく灰緑に見えるので、映り込みの色を
+// 灰色に寄せて水の色を少し掛ける
+const WATER_TILE = 6; // 波の法線マップ 1 枚の大きさ（m）
+const WATER_COLOR = { river: c3('#4f5a46'), canal: c3('#424e37'), pond: c3('#4a5540') };
+function waterMaterial(normalMap) {
+  const m = new THREE.MeshStandardMaterial({
+    color: '#ffffff', vertexColors: true, roughness: 0.13, metalness: 0,
+    normalMap, normalScale: new THREE.Vector2(0.06, 0.06),
+  });
+  m.userData.time = { value: 0 };
+  m.onBeforeCompile = (shader) => {
+    shader.uniforms.waterTime = m.userData.time;
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform float waterTime;')
+      .replace('vec3 mapN = texture2D( normalMap, vNormalMapUv ).xyz * 2.0 - 1.0;', `
+        // 細かいさざ波（ガロンヌ川の流れる北へ流す）と、2.7 倍の大きさで 40° 回したうねり（ゆっくり別の向きに）
+        vec2 uvA = vNormalMapUv + vec2(0.011, -0.043) * waterTime;
+        const mat2 ROT = mat2(0.766, 0.643, -0.643, 0.766);
+        vec2 uvB = ROT * vNormalMapUv * 0.37 + vec2(-0.017, 0.006) * waterTime;
+        vec3 nA = texture2D( normalMap, uvA ).xyz * 2.0 - 1.0;
+        vec3 nB = texture2D( normalMap, uvB ).xyz * 2.0 - 1.0;
+        nB.xy = transpose(ROT) * nB.xy;
+        vec3 mapN = normalize(vec3(nA.xy + nB.xy * 1.3, nA.z * nB.z));`)
+      .replace('#include <lights_fragment_maps>', `#include <lights_fragment_maps>
+        #if defined( USE_ENVMAP ) && defined( RE_IndirectSpecular )
+          radiance = mix(vec3(dot(radiance, vec3(0.2126, 0.7152, 0.0722))), radiance, 0.3) * vec3(0.9, 1.0, 0.93);
+        #endif`);
+  };
+  m.customProgramCacheKey = () => 'water-two-layers';
+  return m;
 }
 
 // 折れ線の左右のオフセット（マイター結合、長さ制限付き）
@@ -236,6 +270,7 @@ export function buildGroundBase(parsed, rect, mats) {
     const mask = new MeshWriter();
     const surface = new MeshWriter();
     const walls = new MeshWriter();
+    const edge = new MeshWriter();
     const onRectEdge = (p, q) => {
       const e = 0.01;
       return (Math.abs(p[0] - rect.minX) < e && Math.abs(q[0] - rect.minX) < e) ||
@@ -243,7 +278,7 @@ export function buildGroundBase(parsed, rect, mats) {
         (Math.abs(p[1] - rect.minZ) < e && Math.abs(q[1] - rect.minZ) < e) ||
         (Math.abs(p[1] - rect.maxZ) < e && Math.abs(q[1] - rect.maxZ) < e);
     };
-    const quaiColor = (a) => (a.kind === 'river' ? c3('#c08066') : c3('#bdb3a2'));
+    const quaiColor = (a) => (a.kind === 'river' ? c3('#b47c64') : c3('#b3aa9a'));
     const writeQuai = (ring, isHole, a) => {
       const s = signedArea(ring) > 0 ? 1 : -1;
       const y0 = 0, y1 = -a.depth - 0.6;
@@ -261,11 +296,15 @@ export function buildGroundBase(parsed, rect, mats) {
         if (inWater(mx, mz)) continue; // 隣も水（ポリゴンの継ぎ目）なら壁は不要
         walls.quad([p[0], y0, p[1]], [q[0], y0, q[1]], [q[0], y1, q[1]], [p[0], y1, p[1]], [nx, 0, nz],
           [0, y0 / 3], [L / 3, y0 / 3], [L / 3, y1 / 3], [0, y1 / 3], col);
+        // 岸壁の際の水面を暗く（幅は川で 7 m、運河・池で 3 m。v = 0 が岸壁の際）
+        const w = a.kind === 'river' ? 7 : 3, yw = -a.depth + 0.01;
+        edge.quad([p[0], yw, p[1]], [q[0], yw, q[1]], [q[0] + nx * w, yw, q[1] + nz * w], [p[0] + nx * w, yw, p[1] + nz * w], [0, 1, 0],
+          [0.5, 0], [0.5, 0], [0.5, 1], [0.5, 1]);
       }
     };
     for (const a of water) {
       writeFlatPolygon(mask, a.outer, a.holes, 0, 10);
-      writeFlatPolygon(surface, a.outer, a.holes, -a.depth, 25);
+      writeFlatPolygon(surface, a.outer, a.holes, -a.depth, WATER_TILE, WATER_COLOR[a.kind] || WATER_COLOR.canal);
       if (a.patch) continue; // 橋の下を埋めたパッチには岸壁を作らない
       writeQuai(a.outer, false, a);
       for (const h of a.holes) writeQuai(h, true, a);
@@ -285,6 +324,12 @@ export function buildGroundBase(parsed, rect, mats) {
       const m = new THREE.Mesh(walls.toGeometry(), mats.quai);
       m.renderOrder = ORDER.water;
       m.receiveShadow = true;
+      group.add(m);
+    }
+    if (!edge.empty && mats.waterEdge) {
+      const m = new THREE.Mesh(edge.toGeometry(), mats.waterEdge);
+      m.renderOrder = ORDER.water + 1;
+      m.name = 'water-edge';
       group.add(m);
     }
   }

@@ -1,6 +1,7 @@
 // エリア設定と名所データ。
 // 名所の座標は「だいたいの位置」。起動時に OSM データ内の同名の地物を探して、
 // 見つかればその実際の位置に置き換える（src/game/landmarks.js）。
+import { pointInRing } from './geo.js';
 
 export const AREA_PRESETS = {
   toulouse: {
@@ -31,6 +32,25 @@ export const DEFAULT_AREA = 'toulouse';
 
 // 地図データ形式のバージョン（変えると同梱データ・キャッシュが無効になる）
 export const DATA_VERSION = 2;
+
+// 旧市街（歴史地区）の範囲 [緯度, 経度]。右岸は環状の大通り（ダルコル・ストラスブール・カルノー・
+// フランソワ・ヴェルディエ・グラン・ロン・ジュール・ゲード）の内側、左岸はガロンヌ川と
+// シャルル・ド・フィット通りの間のサン・シプリアンの古い街。北西はデュポルタル通りまで
+export const OLD_TOWN = [
+  [43.6116, 1.4388], [43.6106, 1.4435], [43.6091, 1.4458], [43.6056, 1.4488], [43.6030, 1.4506],
+  [43.6003, 1.4523], [43.5967, 1.4527], [43.5955, 1.4513], [43.5941, 1.4482], [43.5928, 1.4446],
+  [43.5921, 1.4422], [43.5926, 1.4348], [43.5942, 1.4333], [43.5964, 1.4319], [43.5980, 1.4308],
+  [43.5993, 1.4296], [43.6010, 1.4285], [43.6020, 1.4279], [43.6043, 1.4281], [43.6052, 1.4320],
+  [43.6058, 1.4347], [43.6103, 1.4348], [43.6111, 1.4369],
+];
+
+// ローカル座標 (x, z) が旧市街の中かを調べる関数を作る（proj: geo.js の LocalProjection）
+export function oldTownTest(proj) {
+  const ring = OLD_TOWN.map(([lat, lon]) => proj.project(lat, lon));
+  const xs = ring.map((p) => p[0]), zs = ring.map((p) => p[1]);
+  const minX = Math.min(...xs), maxX = Math.max(...xs), minZ = Math.min(...zs), maxZ = Math.max(...zs);
+  return (x, z) => x >= minX && x <= maxX && z >= minZ && z <= maxZ && pointInRing(x, z, ring);
+}
 
 // 名所。match は OSM の name タグに対する正規表現。
 export const LANDMARKS = [
