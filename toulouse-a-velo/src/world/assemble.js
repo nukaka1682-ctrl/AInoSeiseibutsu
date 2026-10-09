@@ -11,6 +11,8 @@ import { buildTrees, fillParkTrees, planeTreeTest, streetTrees } from './trees.j
 import { buildEnclosures, clearRoads, projectTrees, projectWalls } from './enclosures.js';
 import { findTowers } from './towers.js';
 import { findCapitoleFacade, markBrickSites } from './landmarkfacades.js';
+import { oldTownTest } from '../config.js';
+import { POST_HIT } from './streets.js';
 import { CollisionWorld } from '../game/collision.js';
 import { RoadNetwork } from '../game/roadnet.js';
 import { resolveLandmarks } from '../game/landmarks.js';
@@ -66,11 +68,11 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   const facade = findCapitoleFacade(parsed); // キャピトルの正面には専用のテクスチャ
   progress('道路と川を作成中…', 0.15);
   await pause();
-  const ground = buildGround(parsed, rect, groundMats);
-  group.add(ground.group);
-
-  // 塀（地籍の敷地の境界と LiDAR から見つけたもの）
+  // 塀（地籍の敷地の境界と LiDAR から見つけたもの）。歩道は建物の壁・塀まで延ばすので、地面より先に用意する
   const walls = clearRoads(projectWalls(data.walls || [], proj), (x, z) => roadnet.onRoad(x, z, 0.3));
+  const ground = buildGround(parsed, rect, groundMats, { buildings: parsed.buildings, walls, inOldTown: oldTownTest(proj) });
+  group.add(ground.group);
+  for (const [x, z] of ground.posts) collision.addCircle(x, z, POST_HIT); // 横断歩道の脇の車止め
   group.add(buildEnclosures(walls, buildingMats, collision));
 
   progress('木を植えています…', 0.25);
@@ -91,7 +93,7 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   }
   const towers = findTowers(proj, parsed.buildings); // 八角形の鐘楼は専用のモデル
   markBrickSites(proj, parsed.buildings, parsed.areas);
-  const buildings = await buildBuildings(parsed, buildingMats, (p) => progress(`建物を建てています… ${Math.round(p * 100)}%`, 0.3 + p * 0.6), facade, { towers });
+  const buildings = await buildBuildings(parsed, buildingMats, (p) => progress(`建物を建てています… ${Math.round(p * 100)}%`, 0.3 + p * 0.6), facade, { towers, groundAt: ground.heightAt });
   group.add(buildings.group);
   const buildingStats = buildings.stats;
 
@@ -115,7 +117,8 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
 
   return {
     proj, rect, parsed, roadnet, ground, collision, trees, landmarks, group, surfaceAt,
-    heightAt: () => 0, groundAt: null,
+    // 一段高い歩道の上では自転車も歩道の高さに上がる
+    heightAt: ground.heightAt, groundAt: ground.heightAt,
     stats: {
       buildings: buildingStats,
       roads: parsed.roads.length,

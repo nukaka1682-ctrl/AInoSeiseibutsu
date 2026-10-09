@@ -67,6 +67,14 @@ function brickWall(ctx, W, H, ppm, rnd, { bricks, mortar, grain = 0.18 }) {
   }
 }
 
+// 16 進数の色を k 倍した sRGB の色。shade() は THREE.Color が線形の色に直した値をそのまま使うので、書いた色より
+// かなり暗く・濃くなる（既存のテクスチャはその色合いで合わせてある）。通りの石は写真の色をそのまま書けるようこちらを使う
+function shadeSrgb(hex, k) {
+  const v = parseInt(hex.slice(1), 16);
+  const f = (x) => Math.min(255, Math.round(x * k));
+  return `rgb(${f((v >> 16) & 255)},${f((v >> 8) & 255)},${f(v & 255)})`;
+}
+
 function shade(hex, k) {
   const c = new THREE.Color(hex);
   return `rgb(${Math.min(255, Math.round(c.r * 255 * k))},${Math.min(255, Math.round(c.g * 255 * k))},${Math.min(255, Math.round(c.b * 255 * k))})`;
@@ -321,6 +329,155 @@ export function makeSidewalkTexture() {
   return toTexture(c);
 }
 
+// 石 1 個の表面: 花崗岩の細かい粒（明暗の点）と、上の縁の照り・下の縁の陰（丸みのある石の角）
+// bevel: 石の縁の明暗（丸みのある小舗石・縁石）。磨いた平らな石の板では付けない
+function stoneGrain(ctx, rnd, x, y, w, h, dots, alpha = 0.35, bevel = true) {
+  for (let k = 0; k < dots; k++) {
+    const v = rnd();
+    ctx.fillStyle = v < 0.45 ? `rgba(40,34,34,${alpha})` : v < 0.9 ? `rgba(200,192,190,${alpha})` : `rgba(240,236,232,${alpha + 0.2})`;
+    ctx.fillRect(x + rnd() * w, y + rnd() * h, 1 + (rnd() < 0.2 ? 1 : 0), 1);
+  }
+  if (!bevel) return;
+  ctx.fillStyle = 'rgba(255,250,245,0.10)';
+  ctx.fillRect(x, y, w, Math.max(1, h * 0.18));
+  ctx.fillStyle = 'rgba(20,16,16,0.16)';
+  ctx.fillRect(x, y + h * 0.78, w, h * 0.22);
+}
+
+// 旧市街の小舗石（pavés）: 約 10 cm 角の灰色〜ふじ色がかった花崗岩（写真 #706c6d〜#8a8080、日陰 #5d5656）を、
+// 通りを横切る浅い弧の列（segmental arcs、弦 1.28 m・高さ 12 cm）に並べたもの。目地は暗い砂。
+// 通りに沿った UV（u = 横方向、v = 通りの向き）で貼り、2.56 m で 1 周
+export function makeSettsTexture() {
+  const S = 512, ppm = S / 2.56;
+  const [c, ctx] = canvas(S, S);
+  const rnd = mulberry32(21);
+  ctx.fillStyle = '#4e4645';
+  ctx.fillRect(0, 0, S, S);
+  // 石は写真の日なたの色（#706c6d〜#8a8080、ふじ色・茶色がかった灰色 #7f675d）。日陰の青い空の光で冷たく見えすぎないよう少し暖かく
+  const stones = ['#8a807d', '#928782', '#9a8f89', '#857c7a', '#968a84', '#7d7472', '#9d928c', '#8e8480', '#a2968f'];
+  const P = S / 2, sag = 0.12 * ppm; // 弧の幅・高さ
+  const rows = 26, rowH = S / rows;
+  const arc = (x) => {
+    const f = (((x % P) + P) % P) / P * 2 - 1;
+    return sag * (1 - f * f);
+  };
+  for (let r = 0; r < rows; r++) {
+    // 列の中の石の幅（8〜12 cm）。端で S にそろえて継ぎ目なく繰り返す
+    const xs = [0];
+    while (xs[xs.length - 1] < S - 0.13 * ppm) xs.push(xs[xs.length - 1] + (0.08 + rnd() * 0.045) * ppm);
+    xs[xs.length - 1] = S;
+    for (let k = 0; k + 1 < xs.length; k++) {
+      const x0 = xs[k] + 1, x1 = xs[k + 1] - 1;
+      const col = shadeSrgb(stones[Math.floor(rnd() * stones.length)], 0.9 + rnd() * 0.16);
+      const steps = 4;
+      for (const dy of [-S, 0, S]) {
+        const y0 = r * rowH + dy;
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        for (let s = 0; s <= steps; s++) {
+          const x = x0 + ((x1 - x0) * s) / steps;
+          ctx.lineTo(x, y0 + arc(x) + 1.2);
+        }
+        for (let s = steps; s >= 0; s--) {
+          const x = x0 + ((x1 - x0) * s) / steps;
+          ctx.lineTo(x, y0 + arc(x) + rowH - 1.2);
+        }
+        ctx.closePath();
+        ctx.fill();
+      }
+      const yc = r * rowH + arc((x0 + x1) / 2);
+      for (const dy of [-S, 0, S]) stoneGrain(ctx, rnd, x0, yc + dy + 1, x1 - x0, rowH - 2, 14, 0.18);
+    }
+  }
+  // 雨の跡・油じみのムラ
+  for (let i = 0; i < 14; i++) {
+    const r = 30 + rnd() * 90, x = rnd() * S, y = rnd() * S;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, rnd() < 0.5 ? 'rgba(30,26,26,0.14)' : 'rgba(170,160,156,0.10)');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    for (const dx of [-S, 0, S]) for (const dy of [-S, 0, S]) ctx.fillRect(x + dx - r, y + dy - r, r * 2, r * 2);
+  }
+  return toTexture(c);
+}
+
+// 側溝（caniveau）: 少し大きな細長い花崗岩（約 12×25 cm）を通りに沿って 2 列に並べた帯。中央の継ぎ目に向かって
+// 少しくぼむので、真ん中を暗く。u = 帯の幅（0〜1 で 0.32 m）、v = 通りの向き（2.56 m で 1 周）
+export function makeGutterTexture() {
+  const W = 64, H = 512, ppm = H / 2.56;
+  const [c, ctx] = canvas(W, H);
+  const rnd = mulberry32(22);
+  ctx.fillStyle = '#4a4544';
+  ctx.fillRect(0, 0, W, H);
+  const stones = ['#86807e', '#8e8785', '#7f7978', '#958d8a', '#837c7b'];
+  for (let col = 0; col < 2; col++) {
+    const ys = [col ? -0.12 * ppm : 0];
+    while (ys[ys.length - 1] < H - 0.3 * ppm) ys.push(ys[ys.length - 1] + (0.22 + rnd() * 0.08) * ppm);
+    ys.push(H + ys[0]);
+    for (let k = 0; k + 1 < ys.length; k++) {
+      const x0 = col * 32 + 1, y0 = ys[k] + 1, h = ys[k + 1] - ys[k] - 2;
+      ctx.fillStyle = shadeSrgb(stones[Math.floor(rnd() * stones.length)], 0.92 + rnd() * 0.14);
+      for (const dy of [-H, 0, H]) ctx.fillRect(x0, y0 + dy, 30, h);
+      for (const dy of [-H, 0, H]) stoneGrain(ctx, rnd, x0, y0 + dy, 30, h, 30, 0.25);
+    }
+  }
+  const g = ctx.createLinearGradient(0, 0, W, 0);
+  g.addColorStop(0, 'rgba(0,0,0,0)');
+  g.addColorStop(0.5, 'rgba(10,8,8,0.18)');
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  return toTexture(c);
+}
+
+// 歩道の石の板（Rue du Taur の改修後）: 約 60×30 cm のばら色がかったベージュの石（写真 #bcafa1）を、長い辺を
+// 通りに沿わせて 1 列ごとに半分ずらして敷く。目地は細い。u = 横方向、v = 通りの向き（2.4 m で 1 周）
+export function makeSlabTexture() {
+  const S = 512, ppm = S / 2.4;
+  const [c, ctx] = canvas(S, S);
+  const rnd = mulberry32(23);
+  ctx.fillStyle = '#9c8d80';
+  ctx.fillRect(0, 0, S, S);
+  // 磨いた石の板は 1 枚ごとの色の差が小さい（写真では遠目にほぼ一様なばら色のベージュ）
+  const stones = ['#bcafa1', '#c0b2a4', '#b8ab9d', '#c4b6a9', '#baac9f', '#bfb2a6', '#b5a89b'];
+  const cw = 0.3 * ppm, rh = 0.6 * ppm;
+  for (let col = 0; col < S / cw; col++) {
+    for (let r = -1; r < S / rh + 1; r++) {
+      const x = col * cw, y = r * rh + (col % 2) * rh / 2;
+      ctx.fillStyle = shadeSrgb(stones[Math.floor(rnd() * stones.length)], 0.97 + rnd() * 0.05);
+      ctx.fillRect(x + 1, y + 1, cw - 2, rh - 2);
+      stoneGrain(ctx, rnd, x + 1, y + 1, cw - 2, rh - 2, 60, 0.07, false);
+      if (rnd() < 0.2) {
+        ctx.fillStyle = 'rgba(70,58,50,0.07)';
+        ctx.beginPath();
+        ctx.ellipse(x + rnd() * cw, y + rnd() * rh, 5 + rnd() * 12, 4 + rnd() * 8, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+  return toTexture(c);
+}
+
+// 縁石の花崗岩: 明るい灰色（写真 #8d817d〜#9c9a94）の長さ 0.8〜1.2 m の石を継ぎ目でつないだもの。
+// u = 通りの向き（4 m で 1 周）、v = 縁石の天端と立ち上がり（0.5 m）
+export function makeCurbTexture() {
+  const W = 512, H = 64, ppm = W / 4;
+  const [c, ctx] = canvas(W, H);
+  const rnd = mulberry32(24);
+  ctx.fillStyle = '#6a6562';
+  ctx.fillRect(0, 0, W, H);
+  const stones = ['#a39f99', '#9c958f', '#aaa59e', '#958c87', '#a19b94'];
+  const xs = [0];
+  while (xs[xs.length - 1] < W - 1.3 * ppm) xs.push(xs[xs.length - 1] + (0.8 + rnd() * 0.4) * ppm);
+  xs.push(W);
+  for (let k = 0; k + 1 < xs.length; k++) {
+    ctx.fillStyle = shadeSrgb(stones[Math.floor(rnd() * stones.length)], 0.95 + rnd() * 0.1);
+    ctx.fillRect(xs[k] + 1.5, 0, xs[k + 1] - xs[k] - 3, H);
+    stoneGrain(ctx, rnd, xs[k] + 1.5, 0, xs[k + 1] - xs[k] - 3, H, 500, 0.22);
+  }
+  return toTexture(c);
+}
+
 // 道路・建物以外の地面（広場の端・中庭・空き地）: 明るい灰色の舗装と砂利が混ざった、細かい粒の面（6 m で 1 周）
 export function makeGroundTexture() {
   const S = 512;
@@ -482,6 +639,10 @@ export function makeTextures() {
     asphalt: makeAsphaltTexture(),
     sidewalk: makeSidewalkTexture(),
     paving: makePavingTexture(),
+    setts: makeSettsTexture(),
+    gutter: makeGutterTexture(),
+    slabs: makeSlabTexture(),
+    curb: makeCurbTexture(),
     grass: makeNoiseTexture({ base: '#6f8f45', spots: ['#5a7a35', '#86a356', '#4f6e2e', '#93a85e'], seed: 14, count: 9000, spotSize: 4, alpha: 0.6 }),
     ground: makeGroundTexture(),
     gravel: makeNoiseTexture({ base: '#c9b999', spots: ['#b5a585', '#ddd0b2', '#a39373'], seed: 16, count: 9000, spotSize: 2, alpha: 0.6 }),

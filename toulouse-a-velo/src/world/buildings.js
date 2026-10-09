@@ -284,8 +284,12 @@ const CONTACT_W = 1.1; // 壁際の地面の陰の幅（m）
 
 // 壁際の地面の陰（空が半分ふさがれて暗い）: 壁の足元から外へ CONTACT_W m の帯。濃さは UV の v（0 = 壁際）で決める
 function writeContact(w, a, c, nrm) {
-  const ox = nrm[0] * CONTACT_W, oz = nrm[2] * CONTACT_W, y = 0.02;
-  w.quad([a[0], y, a[2]], [c[0], y, c[2]], [c[0] + ox, y, c[2] + oz], [a[0] + ox, y, a[2] + oz], [0, 1, 0], [0.5, 0], [0.5, 0], [0.5, 1], [0.5, 1]);
+  const ox = nrm[0] * CONTACT_W, oz = nrm[2] * CONTACT_W;
+  // 一段高い歩道の上では歩道の面に載せる（w.groundAt: 歩道の高さ）
+  const y = (x, z) => (w.groundAt ? w.groundAt(x, z) : 0) + 0.02;
+  const ya = y(a[0] + ox * 0.3, a[2] + oz * 0.3), yc = y(c[0] + ox * 0.3, c[2] + oz * 0.3);
+  const yc2 = y(c[0] + ox * 0.9, c[2] + oz * 0.9), ya2 = y(a[0] + ox * 0.9, a[2] + oz * 0.9);
+  w.quad([a[0], ya, a[2]], [c[0], yc, c[2]], [c[0] + ox, yc2, c[2] + oz], [a[0] + ox, ya2, a[2] + oz], [0, 1, 0], [0.5, 0], [0.5, 0], [0.5, 1], [0.5, 1]);
 }
 
 // 傾斜した屋根の三角形。法線を計算し、瓦が勾配方向に流れるよう UV を合わせる
@@ -442,11 +446,12 @@ const now = () => globalThis.performance?.now() ?? Date.now();
 const YIELD_MS = 30; // これだけ続けて計算したらフレームを譲る
 
 // context: 隣のタイルの建物（作らないが、接する壁を見分けるのに使う）、towers: 八角形の鐘楼（towers.js）
-export async function buildBuildings(parsed, materials, onProgress, facade = null, { context = [], towers = [] } = {}) {
+export async function buildBuildings(parsed, materials, onProgress, facade = null, { context = [], towers = [], groundAt = null } = {}) {
   const group = new THREE.Group();
   group.name = 'buildings';
   const chunks = new Map();
   const contact = new MeshWriter(); // 壁際の地面の陰はエリア（タイル）でひとつにまとめる
+  contact.groundAt = groundAt;
   const getChunk = (x, z) => {
     const key = `${Math.floor(x / CHUNK)},${Math.floor(z / CHUNK)}`;
     let c = chunks.get(key);

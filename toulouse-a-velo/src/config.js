@@ -49,7 +49,9 @@ export function oldTownTest(proj) {
   const ring = OLD_TOWN.map(([lat, lon]) => proj.project(lat, lon));
   const xs = ring.map((p) => p[0]), zs = ring.map((p) => p[1]);
   const minX = Math.min(...xs), maxX = Math.max(...xs), minZ = Math.min(...zs), maxZ = Math.max(...zs);
-  return (x, z) => x >= minX && x <= maxX && z >= minZ && z <= maxZ && pointInRing(x, z, ring);
+  const test = (x, z) => x >= minX && x <= maxX && z >= minZ && z <= maxZ && pointInRing(x, z, ring);
+  test.ring = ring; // 外形（旧市街の地面の下地を敷く）
+  return test;
 }
 
 // 名所。match は OSM の name タグに対する正規表現。

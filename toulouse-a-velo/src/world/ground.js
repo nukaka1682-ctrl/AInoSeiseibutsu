@@ -1,15 +1,18 @@
 // 地面まわりのメッシュ: 地面、公園・広場・駐車場、道路と歩道、路面標示、線路、水面と河岸の壁、橋。
 //
 // 地面と同じ高さ (y=0) に重なる面は、深度を書かずに renderOrder の順に塗り重ねる（Z ファイティング防止）。
+// 一段高い歩道と縁石（streets.js）は深度を書き、平らな面をすべて塗った後に描く（下に隠れた車道は描かれない）。
 // 川や運河は地面より低い位置に水面を置き、ステンシルで地面に「穴」をあけて見せる。
 import * as THREE from 'three';
 import { MeshWriter, writeFlatPolygon } from './meshwriter.js';
 import { CAR_ROADS } from './parse.js';
 import { Grid, clipPolylineToRect, clipRingToRect, closestOnSegment, pointInPolygon, signedArea } from '../geo.js';
+import { RaisedIndex, oldTownBase, planStreets, streetSteps } from './streets.js';
 
 export const ORDER = {
   waterMask: -50,
   ground: -40,
+  oldTown: -39, // 旧市街の地面の下地（小舗石。通り・広場・緑地の下）
   water: -35,
   green: -30,
   parking: -29,
@@ -17,12 +20,13 @@ export const ORDER = {
   sidewalk: -27,
   footway: -26,
   service: -25,
+  pedestrian: -24.3, // 歩行者の通りは交差する車道の下（車道が交差点を通り抜ける）
   road: -24,
-  pedestrian: -23,
   cycleway: -22,
   rail: -21,
   marking: -20,
   route: -19,
+  raised: -15, // 一段高い歩道・縁石（深度を書く）
 };
 
 const c3 = (hex, k = 1) => {
@@ -44,9 +48,21 @@ export function createGroundMaterials(tex) {
       asphalt: flat(tex.asphalt),
       paving: flat(tex.paving),
       sidewalk: flat(tex.sidewalk),
+      setts: flat(tex.setts),
+      // 旧市街の地面の下地: 地面と同じく水面の穴（ステンシル）には描かない
+      settsBase: flat(tex.setts, { stencilWrite: true, stencilRef: 1, stencilFunc: THREE.NotEqualStencilFunc, stencilFail: THREE.KeepStencilOp, stencilZFail: THREE.KeepStencilOp, stencilZPass: THREE.KeepStencilOp }),
+      slabs: flat(tex.slabs),
+      gutter: flat(tex.gutter),
       grass: flat(tex.grass),
       gravel: flat(tex.gravel),
       plain: flat(null),
+    },
+    // 一段高い歩道と縁石。角で重なる所は、縁石 → えんじ色の歩道 → 灰色の歩道の順に手前に出す
+    raised: {
+      curb: new THREE.MeshLambertMaterial({ map: tex.curb, vertexColors: true, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -3 }),
+      sidewalkRed: new THREE.MeshLambertMaterial({ map: tex.sidewalk, vertexColors: true, polygonOffset: true, polygonOffsetFactor: -0.5, polygonOffsetUnits: -1.5 }),
+      sidewalk: new THREE.MeshLambertMaterial({ map: tex.sidewalk, vertexColors: true }),
+      post: new THREE.MeshLambertMaterial({ vertexColors: true }), // 横断歩道の脇の黒い車止め
     },
     ground: new THREE.MeshLambertMaterial({
       map: tex.ground,
@@ -220,12 +236,12 @@ export function makeWaterTest(areas) {
 }
 
 // 地図から生成する地面（エリア全体をまとめて作る）
-export function buildGround(parsed, rect, mats) {
+export function buildGround(parsed, rect, mats, opts = {}) {
   const base = buildGroundBase(parsed, rect, mats);
   const pad = 120;
-  const detail = buildGroundDetail(parsed, { minX: rect.minX - pad, minZ: rect.minZ - pad, maxX: rect.maxX + pad, maxZ: rect.maxZ + pad }, mats, base.waterDepthAt);
+  const detail = buildGroundDetail(parsed, { minX: rect.minX - pad, minZ: rect.minZ - pad, maxX: rect.maxX + pad, maxZ: rect.maxZ + pad }, mats, base.waterDepthAt, opts);
   base.group.add(detail.group);
-  return { ...base, bridges: detail.bridges };
+  return { ...base, bridges: detail.bridges, heightAt: detail.heightAt, posts: detail.posts };
 }
 
 // 地面の板と水（エリア全体で 1 回だけ作る）
@@ -234,9 +250,11 @@ export function buildGroundBase(parsed, rect, mats) {
   group.name = 'ground';
 
   // ---- 地面（水面部分はステンシルで抜く） ----
+  // 1 枚の巨大な三角形だと深度の補間の誤差で上に重ねた道路の面が隠れることがあるので、約 250 m ごとに分ける
   {
     const big = 3000;
-    const g = new THREE.PlaneGeometry(rect.maxX - rect.minX + big * 2, rect.maxZ - rect.minZ + big * 2, 1, 1);
+    const sw = rect.maxX - rect.minX + big * 2, sh = rect.maxZ - rect.minZ + big * 2;
+    const g = new THREE.PlaneGeometry(sw, sh, Math.ceil(sw / 250), Math.ceil(sh / 250));
     g.rotateX(-Math.PI / 2);
     const uv = g.attributes.uv;
     const sx = (rect.maxX - rect.minX + big * 2) / 6, sz = (rect.maxZ - rect.minZ + big * 2) / 6;
@@ -338,21 +356,48 @@ export function buildGroundBase(parsed, rect, mats) {
 }
 
 // 緑地・広場・駐車場・道路・線路・橋を、範囲 clip の中だけ作る（広いエリアではタイルごとに呼ぶ）。
-// 範囲をまたぐ緑地は切り取り、道路は範囲の端で切る。橋は中ほどの点が範囲に入るものだけ
-export function buildGroundDetail(parsed, clip, mats, waterDepthAt) {
+// 範囲をまたぐ緑地は切り取り、道路は範囲の端で切る。橋は中ほどの点が範囲に入るものだけ。
+// opts.buildings / opts.walls（範囲の建物と隣の建物・塀）があれば、歩道を建物の壁まで延ばす。opts.inOldTown: 旧市街の判定
+export function buildGroundDetail(parsed, clip, mats, waterDepthAt, opts = {}) {
+  const it = groundDetailSteps(parsed, clip, mats, waterDepthAt, opts);
+  for (;;) {
+    const r = it.next();
+    if (r.done) return r.value;
+  }
+}
+
+// buildGroundDetail と同じものを、budget ms ごとに pause() で描画のフレームに譲りながら作る（走行中のタイルの読み込み）
+export async function buildGroundDetailAsync(parsed, clip, mats, waterDepthAt, opts, pause, budget = 8) {
+  const it = groundDetailSteps(parsed, clip, mats, waterDepthAt, opts);
+  let t = performance.now();
+  for (;;) {
+    const r = it.next();
+    if (r.done) return r.value;
+    if (performance.now() - t > budget) {
+      await pause();
+      t = performance.now();
+    }
+  }
+}
+
+function* groundDetailSteps(parsed, clip, mats, waterDepthAt, opts) {
   const group = new THREE.Group();
   group.name = 'ground-detail';
   const writers = new Map();
-  const W = (order, tex) => {
-    const k = `${order}|${tex}`;
+  const W = (order, tex, set = 'flat') => {
+    const k = `${order}|${tex}|${set}`;
     let w = writers.get(k);
-    if (!w) writers.set(k, (w = { order, tex, w: new MeshWriter() }));
+    if (!w) writers.set(k, (w = { order, tex, set, w: new MeshWriter() }));
     return w.w;
   };
+  const plan = planStreets(parsed, opts.inOldTown);
   const clipRect = [clip.minX, clip.minZ, clip.maxX, clip.maxZ];
   const overlaps = (b) => b.maxX > clip.minX && b.minX < clip.maxX && b.maxZ > clip.minZ && b.minZ < clip.maxZ;
   const contains = (b) => b.minX >= clip.minX && b.maxX <= clip.maxX && b.minZ >= clip.minZ && b.maxZ <= clip.maxZ;
 
+  // ---- 旧市街の地面の下地（小舗石）: 通りの石畳の帯の間（広い交差点・地図にない小さな広場）が土のままにならないように。
+  // 建物の中庭も石畳になるが、旧市街の中庭はたいてい舗装なのでよしとする
+  for (const r of oldTownBase(opts.inOldTown?.ring, clip)) writeFlatPolygon(W(ORDER.oldTown, 'settsBase'), r, [], 0, 2.56, c3('#f4e2d6'));
   // ---- 緑地・広場・駐車場 ----
   for (const a of parsed.areas) {
     if (a.type === 'water' || !overlaps(a.bounds)) continue;
@@ -367,52 +412,8 @@ export function buildGroundDetail(parsed, clip, mats, waterDepthAt) {
     else writeFlatPolygon(W(ORDER.green, 'grass'), outer, holes, 0, 6, GREEN_COLOR[a.type] || GREEN_COLOR.grass);
   }
   // ---- 道路 ----
+  // 車道の面・中央の破線はここで、縁石・歩道・旧市街の石畳・横断歩道は streets.js で作る
   const bridges = [];
-  // 縁石・側溝を交差点の中に引かないよう、範囲の近くの車道・歩行者道の中心線を索引にする
-  const near = new Grid(25);
-  const nearSegs = [];
-  for (const road of parsed.roads) {
-    if (road.tunnel || road.bridge || !(CAR_ROADS.has(road.type) || road.type === 'pedestrian' || road.type === 'living_street')) continue;
-    for (let i = 0; i + 1 < road.pts.length; i++) {
-      const [ax, az] = road.pts[i], [bx, bz] = road.pts[i + 1];
-      if (Math.max(ax, bx) < clip.minX - 30 || Math.min(ax, bx) > clip.maxX + 30 || Math.max(az, bz) < clip.minZ - 30 || Math.min(az, bz) > clip.maxZ + 30) continue;
-      near.insertSegment(ax, az, bx, bz, nearSegs.length);
-      nearSegs.push({ ax, az, bx, bz, road });
-    }
-  }
-  const inOtherRoad = (x, z, self) => {
-    let hit = false;
-    near.queryPoint(x, z, 15, (i) => {
-      const sg = nearSegs[i];
-      if (hit || sg.road === self) return;
-      if (closestOnSegment(x, z, sg.ax, sg.az, sg.bx, sg.bz).d2 < (sg.road.width / 2 + 0.6) ** 2) hit = true;
-    });
-    return hit;
-  };
-  // 線 line に沿って、ほかの道路の中に入らない区間ごとに帯を描く（縁石・側溝）
-  const edgeStrip = (w, line, half, color, road) => {
-    let run = [];
-    const flush = () => {
-      if (run.length >= 2) writeRibbon(w, run, half, 0, color, 2);
-      run = [];
-    };
-    for (let i = 0; i + 1 < line.length; i++) {
-      const [ax, az] = line[i], [bx, bz] = line[i + 1];
-      const L = Math.hypot(bx - ax, bz - az);
-      const n = Math.max(1, Math.ceil(L / 4));
-      for (let k = 0; k < n; k++) {
-        const p = [ax + ((bx - ax) * k) / n, az + ((bz - az) * k) / n], q = [ax + ((bx - ax) * (k + 1)) / n, az + ((bz - az) * (k + 1)) / n];
-        if (inOtherRoad((p[0] + q[0]) / 2, (p[1] + q[1]) / 2, road)) {
-          flush();
-          continue;
-        }
-        if (!run.length) run.push(p);
-        run.push(q);
-      }
-    }
-    flush();
-  };
-
   for (const road of parsed.roads) {
     if (road.tunnel) continue;
     if (road.bridge) {
@@ -420,32 +421,35 @@ export function buildGroundDetail(parsed, clip, mats, waterDepthAt) {
       if (mid[0] >= clip.minX && mid[0] < clip.maxX && mid[1] >= clip.minZ && mid[1] < clip.maxZ) bridges.push(road);
       continue;
     }
+    const kind = plan.info.get(road)?.kind;
+    if (kind === 'shared' || kind === 'taur') continue; // 旧市街の石畳は streets.js
     const parts = clipPolylineToRect(road.pts, ...clipRect);
     if (!parts.length) continue;
     const st = roadStyle(road);
     const half = road.width / 2;
     const isCar = CAR_ROADS.has(road.type);
     for (const pts of parts) {
-      if (isCar && road.sidewalk !== 'no' && road.sidewalk !== 'none') {
-        const sw = W(ORDER.sidewalk, 'sidewalk');
-        writeRibbon(sw, pts, half + 2.2, 0, c3('#ffffff'));
-        writeDisc(sw, pts[0], half + 2.2, 0, c3('#ffffff'));
-        writeDisc(sw, pts[pts.length - 1], half + 2.2, 0, c3('#ffffff'));
-      }
       const w = W(st.order, st.tex);
       writeRibbon(w, pts, half, 0, st.color);
       writeDisc(w, pts[0], half, 0, st.color);
       writeDisc(w, pts[pts.length - 1], half, 0, st.color);
       if (isCar && road.width >= 7 && !road.oneway) writeDashes(W(ORDER.marking, 'plain'), pts, 3, 5, 0.15, 0, c3('#f2f2ee'));
-      if (isCar && road.sidewalk !== 'no' && road.sidewalk !== 'none' && pts.length >= 2) {
-        // 花崗岩の縁石（幅 25 cm）と、その内側の側溝（舗石の帯）
-        const { L, R } = offsets(pts, half + 0.12);
-        const g = offsets(pts, half - 0.25);
-        for (const line of [L, R]) edgeStrip(W(ORDER.road + 0.6, 'plain'), line, 0.13, c3('#c4bfb5'), road);
-        for (const line of [g.L, g.R]) edgeStrip(W(ORDER.road + 0.5, 'sidewalk'), line, 0.18, c3('#d6d2cb'), road);
-      }
     }
   }
+  // 縁石・一段高い歩道（建物の壁まで）・旧市街の石畳・側溝・横断歩道と停止線
+  const raised = new RaisedIndex();
+  const OUT = {
+    setts: () => W(ORDER.road - 0.6, 'setts'),
+    slabs: () => W(ORDER.road - 0.5, 'slabs'),
+    gutter: () => W(ORDER.road + 0.5, 'gutter'),
+    marking: () => W(ORDER.marking, 'plain'),
+    curb: () => W(ORDER.raised, 'curb', 'raised'),
+    sidewalk: () => W(ORDER.raised, 'sidewalk', 'raised'),
+    sidewalkRed: () => W(ORDER.raised + 0.1, 'sidewalkRed', 'raised'),
+    post: () => W(ORDER.raised + 0.2, 'post', 'raised'),
+  };
+  yield;
+  const streetStats = yield* streetSteps(parsed, plan, clip, { buildings: opts.buildings || [], walls: opts.walls || [], waterDepthAt }, (k) => OUT[k](), raised);
 
   // ---- 線路（トラム・鉄道） ----
   for (const r of parsed.rails) {
@@ -458,9 +462,10 @@ export function buildGroundDetail(parsed, clip, mats, waterDepthAt) {
     }
   }
 
-  for (const { order, tex, w } of writers.values()) {
+  for (const { order, tex, set, w } of writers.values()) {
     if (w.empty) continue;
-    const m = new THREE.Mesh(w.toGeometry(), mats.flat[tex]);
+    yield; // 面ごとに譲る（大きな面の toGeometry は重い）
+    const m = new THREE.Mesh(w.toGeometry(), mats[set][tex]);
     m.renderOrder = order;
     m.receiveShadow = true;
     m.matrixAutoUpdate = false;
@@ -471,7 +476,8 @@ export function buildGroundDetail(parsed, clip, mats, waterDepthAt) {
   const big = [clip.minX - 2000, clip.minZ - 2000, clip.maxX + 2000, clip.maxZ + 2000];
   group.add(buildBridges(bridges, mats, waterDepthAt, big));
 
-  return { group, bridges };
+  // posts: 横断歩道の脇の車止めの位置（当たり判定に足す）
+  return { group, bridges, heightAt: (x, z) => raised.heightAt(x, z), streetStats, raised, posts: streetStats.postPts };
 }
 
 function buildBridges(bridges, mats, waterDepthAt, clipRect) {
