@@ -9,6 +9,7 @@ import * as THREE from 'three';
 import { MeshWriter, triangulate } from './meshwriter.js';
 import { centroid, hash01, mulberry32, pointInPolygon, pointInRing, signedArea } from '../geo.js';
 import { ORDER } from './ground.js';
+import { CAR_ROADS } from './parse.js';
 
 export const MONUMENTS = [
   { id: 'chateau-eau', kind: 'chateau', lat: 43.59870, lon: 1.43693, r: 20 },
@@ -201,6 +202,38 @@ export function placeOnPlaza(plaza, hint, ok, maxR = 30) {
   return null;
 }
 
+// 車道に沿った広い歩道の上の置き場所（雄鶏の像: 写真では車道の縁の車止めの列のすぐ後ろ、奥に路上駐車の車）。
+// roads: 車道 [{ pts, width }]。見える車道（中心線が広場の外を通る所。広場の下を通る道は舗装に隠れる）の縁から
+// gap m の、広場の中の点のうち、hint に近く gap が 3 m に近いもの。free(x, z): 置けるか。
+// 返り値 { x, z, angle（(cos, sin) が車道の方）} か null
+export function kerbSpot(plaza, roads, hint, free, { gaps = [3, 2.5, 3.5, 4], step = 1, maxD = 60 } = {}) {
+  let best = null;
+  for (const r of roads) {
+    const half = r.width / 2;
+    for (let i = 0; i + 1 < r.pts.length; i++) {
+      const [ax, az] = r.pts[i], [bx, bz] = r.pts[i + 1];
+      if (Math.min(ax, bx) > hint[0] + maxD || Math.max(ax, bx) < hint[0] - maxD || Math.min(az, bz) > hint[1] + maxD || Math.max(az, bz) < hint[1] - maxD) continue;
+      const L = Math.hypot(bx - ax, bz - az);
+      if (L < 1e-6) continue;
+      const ux = (bx - ax) / L, uz = (bz - az) / L;
+      const n = Math.ceil(L / step);
+      for (let k = 0; k <= n; k++) {
+        const qx = ax + (bx - ax) * (k / n), qz = az + (bz - az) * (k / n);
+        if (Math.hypot(qx - hint[0], qz - hint[1]) > maxD || (plaza && pointInPolygon(qx, qz, plaza))) continue;
+        for (const sd of [1, -1]) {
+          for (const g of gaps) {
+            const px = qx - uz * sd * (half + g), pz = qz + ux * sd * (half + g);
+            const score = Math.hypot(px - hint[0], pz - hint[1]) + 2 * Math.abs(g - 3);
+            if ((best && score >= best.score) || (plaza && !pointInPolygon(px, pz, plaza)) || !free(px, pz)) continue;
+            best = { x: px, z: pz, angle: Math.atan2(qz - pz, qx - px), score };
+          }
+        }
+      }
+    }
+  }
+  return best && { x: best.x, z: best.z, angle: best.angle };
+}
+
 // スタジアムの外壁に食い込んだ小さな建物（角の階段の塔など）: 外形の頂点と頂点を共有する、高さ 6 m 以上のもの
 // （低い売店・切符売り場はそのまま）
 export function stadiumAnnexes(stadium, buildings, maxArea = 400) {
@@ -209,9 +242,11 @@ export function stadiumAnnexes(stadium, buildings, maxArea = 400) {
 }
 
 // 名所の専用モデルの置き場所を決める。buildings: このタイル（エリア）の建物、bounds: このタイルの範囲
-// （像・十字はその中にあるときだけ作る）、onRoad(x, z): 車道の上か。replaced の建物は描かない（当たり判定は残す）
-export function findMonuments(proj, { buildings = [], areas = [], facade = null, bounds = null, onRoad = () => false } = {}) {
+// （像・十字はその中にあるときだけ作る）、onRoad(x, z): 車道の上か（広場の下を通る道も）、roads: 道路（parse.js。
+// 雄鶏の像を見える車道の縁に置くため）。replaced の建物は描かない（当たり判定は残す）
+export function findMonuments(proj, { buildings = [], areas = [], facade = null, bounds = null, onRoad = () => false, roads = [] } = {}) {
   const out = [];
+  const carRoads = roads.filter((r) => CAR_ROADS.has(r.type) && !r.bridge && !r.tunnel && r.pts?.length >= 2);
   const inB = (x, z) => !bounds || (x >= bounds.minX && x < bounds.maxX && z >= bounds.minZ && z < bounds.maxZ);
   const inBuilding = (x, z, m = 0) => buildings.some((b) => x > b.bounds.minX - m && x < b.bounds.maxX + m && z > b.bounds.minZ - m && z < b.bounds.maxZ + m && pointInRing(x, z, b.outer));
   for (const spec of MONUMENTS) {
@@ -250,12 +285,14 @@ export function findMonuments(proj, { buildings = [], areas = [], facade = null,
         }
         return !inBuilding(px, pz, 3);
       };
-      const p = placeOnPlaza(plaza, [x, z], free);
+      // 見える車道の縁石から 2.5〜4 m の歩道の上（車止めの列・路上駐車の車のそば）。なければ広場の中の hint の近く
+      const k = kerbSpot(plaza, carRoads, [x, z], free);
+      const p = k ? [k.x, k.z] : placeOnPlaza(plaza, [x, z], free);
       if (!p || !inB(p[0], p[1])) continue;
-      // 像はいちばん近い車道の方を向く
-      let angle = 0, bestD = Infinity;
-      for (let k = 0; k < 16; k++) {
-        const t = (k / 16) * Math.PI * 2;
+      // 像は車道の方を向く（縁に置けなかったときは、いちばん近い車道の方）
+      let angle = k ? k.angle : 0, bestD = Infinity;
+      for (let j = 0; !k && j < 16; j++) {
+        const t = (j / 16) * Math.PI * 2;
         for (let d = 2.5; d < 40; d += 0.5) {
           if (onRoad(p[0] + Math.cos(t) * d, p[1] + Math.sin(t) * d)) {
             if (d < bestD) [bestD, angle] = [d, t];
@@ -295,9 +332,10 @@ export function monumentClearance(list) {
   return (x, z) => circles.some(([cx, cz, r]) => Math.hypot(x - cx, z - cz) < r);
 }
 
-// 名所の台・柵の内側（街の小物 furniture.js を置かない所）。buildMonuments の当たり判定の円 [x, z, r] だけを見る
-export function monumentSolid(colliders, pad = 0.4) {
-  const circles = colliders.filter((c) => c.length === 3);
+// 名所の台・柵の内側（街の小物 furniture.js を置かない所）。buildMonuments の keepOut の円 [x, z, r]
+// （柵に抜けがあって当たり判定が線分のときも、柵の円の内側全体）
+export function monumentSolid(keepOut, pad = 0.4) {
+  const circles = keepOut.filter((c) => c.length === 3);
   return (x, z) => circles.some(([cx, cz, r]) => Math.hypot(x - cx, z - cz) < r + pad);
 }
 
@@ -416,7 +454,7 @@ function blob(w, o, r, yaw, seg, rings, colorAt) {
 
 // ---- シャトー・ドー
 const BRICK_CW = 1.5; // レンガの区画 1 枚の大きさ（m）
-function writeChateau(m, W, groundAt, colliders, onRoad) {
+function writeChateau(m, W, groundAt, colliders, onRoad, keepOut) {
   const { x, z } = m;
   const y0 = groundAt(x, z);
   const rB = m.rBase, hB = 5, rT = 3.5, yT = y0 + 19, rU = 2.3, yU = y0 + 21.8, rD = 2.45;
@@ -508,6 +546,7 @@ function writeChateau(m, W, groundAt, colliders, onRoad) {
     }
   }
   for (const c of fenceColliders(x, z, rF, up)) colliders.push(c);
+  keepOut.push([x, z, rF + 0.05]);
 }
 
 // 円い柵の当たり判定: 全部の柱が立てば円 [x, z, r]、抜けがあれば立った柱の続く区間を 8 本ごとの線分 [ax, az, bx, bz] にする
@@ -736,7 +775,7 @@ function writeCabanis(m, W, groundAt) {
 }
 
 // ---- 雄鶏の像（ローカル座標: x が前、y が上。angle の向きに回して置く）
-function writeCoq(m, W, groundAt, colliders) {
+function writeCoq(m, W, groundAt, colliders, onRoad, keepOut) {
   const y0 = groundAt(m.x, m.z);
   const c = Math.cos(m.angle), s = Math.sin(m.angle);
   // 台の上（y = 0.55）から上の像は K 倍（写真: 台の上で約 3 m）
@@ -812,6 +851,7 @@ function writeCoq(m, W, groundAt, colliders) {
   // 足元のラグビーボール
   blob(w, T(0.72, 0.76, 0.34), [0.3 * K, 0.19 * K, 0.19 * K], -m.angle + 0.5, 10, 6, () => col('#5b3b28'));
   colliders.push([m.x, m.z, 1.8]);
+  keepOut.push([m.x, m.z, 1.8]);
 }
 
 // ---- オクシタン十字と星座のメダル（ブロンズの象嵌）
@@ -877,13 +917,14 @@ function writeCross(m, W, groundAt) {
 
 const WRITERS = { chateau: writeChateau, stadium: writeStadium, cabanis: writeCabanis, coq: writeCoq, cross: writeCross };
 
-// 名所のモデルを作る。colliders: 足す当たり判定の円 [x, z, r] か線分 [ax, az, bx, bz]
+// 名所のモデルを作る。colliders: 足す当たり判定の円 [x, z, r] か線分 [ax, az, bx, bz]、
+// keepOut: 街の小物を置かない円 [x, z, r]（像の台・シャトー・ドーの柵の内側。monumentSolid）
 export function buildMonuments(list, materials, { groundAt = () => 0, onRoad = () => false } = {}) {
   const group = new THREE.Group();
   group.name = 'monuments';
   const W = { main: new MeshWriter(), metal: new MeshWriter(), inlay: new MeshWriter() };
-  const colliders = [];
-  for (const m of list) WRITERS[m.kind](m, W, groundAt, colliders, onRoad);
+  const colliders = [], keepOut = [];
+  for (const m of list) WRITERS[m.kind](m, W, groundAt, colliders, onRoad, keepOut);
   const mats = { main: materials.monument, metal: materials.monumentMetal, inlay: materials.monumentInlay };
   for (const key of ['main', 'metal', 'inlay']) {
     if (W[key].empty || !mats[key]) continue;
@@ -900,7 +941,7 @@ export function buildMonuments(list, materials, { groundAt = () => 0, onRoad = (
     }
     group.add(mesh);
   }
-  return { group, colliders };
+  return { group, colliders, keepOut };
 }
 
 // ---- テクスチャ（6 区画: レンガ・ルーバー・観客席・ピッチ・外壁のパネル・無地）

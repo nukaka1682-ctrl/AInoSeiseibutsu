@@ -211,7 +211,7 @@ class TileStreamer {
     // 名所の専用モデル（シャトー・ドー・スタディアム・カバニス・雄鶏の像・オクシタン十字）。置き換える外形は描かない
     // （当たり判定は元の外形のまま。カバニスの中央の開口の下だけは通り抜けられる）
     const onCarRoad = (x, z) => this.roadnet.onRoad(x, z, 0.3);
-    const monuments = findMonuments(this.proj, { buildings, areas: this.parsed.areas, facade, bounds: B, onRoad: onCarRoad });
+    const monuments = findMonuments(this.proj, { buildings, areas: this.parsed.areas, roads: this.parsed.roads, facade, bounds: B, onRoad: onCarRoad });
     const tb = performance.now();
     const built = await buildBuildings(tp, this.materials, null, facade, { context, towers, groundAt: ground.heightAt, skip: new Set(monuments.flatMap((m) => m.replaced)) });
     const buildingMs = performance.now() - tb;
@@ -230,15 +230,19 @@ class TileStreamer {
     }
 
     // 木: LiDAR で見つけたもの（水の上・道路の真ん中・橋の上は除く）。なければ公園と並木道に植える
-    const bGrid = new Grid(30);
-    buildings.forEach((b, k) => bGrid.insertBounds(b.bounds.minX, b.bounds.minZ, b.bounds.maxX, b.bounds.maxZ, k));
-    const insideBuilding = (x, z) => {
-      let hit = false;
-      bGrid.queryPoint(x, z, 0, (k) => {
-        if (!hit && pointInRing(x, z, buildings[k].outer)) hit = true;
-      });
-      return hit;
+    const insideOf = (list) => {
+      const grid = new Grid(30);
+      list.forEach((b, k) => grid.insertBounds(b.bounds.minX, b.bounds.minZ, b.bounds.maxX, b.bounds.maxZ, k));
+      return (x, z) => {
+        let hit = false;
+        grid.queryPoint(x, z, 0, (k) => {
+          if (!hit && pointInRing(x, z, list[k].outer)) hit = true;
+        });
+        return hit;
+      };
     };
+    const insideBuilding = insideOf(buildings);
+    const insideContext = insideOf(context); // 隣のタイルの、境の近くの建物
     const inB = (x, z) => x >= B.minX && x < B.maxX && z >= B.minZ && z < B.maxZ;
     let treePts;
     if (data.trees.length) {
@@ -273,10 +277,11 @@ class TileStreamer {
 
     // 街の小物（街灯・車止め・路上駐車の車・ごみ箱）。縁石の区間はこのタイルの歩道から。遠い物は描かない。
     // 旧市街の小物（燭台形の街灯・駐車なし）は右岸の歴史的な中心だけ（左岸のサン・シプリアンは外と同じ）
-    const onMonument = monumentSolid(mon.colliders); // 雄鶏の像の台・シャトー・ドーの柵の内側には置かない
+    // 雄鶏の像の台・シャトー・ドーの柵の内側、隣のタイルの建物（タイルの境の歩道）には置かない
+    const onMonument = monumentSolid(mon.keepOut);
     const furniture = buildFurniture({
       parsed: this.parsed, plan: planStreets(this.parsed, this.inOldTown), clip: B, curbs: ground.streetStats.curbs, inOldTown: this.inCore,
-      heightAt: ground.heightAt, onRoad: (x, z, m) => this.roadnet.onRoad(x, z, m), solid: (x, z) => insideBuilding(x, z) || this.inWater(x, z) || onMonument(x, z), trunks: trees.userData.trunks,
+      heightAt: ground.heightAt, onRoad: (x, z, m) => this.roadnet.onRoad(x, z, m), solid: (x, z) => insideBuilding(x, z) || insideContext(x, z) || this.inWater(x, z) || onMonument(x, z), trunks: trees.userData.trunks,
     }, cw);
     furniture.cull(this.focus[0], this.focus[1], true);
     group.add(furniture.group);

@@ -45,7 +45,7 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   // 名所の専用モデル（シャトー・ドー・スタディアム・カバニス・雄鶏の像・オクシタン十字）。置き換える外形は描かない
   // （当たり判定は元の外形のまま。カバニスの中央の開口の下だけは通り抜けられる）
   const onCarRoad = (x, z) => roadnet.onRoad(x, z, 0.3);
-  const monuments = findMonuments(proj, { buildings: parsed.buildings, areas: parsed.areas, facade, bounds: rect, onRoad: onCarRoad });
+  const monuments = findMonuments(proj, { buildings: parsed.buildings, areas: parsed.areas, roads: parsed.roads, facade, bounds: rect, onRoad: onCarRoad });
   const passThrough = new Set(monuments.flatMap((m) => m.open || []));
 
   // 当たり判定。道路の中心線が建物の壁を横切っている所（建物の下をくぐる通路など）は壁を開けておく
@@ -136,7 +136,7 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   // 街の小物（街灯・車止め・路上駐車の車・ごみ箱）。遠い物は描かない（毎フレーム furniture.cull）。
   // 旧市街の小物（燭台形の街灯・駐車なし）は右岸の歴史的な中心だけ（左岸のサン・シプリアンは外と同じ）
   const pad = 120;
-  const onMonument = monumentSolid(mon.colliders); // 雄鶏の像の台・シャトー・ドーの柵の内側には置かない
+  const onMonument = monumentSolid(mon.keepOut); // 雄鶏の像の台・シャトー・ドーの柵の内側には置かない
   const furniture = buildFurniture({
     parsed, plan: planStreets(parsed, inOldTown), clip: { minX: rect.minX - pad, minZ: rect.minZ - pad, maxX: rect.maxX + pad, maxZ: rect.maxZ + pad },
     curbs: ground.curbs, inOldTown: historicCoreTest(proj), heightAt: ground.heightAt, onRoad: (x, z, m) => roadnet.onRoad(x, z, m),

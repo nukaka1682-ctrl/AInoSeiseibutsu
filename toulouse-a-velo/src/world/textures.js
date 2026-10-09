@@ -153,14 +153,15 @@ export function makeRoofTileTexture() {
   const W = 256, H = 256;
   const [c, ctx] = canvas(W, H);
   const rnd = mulberry32(5);
-  ctx.fillStyle = '#5a4a44';
+  ctx.fillStyle = '#7a645c';
   ctx.fillRect(0, 0, W, H);
+  // 平均の明るさは 1 に近く（色は屋根の色 ROOF_TILE が決める。暗すぎると上から見た瓦の屋根が茶色く沈む）
   const tw = 32, th = 52; // 瓦 1 枚: 幅約 20 cm・長さ約 40 cm
   const tint = () => {
     const r = rnd();
     // 焼き色のばらつき: 明るい橙・濃い赤・黄土・黒ずみ
     const hue = r < 0.55 ? [1, 0.97, 0.93] : r < 0.75 ? [0.93, 0.84, 0.8] : r < 0.9 ? [1, 1, 0.86] : [0.72, 0.7, 0.68];
-    const k = 0.82 + rnd() * 0.18;
+    const k = 0.88 + rnd() * 0.12;
     return hue.map((v) => Math.round(255 * v * k));
   };
   for (const cover of [false, true]) {
@@ -173,18 +174,18 @@ export function makeRoofTileTexture() {
         // 丸みの陰影（山は中央が明るく、谷は中央が暗い）
         const dk = (k) => `rgb(${Math.round(r * k)},${Math.round(g * k)},${Math.round(b * k)})`;
         if (cover) {
-          grad.addColorStop(0, dk(0.55));
+          grad.addColorStop(0, dk(0.68));
           grad.addColorStop(0.45, dk(1));
-          grad.addColorStop(1, dk(0.6));
+          grad.addColorStop(1, dk(0.72));
         } else {
-          grad.addColorStop(0, dk(0.9));
-          grad.addColorStop(0.5, dk(0.7));
-          grad.addColorStop(1, dk(0.9));
+          grad.addColorStop(0, dk(0.95));
+          grad.addColorStop(0.5, dk(0.8));
+          grad.addColorStop(1, dk(0.95));
         }
         ctx.fillStyle = grad;
         for (const dx of [-W, 0, W]) for (const dy of [-H, 0, H]) ctx.fillRect(x0 + dx, y + dy, w, th);
         // 瓦の下端の影
-        ctx.fillStyle = 'rgba(30,15,10,0.45)';
+        ctx.fillStyle = 'rgba(30,15,10,0.35)';
         for (const dx of [-W, 0, W]) for (const dy of [-H, 0, H]) ctx.fillRect(x0 + dx, y + dy + th - 3, w, 3);
       }
     }

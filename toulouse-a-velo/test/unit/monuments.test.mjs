@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { LocalProjection, pointInPolygon } from '../../src/geo.js';
 import {
-  MONUMENTS, ZODIAC, cabanisLayout, circleOf, fenceColliders, findMonuments, monumentClearance, occitanCross, orientedBox, placeOnPlaza, rayRing, stadiumAnnexes, stadiumRays, strokeQuads,
+  MONUMENTS, ZODIAC, buildMonuments, cabanisLayout, circleOf, fenceColliders, findMonuments, kerbSpot, monumentClearance, monumentSolid, occitanCross, orientedBox, placeOnPlaza, rayRing, stadiumAnnexes, stadiumRays, strokeQuads,
 } from '../../src/world/monuments.js';
 
 const rect = (cx, cz, a, b, t = 0) => {
@@ -162,4 +162,40 @@ test('木を植えない所: シャトー・ドーは柵の外の歩道まで、
   const clear = monumentClearance([{ kind: 'chateau', x: 0, z: 0, rBase: 9.5 }, { kind: 'coq', x: 100, z: 0 }]);
   assert.ok(clear(0, 17) && !clear(0, 19));
   assert.ok(clear(102, 0) && !clear(104, 0));
+});
+
+test('雄鶏の像: 見える車道の縁石から 2.5〜4 m の歩道の上で、車道の方を向く（広場の下を通る道は使わない）', () => {
+  const plaza = { outer: rect(0, 0, 30, 20), holes: [] };
+  // 広場の北の縁に沿う車道（幅 6 m、中心線 z = -23）と、広場の下を通る道（z = 5。舗装に隠れる）
+  const visible = { type: 'secondary', width: 6, pts: [[-50, -23], [50, -23]] };
+  const hidden = { type: 'residential', width: 4, pts: [[-50, 5], [50, 5]] };
+  const onRoad = (x, z) => Math.abs(z + 23) < 3.3 || Math.abs(z - 5) < 2.3;
+  const free = (x, z) => Array.from({ length: 8 }, (_, k) => (k / 8) * Math.PI * 2).every((t) => !onRoad(x + Math.cos(t) * 2.5, z + Math.sin(t) * 2.5));
+  const k = kerbSpot(plaza, [visible, hidden], [3, 8], free);
+  assert.ok(k && pointInPolygon(k.x, k.z, plaza));
+  const edge = Math.abs(k.z + 23) - 3;
+  assert.ok(edge >= 2.5 && edge <= 4, `縁石から ${edge} m`);
+  assert.ok(Math.abs(k.angle + Math.PI / 2) < 0.01, '北（-z）の車道の方を向く');
+  assert.equal(kerbSpot(plaza, [hidden], [3, 8], free), null, '広場の下を通る道の縁には置かない');
+  // findMonuments: 道路を渡せば縁に置き、渡さなければ広場の中の hint の近く
+  const proj = new LocalProjection(43.5994, 1.4395);
+  const spec = MONUMENTS.find((m) => m.id === 'coq');
+  const [ox, oz] = proj.project(spec.lat, spec.lon);
+  const shift = (r) => ({ ...r, pts: r.pts.map(([x, z]) => [x + ox, z + oz]) });
+  const olivier = { name: 'Place Olivier', outer: rect(ox, oz, 30, 20), holes: [], bounds: {} };
+  const onRoadW = (x, z) => onRoad(x - ox, z - oz);
+  const coq = findMonuments(proj, { areas: [olivier], roads: [shift(visible), shift(hidden), { ...shift(visible), type: 'footway' }], onRoad: onRoadW }).find((m) => m.kind === 'coq');
+  assert.ok(coq && Math.abs(coq.z - oz + 17) < 1.01 && Math.abs(coq.angle + Math.PI / 2) < 0.01);
+});
+
+test('小物を置かない所: シャトー・ドーの柵に抜けがあっても（当たり判定は線分）柵の円の内側全体', () => {
+  const ch = { kind: 'chateau', x: 0, z: 0, rBase: 9, replaced: [] };
+  const full = buildMonuments([ch], {});
+  const gap = buildMonuments([ch], {}, { onRoad: (x, z) => x > 9 && Math.abs(z) < 3 });
+  assert.ok(full.colliders.some((c) => c.length === 3));
+  assert.ok(gap.colliders.every((c) => c.length === 4), '柵の抜けがあれば当たり判定は線分だけ');
+  for (const m of [full, gap]) {
+    const solid = monumentSolid(m.keepOut);
+    assert.ok(solid(9.8, 0) && solid(0, -10) && !solid(13, 0));
+  }
 });
