@@ -106,7 +106,7 @@ test('OSM の解析: 建物・川・橋・名前', () => {
   const river = parsed.areas.find((a) => a.type === 'water' && a.name === 'La Garonne');
   assert.ok(river);
   assert.equal(river.holes.length, 1);
-  assert.equal(river.depth, 6);
+  assert.equal(river.depth, 10); // 広い川は岸壁の高さ（約 10 m）だけ低い
   assert.ok(river.bounds.minZ >= rect.minZ - 1e-6 && river.bounds.maxZ <= rect.maxZ + 1e-6);
   // 橋
   const bridge = parsed.roads.find((r) => r.name === 'Pont Neuf');
