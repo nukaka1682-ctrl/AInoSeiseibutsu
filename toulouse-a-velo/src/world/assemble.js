@@ -133,6 +133,7 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
       buildings: buildingStats,
       roads: parsed.roads.length,
       trees: treePts.length,
+      bankTrees: (ground.bankTrees || []).length, // そのうち川岸の土手の木（bridges の土手）
       passages: opened,
       source: data.source,
       provider: data.provider,
