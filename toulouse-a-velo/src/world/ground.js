@@ -264,7 +264,7 @@ export function buildGround(parsed, rect, mats, opts = {}) {
   const pad = 120;
   const detail = buildGroundDetail(parsed, { minX: rect.minX - pad, minZ: rect.minZ - pad, maxX: rect.maxX + pad, maxZ: rect.maxZ + pad }, mats, base.waterDepthAt, opts);
   base.group.add(detail.group);
-  return { ...base, bridges: detail.bridges, heightAt: detail.heightAt, posts: detail.posts };
+  return { ...base, bridges: detail.bridges, heightAt: detail.heightAt, posts: detail.posts, curbs: detail.streetStats.curbs };
 }
 
 // 岸の形: ガロンヌ川は旧市街のまわり（バザクルからポン・サン・ミシェルの先まで）だけ高いレンガの岸壁、その外は草の土手。

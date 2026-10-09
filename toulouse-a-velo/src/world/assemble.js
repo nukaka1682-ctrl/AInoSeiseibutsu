@@ -14,8 +14,9 @@ import { buildTrees, fillParkTrees, planeTreeTest, streetTrees } from './trees.j
 import { buildEnclosures, clearRoads, projectTrees, projectWalls, tameWalls } from './enclosures.js';
 import { findTowers } from './towers.js';
 import { findCapitoleFacade, markBrickSites } from './landmarkfacades.js';
-import { oldTownTest } from '../config.js';
-import { POST_HIT } from './streets.js';
+import { historicCoreTest, oldTownTest } from '../config.js';
+import { POST_HIT, planStreets } from './streets.js';
+import { buildFurniture } from './furniture.js';
 import { CollisionWorld } from '../game/collision.js';
 import { RoadNetwork } from '../game/roadnet.js';
 import { resolveLandmarks } from '../game/landmarks.js';
@@ -117,6 +118,15 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   for (const [x, z] of trees.userData.trunks) {
     if (!roadnet.onRoad(x, z, 0.3)) collision.addCircle(x, z, 0.3);
   }
+  // 街の小物（街灯・車止め・路上駐車の車・ごみ箱）。遠い物は描かない（毎フレーム furniture.cull）。
+  // 旧市街の小物（燭台形の街灯・駐車なし）は右岸の歴史的な中心だけ（左岸のサン・シプリアンは外と同じ）
+  const pad = 120;
+  const furniture = buildFurniture({
+    parsed, plan: planStreets(parsed, inOldTown), clip: { minX: rect.minX - pad, minZ: rect.minZ - pad, maxX: rect.maxX + pad, maxZ: rect.maxZ + pad },
+    curbs: ground.curbs, inOldTown: historicCoreTest(proj), heightAt: ground.heightAt, onRoad: (x, z, m) => roadnet.onRoad(x, z, m),
+    solid: (x, z) => insideBuilding(x, z) || inWater(x, z), trunks: trees.userData.trunks,
+  }, collision);
+  group.add(furniture.group);
 
   const surfaceAt = makeSurfaceAt(parsed, roadnet);
 
@@ -126,7 +136,7 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   for (const lm of landmarks) lm.y = 0;
 
   return {
-    proj, rect, parsed, roadnet, ground, collision, trees, landmarks, group, surfaceAt,
+    proj, rect, parsed, roadnet, ground, collision, trees, landmarks, group, surfaceAt, furniture,
     // 一段高い歩道の上では自転車も歩道の高さに上がる
     heightAt: ground.heightAt, groundAt: ground.heightAt,
     stats: {

@@ -15,9 +15,10 @@ import { findTowers } from './towers.js';
 import { areaFrame, makeSurfaceAt } from './assemble.js';
 import { buildGroundBase, buildGroundDetailAsync, makeWaterTest } from './ground.js';
 import { POST_HIT, planStreets } from './streets.js';
-import { oldTownTest } from '../config.js';
+import { historicCoreTest, oldTownTest } from '../config.js';
 import { makeDeckTest } from './bridges.js';
 import { buildCoverMesh } from './cover.js';
+import { buildFurniture } from './furniture.js';
 import { CollisionWorld } from '../game/collision.js';
 import { RoadNetwork } from '../game/roadnet.js';
 import { resolveLandmarks } from '../game/landmarks.js';
@@ -57,7 +58,7 @@ export async function assembleStreamWorld({ base, bbox, presetId, buildingMats, 
   const avenues = parsed.roads.filter((r) => CAR_ROADS.has(r.type) || r.type === 'pedestrian');
 
   const streamer = new TileStreamer({
-    presetId, bbox, rect, proj, layout, parsed, roadnet, inWater, onRoad, avenues, inOldTown,
+    presetId, bbox, rect, proj, layout, parsed, roadnet, inWater, onRoad, avenues, inOldTown, inCore: historicCoreTest(proj),
     materials: buildingMats, groundMats, waterDepthAt: ground.waterDepthAt, bankTrees: ground.bankTrees || [], collision, group,
   });
   for (const lm of landmarks) lm.y = 0;
@@ -124,6 +125,8 @@ class TileStreamer {
       else if (d > NEAR && t.state === 'queued') this.tiles.delete(t.key);
     }
     this.pump();
+    // 街の小物は自転車の近くの物だけ描く
+    for (const t of this.tiles.values()) if (t.state === 'ready') t.furniture?.cull(x, z);
   }
 
   pump() {
@@ -254,6 +257,15 @@ class TileStreamer {
       if (!this.roadnet.onRoad(x, z, 0.3)) cw.addCircle(x, z, 0.3);
     }
 
+    // 街の小物（街灯・車止め・路上駐車の車・ごみ箱）。縁石の区間はこのタイルの歩道から。遠い物は描かない。
+    // 旧市街の小物（燭台形の街灯・駐車なし）は右岸の歴史的な中心だけ（左岸のサン・シプリアンは外と同じ）
+    const furniture = buildFurniture({
+      parsed: this.parsed, plan: planStreets(this.parsed, this.inOldTown), clip: B, curbs: ground.streetStats.curbs, inOldTown: this.inCore,
+      heightAt: ground.heightAt, onRoad: (x, z, m) => this.roadnet.onRoad(x, z, m), solid: (x, z) => insideBuilding(x, z) || this.inWater(x, z), trunks: trees.userData.trunks,
+    }, cw);
+    furniture.cull(this.focus[0], this.focus[1], true);
+    group.add(furniture.group);
+
     let tris = 0;
     group.traverse((o) => {
       if (o.isMesh && !o.isInstancedMesh && o.geometry.index == null) tris += o.geometry.attributes.position.count / 3;
@@ -262,8 +274,8 @@ class TileStreamer {
     // 組み立てにかかった時間（途中でフレームを譲った時間も含む）と三角形の数を記録する
     const ms = performance.now() - t0;
     const roofs = built.stats.roofs;
-    console.info(`タイル ${t.key}: 建物 ${buildings.length} 棟（傾斜屋根 ${roofs.pitched}・陸屋根 ${roofs.flat}・作れず陸屋根 ${roofs.fallback}）・三角形 ${tris}・組み立て ${ms.toFixed(0)} ms（建物の計算 ${built.stats.ms.toFixed(0)} ms、待ちを含め ${buildingMs.toFixed(0)} ms）`);
-    Object.assign(t, { group, cw, heightAt: ground.heightAt, buildings: buildings.length, trees: treePts.length, walls: walls.length, triangles: tris, buildMs: ms, state: 'ready' });
+    console.info(`タイル ${t.key}: 建物 ${buildings.length} 棟（傾斜屋根 ${roofs.pitched}・陸屋根 ${roofs.flat}・作れず陸屋根 ${roofs.fallback}）・三角形 ${tris}・小物 ${furniture.count}（車 ${furniture.stats.cars}・街灯 ${furniture.stats.lights + furniture.stats.discs}・車止め ${furniture.stats.bollards}）・組み立て ${ms.toFixed(0)} ms（建物の計算 ${built.stats.ms.toFixed(0)} ms、待ちを含め ${buildingMs.toFixed(0)} ms）`);
+    Object.assign(t, { group, cw, furniture, heightAt: ground.heightAt, buildings: buildings.length, trees: treePts.length, walls: walls.length, triangles: tris, buildMs: ms, state: 'ready' });
     this.group.add(group);
     this.collision.add(cw);
     this.onTileReady?.(t, buildings);
