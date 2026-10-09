@@ -100,11 +100,14 @@ function simulate(rings, weights, tStop) {
     if (l) l.push(a, b);
     else fseg[f] = [a, b];
   };
-  // 頂点の軌跡など（節点 a–b）: 両側の面の境界になる。同じ辺の 2 つの部分の間の線は面の内側なので除く
-  const arc = (a, b, f1, f2) => {
+  // 頂点の軌跡など（節点 a–b）: 両側の面の境界になる。同じ辺の 2 つの部分の間の線は面の内側なので除く。
+  // arcs: 屋根面どうしの境の線 [a, b, f1, f2, 谷か] を並べたもの（凹んだ角の軌跡は谷、それ以外は棟・隅棟）
+  const arcs = [];
+  const arc = (a, b, f1, f2, valley = false) => {
     if (f1 === f2) return;
     seg(f1, a, b);
     seg(f2, a, b);
+    arcs.push(a, b, f1, f2, valley ? 1 : 0);
   };
   const verts = [];
   const node = (x, z, t) => nodes.push([x, z, t]) - 1;
@@ -153,7 +156,7 @@ function simulate(rings, weights, tStop) {
     fresh.push(a);
   };
   const endAt = (v, nd) => {
-    arc(v.node, nd, v.eL, v.eR);
+    arc(v.node, nd, v.eL, v.eR, v.reflex);
     v.alive = false;
   };
 
@@ -185,7 +188,7 @@ function simulate(rings, weights, tStop) {
         const y = x.next;
         const Q = node(px(y, t), pz(y, t), t);
         endAt(y, Q);
-        arc(x.node, Q, x.eL, x.eR);
+        arc(x.node, Q, x.eL, x.eR, x.reflex);
         x.alive = false;
         return;
       }
@@ -197,7 +200,7 @@ function simulate(rings, weights, tStop) {
       if (db <= da) {
         const Q = node(bx, bz, t);
         endAt(b, Q);
-        arc(x.node, Q, x.eL, x.eR);
+        arc(x.node, Q, x.eL, x.eR, x.reflex);
         x.alive = false;
         y = vertex(bx, bz, t, x.eL, b.eR, Q);
         link(a, y);
@@ -205,7 +208,7 @@ function simulate(rings, weights, tStop) {
       } else {
         const Q = node(ax, az, t);
         endAt(a, Q);
-        arc(x.node, Q, x.eL, x.eR);
+        arc(x.node, Q, x.eL, x.eR, x.reflex);
         x.alive = false;
         y = vertex(ax, az, t, a.eL, x.eR, Q);
         link(a.prev, y);
@@ -356,7 +359,7 @@ function simulate(rings, weights, tStop) {
   }
   let maxT = 0;
   for (const nd of nodes) maxT = Math.max(maxT, nd[2]);
-  return { nodes, fseg, edges: E, tops, maxT };
+  return { nodes, fseg, edges: E, tops, maxT, arcs };
 }
 
 // 面ごとの境界の線分をつないで多角形（節点の列）にする。各節点の次数が 2 でなければ失敗
@@ -462,6 +465,8 @@ function dedupe(cyc, nodes) {
  *   roof: number[],                      // 傾いた屋根面の三角形 [x, y, z] × 3 を並べたもの（y は軒からの高さ）
  *   top: number[],                       // 上限で平らになった上面の三角形（同じ並び）
  *   gables: { ring, edge, a, b, pts: [[s, y]] }[], // 重み 0 の辺の垂直な壁（辺 a→b に沿った距離 s と高さ y の多角形）
+ *   eaves: { ring, edge }[],             // 軒の辺（屋根面が下りてくる、重みのある辺）
+ *   ridges: number[],                    // 棟・隅棟の線分 [x0, y0, z0, x1, y1, z1] を並べたもの（谷・切妻の縁は含まない）
  *   unweighted?: true                    // 重み付きでは作れず、すべて寄棟にした
  * }}
  */
@@ -532,7 +537,7 @@ function buildRoofWith(outer, holes, opt) {
     sk = simulate(rings, weights, cap / slope);
     if (!sk) return null;
   }
-  const { nodes, fseg, edges: E, tops } = sk;
+  const { nodes, fseg, edges: E, tops, arcs } = sk;
 
   // 三角形の頂点を [x, y, z, x, y, z, x, y, z, ...] に並べる（y は軒からの高さ）
   const roof = [], top = [], gables = [];
@@ -625,7 +630,27 @@ function buildRoofWith(outer, holes, opt) {
   let height = 0;
   for (let i = 1; i < roof.length; i += 3) height = Math.max(height, roof[i]);
   if (top.length) height = Math.max(height, topH);
-  return { slope, height, reach, roof, top, gables };
+  // 軒の辺（重みのある辺。元の輪の番号と辺の番号）: 軒の génoise・軒の出をつける
+  const eaves = [];
+  ringStart = 0;
+  for (let r = 0; r < rings.length; r++) {
+    const n = rings[r].length;
+    for (let i = 0; i < n; i++) if (E[ringStart + i].w > 0) eaves.push({ ring: r, edge: flips[r] ? (n - 2 - i + n) % n : i });
+    ringStart += n;
+  }
+  // 棟・隅棟（両側が傾いた面で、谷でない境の線）: 棟瓦を載せる。[x0, y0, z0, x1, y1, z1] を並べたもの（y は軒から）
+  const ridges = [];
+  for (let i = 0; i < arcs.length; i += 5) {
+    const f1 = arcs[i + 2], f2 = arcs[i + 3];
+    if (arcs[i + 4] || f1 >= E.length || f2 >= E.length) continue;
+    const e1 = E[f1], e2 = E[f2];
+    if (!(e1.w > 0 && e2.w > 0)) continue;
+    if (e1.nx * e2.nx + e1.nz * e2.nz > 0.94) continue; // ほぼ一直線に続く辺の間のかすかな折れ目
+    const p = nodes[arcs[i]], q = nodes[arcs[i + 1]];
+    if (len2(q[0] - p[0], q[1] - p[1]) < 0.2) continue;
+    ridges.push(p[0] + ox, p[2] * slope, p[1] + oz, q[0] + ox, q[2] * slope, q[1] + oz);
+  }
+  return { slope, height, reach, roof, top, gables, eaves, ridges };
 }
 
 function pointIn(x, z, ring) {

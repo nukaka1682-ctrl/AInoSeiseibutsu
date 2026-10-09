@@ -9,6 +9,7 @@ import { CHURCH_TILE, STYLE, stylePlainColor, useContactShade, useFacadeAtlas } 
 import { ORDER } from './ground.js';
 import { facadeSpan } from './landmarkfacades.js';
 import { buildRoof, cleanRing, clipGable, ringsSimple, triangulate2 } from './roofs.js';
+import { GENOISE, eaveRuns, eaveShifts, placeChimneys, writeChimney, writeGenoise, writeRidgeTiles } from './roofdetail.js';
 
 const CHUNK = 300;
 export const BAY = 3.5; // 窓 1 列分の幅（m）
@@ -21,6 +22,9 @@ const GLASS = ['#8d9ba5', '#7f8f99'];
 // 丸瓦の色: 年月を経た茶色・くすんだばら色と、葺き替えたばかりの明るい橙赤が建物ごとに混ざる（屋根の写真 #896450〜#bd8663）
 const ROOF_TILE = ['#b07a5e', '#a86e55', '#b8805f', '#9f6a55', '#a8634a', '#b06e4f', '#b86a48', '#c27852'];
 const FLAT_ROOF = ['#9b928a', '#8f8b86', '#a59c90', '#878079'];
+// 煙突の筒: むき出しのレンガ（#8a5f49 前後）と、漆喰塗り（白〜クリーム）
+const CHIMNEY_BRICK = ['#8a5f49', '#94654c', '#9c6c52', '#83594a'];
+const CHIMNEY_RENDER = ['#e2d9c8', '#d8cdb8', '#ebe3d3'];
 
 const tmpColor = new THREE.Color();
 
@@ -382,7 +386,10 @@ function writeRoof(W, rings, b, plainColor, covers, plan) {
   }
   const R = roof.roof;
   const at = (arr, i) => [arr[i], top + arr[i + 1], arr[i + 2]];
-  for (let i = 0; i < R.length; i += 9) roofTri(w, at(R, i), at(R, i + 3), at(R, i + 6), rColor);
+  // 伝統的な家は軒の génoise と軒の出（屋根の軒の頂点を外へ動かして屋根面を延ばす）
+  const eave = traditionalHouse(b, plan) ? houseEave(b, rings, roof, covers) : null;
+  const atR = eave ? (arr, i) => (arr[i + 1] < 1e-6 && eave.corner(arr[i], arr[i + 2])) || at(arr, i) : at;
+  for (let i = 0; i < R.length; i += 9) roofTri(w, atR(R, i), atR(R, i + 3), atR(R, i + 6), rColor);
   const T = roof.top;
   if (T.length) {
     // 上限で平らになった上面（terrasson）: 広ければ亜鉛・防水の灰色、狭ければ屋根の続き
@@ -396,6 +403,7 @@ function writeRoof(W, rings, b, plainColor, covers, plan) {
       else roofTri(w, p0, p1, p2, tc);
     }
   }
+  if (tile) writeRoofDetail(W, b, roof, rColor, eave);
   // 切妻の壁（重み 0 の辺の上の三角形）: 隣の建物より高い所だけ、窓のない壁で埋める
   for (const g of roof.gables) {
     const ring = rings[g.ring];
@@ -418,6 +426,89 @@ function writeRoof(W, rings, b, plainColor, covers, plan) {
   return 'pitched';
 }
 
+// génoise・煙突をつける建物: 旧市街・フォーブールのレンガ・漆喰の家（瓦の傾斜屋根）。1 階が店の家（BD TOPO では commercial）も含める。
+// 教会・塔・名所（決まった様式）・現代的な様式・高い集合住宅・大きな工場や商業施設・物置や車庫・浮いたパーツは除く
+const NOT_HOUSE = /^(school|university|roof|carport|church|cathedral|chapel|tower|hospital|stadium|train_station|transportation|shed|garage|hut)$/;
+export function traditionalHouse(b, plan) {
+  const info = b.info;
+  if (plan.material !== 'tile' || info.isChurch || b.style != null || info.minHeight > 0.5) return false;
+  if (info.height < 3 || info.height > 22 || info.area > 2500) return false;
+  if (BIG_FLAT_KINDS.test(info.kind) || NOT_HOUSE.test(info.kind)) return false;
+  if (info.kind === 'commercial' && info.area > 800) return false; // 大きな商業施設
+  return facadeStyle(b) !== STYLE.modern;
+}
+
+// 頂点の座標の鍵（屋根の三角形の頂点と外形の頂点を突き合わせる）
+const vkey = (x, z) => `${Math.round(x * 1000)},${Math.round(z * 1000)}`;
+
+// 伝統的な家の軒: 外周の軒の辺のうち、隣の建物が軒より 1.5 m 以上低い区間（génoise が見え、隣の屋根にめり込まない所）に
+// génoise を並べ、軒の辺の頂点を外へ ext だけずらす（軒の出）。中庭の軒は省く（通りから見えない）。
+// 返り値: { runs, rows, ext, corner(x, z): 外形の頂点を軒の出で動かした位置 [x, y, z]（動かさない頂点は null） }
+function houseEave(b, rings, roof, covers) {
+  const top = b.info.height;
+  const outer = rings[0];
+  const sign = outwardSign(outer);
+  const spans = outer.map(() => null), isEave = outer.map(() => false);
+  for (const { ring, edge } of roof.eaves) {
+    if (ring !== 0) continue;
+    isEave[edge] = true;
+    const a = outer[edge], c = outer[(edge + 1) % outer.length];
+    const L = Math.hypot(c[0] - a[0], c[1] - a[1]);
+    const sp = [];
+    for (const [t0, t1, h] of coverIntervals(L, covers[0][edge])) {
+      if (h > top - 1.5) continue;
+      const last = sp[sp.length - 1];
+      if (last && t0 - last[1] < 0.06) last[1] = t1;
+      else sp.push([t0, t1]);
+    }
+    spans[edge] = sp;
+  }
+  // 段数: 小さな家は 2 段のことが多く、ほかは 3 段。軒の出 = いちばん上の段の迫り出し + 瓦の端の出（0.22〜0.30 m）
+  const rows = b.info.height < 7 && hash01(b.id, 43) < 0.6 ? 2 : 3;
+  const ext = rows * GENOISE.step + GENOISE.lip;
+  const shift = new Map();
+  eaveShifts(outer, sign, isEave).forEach((m, i) => m && shift.set(vkey(outer[i][0], outer[i][1]), m));
+  const corner = (x, z) => {
+    const m = shift.get(vkey(x, z));
+    return m ? [x + m[0] * ext, top - m[2] * ext * roof.slope, z + m[1] * ext] : null;
+  };
+  // 小口: 角の向こうの辺（切妻・境の壁）に軒の高さ近くまで隣の家が接していれば、隣の家の軒に隠れるのでふさがない
+  const n = outer.length;
+  const hidden = (edge, t) => covers[0][edge].some(([c0, c1, h]) => c0 < t + 0.3 && c1 > t - 0.3 && h >= top - 0.5);
+  const len = (i) => Math.hypot(outer[(i + 1) % n][0] - outer[i][0], outer[(i + 1) % n][1] - outer[i][1]);
+  const runs = eaveRuns(outer, sign, spans, 2.5);
+  for (const r of runs) {
+    const pe = (r.edge - 1 + n) % n, ne = (r.edge + 1) % n;
+    if (r.capA && hidden(pe, len(pe))) r.capA = false;
+    if (r.capB && hidden(ne, 0)) r.capB = false;
+  }
+  return { runs, rows, ext, corner };
+}
+
+// 屋根の細部（roofdetail.js）: 伝統的な家だけ、軒の génoise・煙突と、3 m 以上の棟・隅棟の棟瓦
+function writeRoofDetail(W, b, roof, rColor, eave) {
+  if (!eave) return;
+  const top = b.info.height;
+  const { rows } = eave;
+  // いちばん上の段の上端が、壁から rows × step の所の屋根の下面に接する（その先へ瓦の端が lip だけ出る）
+  const base = top - rows * GENOISE.step * roof.slope - rows * GENOISE.rowH;
+  const k = 0.88 + hash01(b.id, 44) * 0.12;
+  const gColor = [k, k * 0.98, k * 0.95];
+  for (const run of eave.runs) writeGenoise(W.genoise, run, base, rows, gColor);
+  const chimneys = placeChimneys(roof, b.id, b.info.area);
+  if (chimneys.length) {
+    const brick = paletteColor(CHIMNEY_BRICK, b.id, 45);
+    const render = paletteColor(CHIMNEY_RENDER, b.id, 46);
+    const cap = paletteColor(FLAT_ROOF, b.id, 47);
+    const rTri = (p, q, r) => roofTri(W.roof, p, q, r, rColor);
+    for (const c of chimneys) writeChimney(W.plain, rTri, c, top, c.render ? render : brick, cap);
+  }
+  // 棟瓦: 屋根とほぼ同じ色で、ほんの少し暗くくすむ（漆喰で固めた上瓦）。大きな屋根・高い建物・現代的な建物には載せない
+  // （遠くからしか見えないので三角形を節約する）
+  const rc = [rColor[0] * 0.91, rColor[1] * 0.9, rColor[2] * 0.89];
+  writeRidgeTiles(W.roof, roof.ridges, top, eave.corner, rc);
+}
+
 export function createBuildingMaterials(tex) {
   const std = (map, extra = {}) => new THREE.MeshStandardMaterial({ map, vertexColors: true, roughness: 0.92, metalness: 0, ...extra });
   return {
@@ -430,6 +521,7 @@ export function createBuildingMaterials(tex) {
     enclosureBrick: std(tex.enclosureBrick, { roughness: 0.95 }), // 敷地の塀（レンガ）
     enclosureRender: std(tex.enclosureRender, { roughness: 0.95 }), // 敷地の塀（漆喰）
     roof: std(tex.roof, { roughness: 0.85 }),
+    genoise: std(tex.genoise, { roughness: 0.9 }), // 軒の génoise（漆喰に丸瓦の端の列）
     flat: std(tex.flatRoof),
     // 壁際の地面の陰（半透明の黒。川の上には描かない: 地面と同じステンシル）
     contact: new THREE.MeshBasicMaterial({
@@ -456,7 +548,7 @@ export async function buildBuildings(parsed, materials, onProgress, facade = nul
     const key = `${Math.floor(x / CHUNK)},${Math.floor(z / CHUNK)}`;
     let c = chunks.get(key);
     if (!c) {
-      c = { upper: new MeshWriter(), ground: new MeshWriter(), plain: new MeshWriter(), capitole: new MeshWriter(), church: new MeshWriter(), tower: new MeshWriter(), roof: new MeshWriter(), flat: new MeshWriter(), contact };
+      c = { upper: new MeshWriter(), ground: new MeshWriter(), plain: new MeshWriter(), capitole: new MeshWriter(), church: new MeshWriter(), tower: new MeshWriter(), roof: new MeshWriter(), genoise: new MeshWriter(), flat: new MeshWriter(), contact };
       chunks.set(key, c);
     }
     return c;
@@ -499,10 +591,10 @@ export async function buildBuildings(parsed, materials, onProgress, facade = nul
   }
 
   for (const c of chunks.values()) {
-    for (const key of ['upper', 'ground', 'plain', 'capitole', 'church', 'tower', 'roof', 'flat']) {
+    for (const key of ['upper', 'ground', 'plain', 'capitole', 'church', 'tower', 'roof', 'genoise', 'flat']) {
       if (c[key].empty) continue;
       const mesh = new THREE.Mesh(c[key].toGeometry(), materials[key]);
-      mesh.castShadow = true;
+      mesh.castShadow = key !== 'genoise'; // 軒の génoise は細かいので影の地図には描かない
       mesh.receiveShadow = true;
       mesh.matrixAutoUpdate = false;
       group.add(mesh);
