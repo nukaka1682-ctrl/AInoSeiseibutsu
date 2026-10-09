@@ -7,6 +7,7 @@ import { Grid, LocalProjection, pointInPolygon, pointInRing } from '../geo.js';
 import { CAR_ROADS, parseOsm } from './parse.js';
 import { buildBuildings } from './buildings.js';
 import { buildGround, makeWaterTest } from './ground.js';
+import { makeDeckTest } from './bridges.js';
 import { buildTrees, fillParkTrees, planeTreeTest, streetTrees } from './trees.js';
 import { buildEnclosures, clearRoads, projectTrees, projectWalls } from './enclosures.js';
 import { findTowers } from './towers.js';
@@ -53,7 +54,8 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   for (const p of parsed.parts) if (!p.hasParent && p.info.collide) collision.addRing(p.outer, isPassage);
   const inWater = makeWaterTest(parsed.areas);
   collision.inWater = inWater;
-  collision.onRoad = (x, z) => roadnet.onRoad(x, z, 0.4);
+  const onDeck = makeDeckTest(parsed.roads); // 橋の上は欄干まで走れる
+  collision.onRoad = (x, z) => roadnet.onRoad(x, z, 0.4) || onDeck(x, z);
 
   const bGrid = new Grid(30);
   parsed.buildings.forEach((b, i) => bGrid.insertBounds(b.bounds.minX, b.bounds.minZ, b.bounds.maxX, b.bounds.maxZ, i));
@@ -91,6 +93,7 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
       : [];
     treePts = parsed.trees.filter(inRect).concat(extra, avenue);
   }
+  treePts = treePts.concat(ground.bankTrees || []); // 街の外れの川岸の土手の木
   const towers = findTowers(proj, parsed.buildings); // 八角形の鐘楼は専用のモデル
   markBrickSites(proj, parsed.buildings, parsed.areas);
   const buildings = await buildBuildings(parsed, buildingMats, (p) => progress(`建物を建てています… ${Math.round(p * 100)}%`, 0.3 + p * 0.6), facade, { towers, groundAt: ground.heightAt });

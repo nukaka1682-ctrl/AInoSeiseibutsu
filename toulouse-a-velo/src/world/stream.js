@@ -16,6 +16,7 @@ import { areaFrame, makeSurfaceAt } from './assemble.js';
 import { buildGroundBase, buildGroundDetailAsync, makeWaterTest } from './ground.js';
 import { POST_HIT, planStreets } from './streets.js';
 import { oldTownTest } from '../config.js';
+import { makeDeckTest } from './bridges.js';
 import { CollisionWorld } from '../game/collision.js';
 import { RoadNetwork } from '../game/roadnet.js';
 import { resolveLandmarks } from '../game/landmarks.js';
@@ -47,7 +48,8 @@ export async function assembleStreamWorld({ base, bbox, presetId, buildingMats, 
   await pause();
   const landmarks = resolveLandmarks(parsed, proj, rect, roadnet);
   const surfaceAt = makeSurfaceAt(parsed, roadnet);
-  const collision = new StreamCollision(rect, inWater, onRoad);
+  const onDeck = makeDeckTest(parsed.roads); // 橋の上は欄干まで走れる
+  const collision = new StreamCollision(rect, inWater, (x, z) => onRoad(x, z) || onDeck(x, z));
   const inOldTown = oldTownTest(proj);
   planStreets(parsed, inOldTown); // 通りの種類・交差点・横断歩道（エリアで 1 回）
   // 並木道（IGN のデータには個々の木がないので、LiDAR の木がないタイルで使う）
@@ -55,7 +57,7 @@ export async function assembleStreamWorld({ base, bbox, presetId, buildingMats, 
 
   const streamer = new TileStreamer({
     presetId, bbox, rect, proj, layout, parsed, roadnet, inWater, onRoad, avenues, inOldTown,
-    materials: buildingMats, groundMats, waterDepthAt: ground.waterDepthAt, collision, group,
+    materials: buildingMats, groundMats, waterDepthAt: ground.waterDepthAt, bankTrees: ground.bankTrees || [], collision, group,
   });
   for (const lm of landmarks) lm.y = 0;
   // 一段高い歩道の高さ（読み込んだタイルの歩道から。歩道はタイルの境を少しはみ出すので、隣のタイルも見る）
@@ -231,6 +233,7 @@ class TileStreamer {
       const roads = this.avenues.filter((r) => r.pts.some(([x, z]) => x > B.minX - 50 && x < B.maxX + 50 && z > B.minZ - 50 && z < B.maxZ + 50));
       treePts = fillParkTrees(parks, [], free).concat(streetTrees(roads, (x, z) => inB(x, z) && !this.roadnet.onRoad(x, z, 0.2) && !this.inWater(x, z) && !insideBuilding(x, z)));
     }
+    treePts = treePts.concat(this.bankTrees.filter((t) => inB(t.x, t.z))); // 街の外れの川岸の土手の木
     // 街路・運河沿いはプラタナス。横に広い LiDAR の塊を分けた木は、道路・水・建物の上には置かない
     const trees = buildTrees(treePts, {
       isPlane: planeTreeTest(this.roadnet, this.inWater),

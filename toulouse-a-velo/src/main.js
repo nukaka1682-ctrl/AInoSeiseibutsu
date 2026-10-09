@@ -905,6 +905,7 @@ function frame(now) {
   }
   if (state.world) {
     fitSunShadow();
+    sky.position.copy(camera.position); // 空の箱はカメラと一緒に動かす（5 km のエリアの端でも空が切れないように）
     renderer.render(scene, camera);
   }
 }
