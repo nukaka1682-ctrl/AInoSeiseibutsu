@@ -5,8 +5,10 @@
 //   （建物の上・木の下・車などは除く）。位置は境界から前後 1.25 m の範囲で、実際に高い所へずらす
 // 結果は [経度 1, 緯度 1, 経度 2, 緯度 2, 高さ (m)] の線分の配列（scripts/fetch-data.mjs で同梱データに入れる）。
 // 同じ表面モデルから、木の位置・高さ・枝の広がりも見つける（IGN のデータには個々の木がないため）。
+// さらに赤外線航空写真を足して、地面の覆い（公道・中庭・芝生・木の下。data/cover.js）を 1 m ごとに決める。
 import { fetchWfsLayer, normalizeCoords, polygonsOf } from './bdtopo.js';
 import { HeightGrid, LIDAR_LAYERS, fetchElevation } from './lidar.js';
+import { COVER_RES, classifyCover, encodeCover, fetchIrc, ndviFromIrc } from './cover.js';
 import { detectTrees } from '../world/lidartrees.js';
 
 export const PARCEL_LAYER = 'CADASTRALPARCELS.PARCELLAIRE_EXPRESS:parcelle';
@@ -193,19 +195,56 @@ export function featurePolygons(features, bbox) {
   return out;
 }
 
-// bbox の塀と木を、実測データから見つける。buildings: その周り（MARGIN m）を含む建物の GeoJSON 地物
-// 戻り値: walls（detectWalls の形）と trees（[経度, 緯度, 高さ (m), 枝の広がりの半径 (m)]）
-export async function fetchSiteFeatures(bbox, buildings, { keep } = {}) {
+// 地面の覆い: bbox を 1 m 格子（行 0 = 北）で分類する。big: dsm・dtm・多角形の範囲（bbox を MARGIN m 広げたもの）。
+// rgb: bbox の赤外線写真（cols × rows）。戻り値は種類（data/cover.js の COVER）の配列
+export function detectCover({ bbox, big, cols, rows, parcels, buildings, dsm, dtm, rgb }) {
+  const F = frame(bbox), FB = frame(big);
+  const sx = cols / F.width, sz = rows / F.height; // m → マス
+  const raster = (polys) => {
+    const mask = new Uint8Array(cols * rows);
+    for (const poly of polys) fillPolygon(mask, cols, rows, 1, poly.map((ring) => ring.map((p) => {
+      const [x, z] = F.to(p);
+      return [x * sx, z * sz];
+    })));
+    return mask;
+  };
+  // 地面からの高さ（マスの中心の表面モデル − 地形モデル）
+  const ox = (bbox.w - big.w) * FB.mx, oz = (big.n - bbox.n) * FB.mz;
+  const hag = new Float32Array(cols * rows);
+  for (let r = 0; r < rows; r++) {
+    const z = oz + (r + 0.5) / sz;
+    const ds = Math.min(dsm.rows - 1, Math.floor((z / FB.height) * dsm.rows)), dt = Math.min(dtm.rows - 1, Math.floor((z / FB.height) * dtm.rows));
+    for (let c = 0; c < cols; c++) {
+      const x = ox + (c + 0.5) / sx;
+      const cs = Math.min(dsm.cols - 1, Math.floor((x / FB.width) * dsm.cols)), ct = Math.min(dtm.cols - 1, Math.floor((x / FB.width) * dtm.cols));
+      hag[r * cols + c] = dsm.data[ds * dsm.cols + cs] - dtm.data[dt * dtm.cols + ct];
+    }
+  }
+  return classifyCover({ cols, rows, inParcel: raster(parcels), inBuilding: raster(buildings), ndvi: ndviFromIrc(rgb, cols * rows), hag });
+}
+
+// bbox の塀と木（と地面の覆い）を、実測データから見つける。buildings: その周り（MARGIN m）を含む建物の GeoJSON 地物
+// 戻り値: walls（detectWalls の形）と trees（[経度, 緯度, 高さ (m), 枝の広がりの半径 (m)]）と
+// cover（{ cols, rows, rle }。赤外線写真を取得できなければ null。needCover なら例外にする）
+export async function fetchSiteFeatures(bbox, buildings, { keep, needCover = false } = {}) {
   const big = grow(bbox, MARGIN);
-  const F = frame(big);
-  const [parcelFeatures, dsm, dtm] = await Promise.all([
+  const F = frame(big), FT = frame(bbox);
+  const cols = Math.max(1, Math.round(FT.width / COVER_RES)), rows = Math.max(1, Math.round(FT.height / COVER_RES));
+  const [parcelFeatures, dsm, dtm, rgb] = await Promise.all([
     fetchWfsLayer(PARCEL_LAYER, big, { maxPages: 10 }),
     fetchElevation(LIDAR_LAYERS.dsm, big, Math.round(F.width / DSM_RES), Math.round(F.height / DSM_RES)),
     fetchElevation(LIDAR_LAYERS.dtm, big, Math.round(F.width / DTM_RES), Math.round(F.height / DTM_RES)),
+    fetchIrc(bbox, cols, rows, needCover ? 5 : 2).catch((err) => {
+      if (needCover) throw err;
+      console.warn('赤外線写真を取得できませんでした', err);
+      return null;
+    }),
   ]);
   const inside = (lon, lat) => lon >= bbox.w && lon < bbox.e && lat > bbox.s && lat <= bbox.n && (!keep || keep(lon, lat));
   const buildingPolys = featurePolygons(buildings, big);
-  const walls = detectWalls({ bbox: big, parcels: featurePolygons(parcelFeatures, big), buildings: buildingPolys, dsm, dtm, keep: inside });
+  const parcels = featurePolygons(parcelFeatures, big);
+  const walls = detectWalls({ bbox: big, parcels, buildings: buildingPolys, dsm, dtm, keep: inside });
+  const cover = rgb && encodeCover(detectCover({ bbox, big, cols, rows, parcels, buildings: buildingPolys, dsm, dtm, rgb }), cols, rows);
 
   // 木: 樹冠の高さの極大（world/lidartrees.js）
   const rect = { minX: 0, maxX: F.width, minZ: 0, maxZ: F.height };
@@ -223,5 +262,5 @@ export async function fetchSiteFeatures(bbox, buildings, { keep } = {}) {
     const [lon, lat] = F.from(t.x, t.z);
     if (inside(lon, lat)) trees.push([lon, lat, Math.round(t.h * 10) / 10, Math.round(t.r * 10) / 10]);
   }
-  return { walls, trees };
+  return { walls, trees, cover };
 }

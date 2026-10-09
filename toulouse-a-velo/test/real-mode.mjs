@@ -26,7 +26,7 @@ const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/cs
 await page.route('http://game.test/**', async (r) => {
   const path = decodeURIComponent(new URL(r.request().url()).pathname).replace(/^\/$/, '/index.html');
   try {
-    r.fulfill({ body: await readFile(join(root, 'dist', path)), contentType: TYPES[extname(path)] || 'application/octet-stream' });
+    r.fulfill({ body: await readFile(join(root, process.env.DIST || 'dist', path)), contentType: TYPES[extname(path)] || 'application/octet-stream' });
   } catch {
     r.fulfill({ status: 404, body: 'not found' });
   }
@@ -123,8 +123,16 @@ for (const v of views) {
       const s = window.__tav;
       s.phase = 'shot';
       const c = window.__tavDebug.camera;
-      c.position.set(...cam.pos);
-      c.lookAt(...cam.look);
+      if (cam.rel) {
+        // rel: 自転車から見た [右, 上, 前]（m）で指定する（通りの名前で置いたとき、軒を見上げるなど）
+        const b = s.bike, fx = Math.sin(b.heading), fz = -Math.cos(b.heading);
+        const at = ([r, u, f]) => [b.x + fz * -r + fx * f, b.y + u, b.z + fx * r + fz * f];
+        c.position.set(...at(cam.pos));
+        c.lookAt(...at(cam.look));
+      } else {
+        c.position.set(...cam.pos);
+        c.lookAt(...cam.look);
+      }
     }, v.cam);
     for (let i = 0; i < 25; i++) {
       await page.waitForTimeout(1000);
@@ -139,7 +147,8 @@ for (const v of views) {
     for (const c of o?.chunks || []) lv[c.level]++;
     const st = window.__tav.world.stream;
     const tiles = st ? `、タイル ${st.readyCount} 枚（建物 ${st.totals.buildings}・三角形 ${st.totals.triangles}）` : '';
-    return `y=${window.__tav.bike.y.toFixed(1)}、航空写真の解像度別の区画数 ${lv.join('/')}・失敗 ${o?.failures}${tiles}`;
+    const ri = window.__tavDebug.renderer.info.render; // 直前の 1 フレーム（影の地図の描画を含む）
+    return `y=${window.__tav.bike.y.toFixed(1)}、航空写真の解像度別の区画数 ${lv.join('/')}・失敗 ${o?.failures}${tiles}、描画コール ${ri.calls}・三角形 ${ri.triangles}`;
   });
   await page.screenshot({ path: join(out, `${v.name}.jpg`), type: 'jpeg', quality: 85, timeout: 240000 });
   console.log(`  ${v.name}: 自転車の高さ ${info}`);

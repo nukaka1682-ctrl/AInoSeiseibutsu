@@ -1,28 +1,32 @@
 // トゥールーズのファサード（建物の正面）の手続き的テクスチャ。
-// 実際の街並みの写真を手本に、よくある 8 つの様式を描き分けて 1 枚のアトラスにまとめる。
+// 実際の街並みの写真を手本に、よくある 9 つの様式を描き分けて 1 枚のアトラスにまとめる。
 //   0 レンガむき出し＋白い石の窓枠（邸宅の中庭など）   1 レンガ＋木の鎧戸と鉄の手すり
-//   2 黄土色の漆喰＋レンガの窓枠                          3 灰緑の漆喰＋レンガと石を交互に積んだ窓枠
+//   2 黄土色の漆喰＋レンガの窓枠                          3 灰褐色の漆喰＋レンガと石を交互に積んだ窓枠
 //   4 サーモン色の漆喰＋白い鎧戸                          5 クリーム色の石造り（オスマン風）
 //   6 現代的な建物                                        7 ばら色の漆喰＋半円アーチの窓
+//   8 キャピトル広場を囲むレンガ造り（1 階は半円アーチのアーケード、窓の下に石の手すり）
+// 漆喰の色は写真の色（日なたで黄土色 #c8b48a・サーモン色・灰褐色）に合わせて、彩度を抑えてある（黄色・橙に寄りすぎない）。
+// どの様式も、雨だれ（窓台の両端から下へ）と、1 階の足元の暗い石の腰壁（約 0.8 m）で古びた感じを出す。
 // アトラスは様式ごとに縦に並べた 1024×256 のセル（横 4 ベイ = 14 m、縦 1 フロア）。
 // 頂点の UV は u = 壁に沿った位置 / 14 m、v = 様式 × 1000 + 階数 で、シェーダーで様式のセルを選ぶ。
 import * as THREE from 'three';
 import { mulberry32 } from '../geo.js';
 
-export const FACADE_STYLES = 8;
-export const STYLE = { brickStone: 0, brickShutters: 1, ochre: 2, taupe: 3, salmon: 4, cream: 5, modern: 6, rose: 7 };
+export const FACADE_STYLES = 9;
+export const STYLE = { brickStone: 0, brickShutters: 1, ochre: 2, taupe: 3, salmon: 4, cream: 5, modern: 6, rose: 7, arcade: 8 };
 
 const W = 1024, CELL = 256, BAYW = 256;
 
 const STYLES = [
-  { wall: 'brick', bricks: ['#c27058', '#cb7c62', '#b8644e', '#d08a6e', '#c4745c', '#ae5e4a', '#d4927a', '#c67960'], mortar: '#dcc5b0', trim: 'stone', shutters: null, panes: 4, balcony: [0, 0, 1, 0], lintel: true, band: 'stone', door: '#3e4a45', shop: '#2f3b36' },
-  { wall: 'brick', bricks: ['#c27a62', '#b96d55', '#cd8a70', '#b06450', '#c98168', '#d29178', '#bc735a'], mortar: '#e0c5b2', trim: 'brick', shutters: ['#8a9a9c', '#7d8f86', '#97a2a4', '#6f8592'], panes: 3, balcony: [1, 0, 1, 1], band: 'brick', door: '#5a3a2a', shop: '#6b2a2a' },
-  { wall: 'plaster', plaster: '#dca649', trim: 'brick', shutters: null, panes: 4, balcony: [0, 1, 0, 0], band: 'brick', door: '#2f4a3c', shop: '#24332c', keystone: true },
-  { wall: 'plaster', plaster: '#8e8a74', trim: 'harpe', shutters: null, panes: 4, balcony: [0, 0, 0, 0], band: 'brick', door: '#4a3426', shop: '#3b3330' },
-  { wall: 'plaster', plaster: '#c88a5a', trim: 'brick', shutters: ['#efeee8', '#e9e7df', '#f3f1ea', '#e5e3da'], panes: 3, balcony: [1, 0, 0, 1], band: 'brick', door: '#2a2d33', shop: '#1f2226' },
-  { wall: 'stone', plaster: '#dcd0b6', trim: 'molded', shutters: ['#9aa0a0', '#a4a8a6', '#8f9696', '#a9aba8'], panes: 3, balcony: [1, 1, 1, 1], band: 'stone', door: '#3b3530', shop: '#2c2a28' },
-  { wall: 'plaster', plaster: '#d9d4c9', trim: 'none', shutters: null, panes: 1, balcony: [0, 1, 0, 1], band: 'none', modern: true, door: '#555b60', shop: '#3a4046' },
-  { wall: 'plaster', plaster: '#dca28d', trim: 'brick', shutters: null, panes: 3, balcony: [0, 0, 0, 0], band: 'brick', arched: true, door: '#4b3a2c', shop: '#5c2c28' },
+  { wall: 'brick', bricks: ['#c27d5a', '#c98a66', '#b8704e', '#cf9874', '#c4825f', '#ad6a4c', '#cc916e', '#bb7b5b'], mortar: '#d6c7ad', trim: 'stone', shutters: null, panes: 4, balcony: [0, 0, 1, 0], lintel: true, band: 'stone', door: '#3e4a45', shop: '#2f3b36' },
+  { wall: 'brick', bricks: ['#c6876a', '#bb7b60', '#cd9475', '#b3715a', '#c98d70', '#d09c80', '#bf8064'], mortar: '#d9c8b2', trim: 'brick', shutters: ['#8a9a9c', '#7d8f86', '#97a2a4', '#6f8592'], panes: 3, balcony: [1, 0, 1, 1], band: 'brick', door: '#5a3a2a', shop: '#6b2a2a' },
+  { wall: 'plaster', plaster: '#cdb38c', trim: 'brick', shutters: null, panes: 4, balcony: [0, 1, 0, 0], band: 'brick', door: '#2f4a3c', shop: '#24332c', keystone: true },
+  { wall: 'plaster', plaster: '#b9ac94', trim: 'harpe', shutters: null, panes: 4, balcony: [0, 0, 0, 0], band: 'brick', door: '#4a3426', shop: '#3b3330' },
+  { wall: 'plaster', plaster: '#cb9f86', trim: 'brick', shutters: ['#efeee8', '#e9e7df', '#f3f1ea', '#e5e3da'], panes: 3, balcony: [1, 0, 0, 1], band: 'brick', door: '#2a2d33', shop: '#1f2226' },
+  { wall: 'stone', plaster: '#d8cbb0', trim: 'molded', shutters: ['#9aa0a0', '#a4a8a6', '#8f9696', '#a9aba8'], panes: 3, balcony: [1, 1, 1, 1], band: 'stone', door: '#3b3530', shop: '#2c2a28' },
+  { wall: 'plaster', plaster: '#d3ccc0', trim: 'none', shutters: null, panes: 1, balcony: [0, 1, 0, 1], band: 'none', modern: true, door: '#555b60', shop: '#3a4046' },
+  { wall: 'plaster', plaster: '#cfa594', trim: 'brick', shutters: null, panes: 3, balcony: [0, 0, 0, 0], band: 'brick', arched: true, door: '#4b3a2c', shop: '#5c2c28' },
+  { wall: 'brick', bricks: ['#bf7454', '#b66d4f', '#c47e5e', '#ad684b', '#c17a59', '#b97250'], mortar: '#d6c3a8', trim: 'brick', shutters: null, panes: 3, balcony: [0, 0, 0, 0], balustrade: true, band: 'brick', arcade: true, door: '#3a3632', shop: '#2b2826' },
 ];
 
 function canvas(w, h) {
@@ -37,19 +41,32 @@ function shade(hex, k) {
   return `rgb(${Math.min(255, Math.round(c.r * 255 * k))},${Math.min(255, Math.round(c.g * 255 * k))},${Math.min(255, Math.round(c.b * 255 * k))})`;
 }
 
-// トゥールーズの薄いレンガ（brique foraine、約 40×5 cm）。1 段 5 px、長さ 32 px（横に 1024 px でぴったり繰り返す）
+// トゥールーズの薄いレンガ（brique foraine）。写真を手本に、1 段 5 px（約 7 cm）のうちレンガは 3.5 px で、
+// 目地（砂色の石灰モルタル）は太め。レンガの長さ 26〜34 px（約 36〜46 cm）で、縦目地の位置は段ごとに不規則
 function brickFill(ctx, x0, y0, w, h, st, rnd) {
   ctx.fillStyle = st.mortar;
   ctx.fillRect(x0, y0, w, h);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x0, y0, w, h);
+  ctx.clip();
   for (let y = y0, row = 0; y < y0 + h; y += 5, row++) {
-    const off = row % 2 ? 16 : 0;
-    for (let x = x0 - 32 + off; x < x0 + w; x += 32) {
+    let x = x0 - Math.floor(rnd() * 30);
+    while (x < x0 + w) {
+      const len = 26 + Math.floor(rnd() * 9);
       const base = st.bricks[Math.floor(rnd() * st.bricks.length)];
-      ctx.fillStyle = shade(base, 0.92 + rnd() * 0.16);
-      ctx.fillRect(Math.max(x0, x + 1), y, Math.min(x + 31, x0 + w) - Math.max(x0, x + 1), 4);
+      ctx.fillStyle = shade(base, 0.9 + rnd() * 0.2);
+      ctx.fillRect(x + 1, y + 0.7, len - 1.5, 3.5);
+      if (rnd() < 0.35) {
+        // 焼きムラ: 端が濃い
+        ctx.fillStyle = 'rgba(70,30,15,0.18)';
+        ctx.fillRect(rnd() < 0.5 ? x + 1 : x + len - 8, y + 0.7, 7, 3.5);
+      }
+      x += len;
     }
   }
-  // 焼きムラ・汚れ
+  ctx.restore();
+  // 汚れ・色あせ
   for (let i = 0; i < (w * h) / 900; i++) {
     ctx.fillStyle = `rgba(${rnd() < 0.5 ? '40,20,10' : '255,230,200'},${0.05 + rnd() * 0.07})`;
     ctx.fillRect(x0 + rnd() * w, y0 + rnd() * h, 6 + rnd() * 30, 3 + rnd() * 10);
@@ -93,7 +110,7 @@ function wallFill(ctx, x0, y0, w, h, st, rnd) {
   else plasterFill(ctx, x0, y0, w, h, st.plaster, rnd, st.wall === 'stone');
 }
 
-const STONE = '#e6dac2', STONE_DARK = '#cbbd9f', BRICK_TRIM = ['#b5533b', '#a94a34', '#bf5e43', '#b04f37'];
+const STONE = '#e6dac2', STONE_DARK = '#cbbd9f', BRICK_TRIM = ['#ad5c43', '#a1543e', '#b6654a', '#a8583f'];
 
 function brickBlocks(ctx, x, y, w, h, rnd, k = 1) {
   for (let yy = y; yy < y + h; yy += 5) {
@@ -233,6 +250,40 @@ function railing(ctx, x, y, w, rnd, fancy) {
   }
 }
 
+// 窓台の両端（とときどき中ほど）から下へ流れる雨だれ。セルは縦に繰り返すので、下端を越えた分は上端（下の階）に続ける
+function rainStreaks(ctx, x0, x1, y, rnd) {
+  const xs = [x0, x1];
+  if (rnd() < 0.5) xs.push(x0 + (x1 - x0) * (0.3 + rnd() * 0.4));
+  for (const x of xs) {
+    const w = 3 + rnd() * 8, len = 45 + rnd() * 80, a = 0.07 + rnd() * 0.09;
+    for (const dy of [0, -CELL]) {
+      const g = ctx.createLinearGradient(0, y + dy, 0, y + dy + len);
+      g.addColorStop(0, `rgba(45,36,28,${a})`);
+      g.addColorStop(1, 'rgba(45,36,28,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(x - w / 2, y + dy, w, len);
+    }
+  }
+}
+
+// 窓の下の石の手すり（キャピトル広場の建物）
+function balustrade(ctx, x, y, w) {
+  ctx.fillStyle = '#e3d6c0';
+  ctx.fillRect(x, y, w, 7);
+  ctx.fillRect(x, y + 44, w, 8);
+  for (let xx = x + 5; xx < x + w - 6; xx += 13) {
+    ctx.fillStyle = '#ddcfb7';
+    ctx.beginPath();
+    ctx.ellipse(xx + 4, y + 26, 4.5, 15, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(70,50,35,0.25)';
+    ctx.fillRect(xx + 6, y + 12, 2, 28);
+  }
+  ctx.fillStyle = 'rgba(0,0,0,0.22)';
+  ctx.fillRect(x, y + 7, w, 2);
+  ctx.fillRect(x, y + 52, w, 2);
+}
+
 // 上の階のセル
 function drawUpper(ctx, st, rnd) {
   wallFill(ctx, 0, 0, W, CELL, st, rnd);
@@ -296,23 +347,102 @@ function drawUpper(ctx, st, rnd) {
     }
     if (st.shutters) shutters(ctx, x, top, ww, wh, st.shutters[b % st.shutters.length], b === 3, rnd);
     if (st.balcony[b]) railing(ctx, x, top + wh - 60, ww, rnd, st.wall === 'stone' || b === 2);
-    // 窓の下の雨だれ
-    ctx.fillStyle = 'rgba(40,30,20,0.06)';
-    ctx.fillRect(x - 10, top + wh + 9, ww + 20, 30);
+    if (st.balustrade) balustrade(ctx, x - 10, top + wh - 54, ww + 20);
+    // 窓台の両端からの雨だれ
+    rainStreaks(ctx, x - 14, x + ww + 14, top + wh + 9, rnd);
+  }
+}
+
+// 足元の腰壁（soubassement、約 0.8 m）: レンガの家は暗い灰褐色の切り石、漆喰の家は漆喰より暗い色。下ほど泥はねで暗い
+function plinth(ctx, st, rnd) {
+  const PH = 52; // 1 階の高さ 3.4〜3.8 m のうち約 0.8 m
+  const y0 = CELL - PH;
+  ctx.fillStyle = st.wall === 'brick' ? '#7f7468' : st.modern ? '#8c8781' : shade(st.plaster, 0.66);
+  ctx.fillRect(0, y0, W, PH);
+  for (let i = 0; i < W * PH / 12; i++) {
+    ctx.fillStyle = rnd() < 0.5 ? 'rgba(30,25,20,0.12)' : 'rgba(255,245,230,0.10)';
+    ctx.fillRect(rnd() * W, y0 + rnd() * PH, 1 + rnd() * 2, 1);
+  }
+  if (!st.modern) {
+    // 切り石の目地（2 段）
+    ctx.fillStyle = 'rgba(30,24,18,0.28)';
+    ctx.fillRect(0, y0 + PH / 2, W, 1.5);
+    for (let row = 0; row < 2; row++) {
+      for (let x = rnd() * 70; x < W; x += 60 + rnd() * 50) ctx.fillRect(x, y0 + row * (PH / 2) + 2, 1.5, PH / 2 - 2);
+    }
+  }
+  // 天端の水切り（明るい縁と影）
+  ctx.fillStyle = 'rgba(255,248,235,0.25)';
+  ctx.fillRect(0, y0, W, 3);
+  ctx.fillStyle = 'rgba(0,0,0,0.25)';
+  ctx.fillRect(0, y0 + 3, W, 2);
+  const g = ctx.createLinearGradient(0, CELL, 0, y0 - 12);
+  g.addColorStop(0, 'rgba(35,28,22,0.40)');
+  g.addColorStop(1, 'rgba(35,28,22,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, y0 - 12, W, PH + 12);
+}
+
+// キャピトル広場のアーケード: 各ベイに半円アーチ（幅約 2.6 m）。奥は暗く、店のガラスと吊り下げた角灯が見える
+function arcade(ctx, st, rnd) {
+  for (let b = 0; b < 4; b++) {
+    const cx = b * BAYW + BAYW / 2, r = 94, spring = 118;
+    const opening = () => {
+      ctx.beginPath();
+      ctx.arc(cx, spring, r, Math.PI, 0);
+      ctx.lineTo(cx + r, CELL);
+      ctx.lineTo(cx - r, CELL);
+      ctx.closePath();
+    };
+    // レンガのアーチの迫石
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, spring, r + 20, Math.PI, 0);
+    ctx.arc(cx, spring, r, 0, Math.PI, true);
+    ctx.closePath();
+    ctx.clip();
+    brickBlocks(ctx, cx - r - 22, spring - r - 22, (r + 22) * 2, r + 24, rnd, 0.92);
+    ctx.restore();
+    ctx.fillStyle = STONE;
+    ctx.fillRect(cx - 9, spring - r - 22, 18, 24); // 要石
+    for (const s of [-1, 1]) ctx.fillRect(cx + s * (r + 10) - 12, spring - 6, 24, 9); // 迫元の石
+    // 奥（アーケードの中は日陰）
+    ctx.save();
+    opening();
+    ctx.clip();
+    ctx.fillStyle = '#2b2522';
+    ctx.fillRect(cx - r, spring - r, r * 2, CELL);
+    glass(ctx, cx - r * 0.62, spring - 22, r * 1.24, CELL - spring + 6, rnd, false);
+    ctx.fillStyle = 'rgba(25,20,18,0.55)';
+    ctx.fillRect(cx - r, spring - r, r * 2, CELL);
+    const g = ctx.createLinearGradient(0, spring - r, 0, spring);
+    g.addColorStop(0, 'rgba(10,8,6,0.6)');
+    g.addColorStop(1, 'rgba(10,8,6,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(cx - r, spring - r, r * 2, r);
+    // 吊り下げた角灯
+    ctx.fillStyle = '#1b1a18';
+    ctx.fillRect(cx - 1, spring - r, 2, 40);
+    ctx.fillRect(cx - 10, spring - r + 40, 20, 4);
+    ctx.fillStyle = '#d8cfae';
+    ctx.fillRect(cx - 8, spring - r + 44, 16, 22);
+    ctx.fillStyle = '#1b1a18';
+    ctx.fillRect(cx - 10, spring - r + 66, 20, 3);
+    ctx.restore();
   }
 }
 
 // 1 階（地上階）のセル: 馬車門・店・格子の窓・玄関
 function drawGround(ctx, st, rnd) {
   wallFill(ctx, 0, 0, W, CELL, st, rnd);
-  // 腰石
-  ctx.fillStyle = st.wall === 'brick' ? '#b9ab92' : shade(st.plaster, 0.78);
-  ctx.fillRect(0, CELL - 22, W, 22);
-  ctx.fillStyle = 'rgba(0,0,0,0.18)';
-  ctx.fillRect(0, CELL - 22, W, 2);
+  plinth(ctx, st, rnd);
   // 1 階の上の帯
   ctx.fillStyle = st.wall === 'plaster' ? shade(st.plaster, 0.9) : STONE;
   ctx.fillRect(0, 0, W, 8);
+  if (st.arcade) {
+    arcade(ctx, st, rnd);
+    return;
+  }
   const trimStone = st.trim === 'stone' || st.trim === 'molded' || st.trim === 'none';
 
   // ベイ 0: 半円アーチの馬車門（porte cochère）
@@ -435,6 +565,12 @@ function drawGround(ctx, st, rnd) {
   }
 }
 
+// 窓のない壁（境界の壁・切妻など）の色: 漆喰・石の様式はその色、レンガの様式は null（レンガの色にする）
+export function stylePlainColor(style) {
+  const st = STYLES[style];
+  return st && st.wall !== 'brick' ? st.plaster : null;
+}
+
 // 上の階用と 1 階用のアトラス（どちらも 1024 × 256·様式数）
 export function makeFacadeAtlases() {
   const make = (draw, seed) => {
@@ -459,9 +595,36 @@ export function makeFacadeAtlases() {
   return { upper: make(drawUpper, 17), ground: make(drawGround, 29) };
 }
 
-// アトラスから様式のセルを選んで縦に繰り返すようにマテリアルを書き換える
+// 壁の足元の陰（地面に近いほど空が見えず暗い。世界座標の高さ vWallY で決める）
+const CONTACT_SHADE = 'diffuseColor.rgb *= mix(0.7, 1.0, smoothstep(0.0, 1.3, vWallY));';
+function addWallY(shader) {
+  shader.vertexShader = shader.vertexShader
+    .replace('#include <common>', '#include <common>\nvarying float vWallY;')
+    .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWallY = (modelMatrix * vec4(transformed, 1.0)).y;');
+  shader.fragmentShader = shader.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vWallY;');
+}
+
+// 窓のない壁・教会の壁にも足元の陰を付ける
+export function useContactShade(material) {
+  material.onBeforeCompile = (shader) => {
+    addWallY(shader);
+    shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>\n${CONTACT_SHADE}`);
+  };
+  material.customProgramCacheKey = () => 'contact-shade';
+  return material;
+}
+
+// アトラスから様式のセルを選んで縦に繰り返すようにマテリアルを書き換える。
+// 頂点カラーには（明るさ, 暖かさ, 軒の高さ）を入れてある（buildings.js の facadeColor）: 軒下の 1 m は雨が当たらず
+// 汚れが残り、軒の陰にもなるので少し暗くする。足元の陰も付ける
 export function useFacadeAtlas(material) {
   material.onBeforeCompile = (shader) => {
+    addWallY(shader);
+    shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', `#ifdef USE_COLOR
+        diffuseColor.rgb *= vColor.r * vec3(1.0, 1.0 - vColor.g * 0.5, 1.0 - vColor.g);
+        diffuseColor.rgb *= mix(0.8, 1.0, smoothstep(0.0, 1.0, vColor.b - vWallY));
+      #endif
+      ${CONTACT_SHADE}`);
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <map_fragment>',
       `#ifdef USE_MAP

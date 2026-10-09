@@ -164,7 +164,8 @@ try {
   const fence = [...lonLat(ahead(10, -8)), ...lonLat(ahead(10, 8)), 2.4];
   const baked = { version: DATA_VERSION, bbox: fx.bbox, provider: 'osm', osm: fx.osm, bdtopo: [], walls: [fence], trees: [[...lonLat(ahead(-20, 6)), 11, 3.5]] };
   const wp = await newPage('', baked);
-  const ws = await wp.evaluate(() => ({ walls: window.__tav.world.stats.walls, trees: window.__tav.world.stats.trees }));
+  // 木の数は同梱データの木だけ（街の外れの川岸の土手に自動で植える木は除く）
+  const ws = await wp.evaluate(() => ({ walls: window.__tav.world.stats.walls, trees: window.__tav.world.stats.trees - (window.__tav.world.stats.bankTrees || 0) }));
   check(ws.walls >= 1 && ws.walls <= 2 && ws.trees === 1, `同梱データの塀と木を置く（道路の上を切り取って塀 ${ws.walls}・木 ${ws.trees}）`);
   const [p0, p1] = [ahead(5, -7.5), ahead(15, -7.5)];
   const hit = await wp.evaluate(([a, b]) => window.__tav.world.collision.raycast(a[0], a[1], b[0], b[1]), [p0, p1]);

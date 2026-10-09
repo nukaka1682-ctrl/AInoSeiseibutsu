@@ -175,6 +175,29 @@ export function clipRingToRect(ring, minX, minZ, maxX, maxZ) {
   return output.length >= 3 ? output : [];
 }
 
+// 矩形 clip から矩形の集まり rects（[{ minX, minZ, maxX, maxZ }]）を除いた残りを、重ならない矩形に分ける。
+// 縦横の辺で格子に切り、どの矩形にも入らないマスを、行ごとに横につなげて返す
+export function freeRects(clip, rects) {
+  const inside = rects.filter((r) => r.maxX > clip.minX && r.minX < clip.maxX && r.maxZ > clip.minZ && r.minZ < clip.maxZ);
+  if (!inside.length) return [{ ...clip }];
+  const cut = (lo, hi, vs) => [...new Set([lo, hi, ...vs.filter((v) => v > lo && v < hi)])].sort((a, b) => a - b);
+  const xs = cut(clip.minX, clip.maxX, inside.flatMap((r) => [r.minX, r.maxX]));
+  const zs = cut(clip.minZ, clip.maxZ, inside.flatMap((r) => [r.minZ, r.maxZ]));
+  const out = [];
+  for (let j = 0; j + 1 < zs.length; j++) {
+    const cz = (zs[j] + zs[j + 1]) / 2;
+    let run = null;
+    for (let i = 0; i + 1 < xs.length; i++) {
+      const cx = (xs[i] + xs[i + 1]) / 2;
+      const free = !inside.some((r) => cx > r.minX && cx < r.maxX && cz > r.minZ && cz < r.maxZ);
+      if (free && run) run.maxX = xs[i + 1];
+      else if (free) out.push((run = { minX: xs[i], minZ: zs[j], maxX: xs[i + 1], maxZ: zs[j + 1] }));
+      else run = null;
+    }
+  }
+  return out;
+}
+
 // 折れ線を矩形でクリップし、矩形内の部分折れ線の配列を返す
 export function clipPolylineToRect(pts, minX, minZ, maxX, maxZ) {
   const inside = (p) => p[0] >= minX && p[0] <= maxX && p[1] >= minZ && p[1] <= maxZ;

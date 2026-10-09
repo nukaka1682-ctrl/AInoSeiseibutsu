@@ -64,9 +64,12 @@ function buildingTags(p) {
   const roof = firstDigit(p.materiaux_de_la_toiture);
   const h = Number(p.hauteur);
   const t0 = Number(p.altitude_minimale_toit), t1 = Number(p.altitude_maximale_toit);
-  let roofH = Number.isFinite(t0) && Number.isFinite(t1) ? Math.max(0, t1 - t0) : 0;
+  const known = Number.isFinite(t0) && Number.isFinite(t1) && t1 > 0; // 屋根の最高点・最低点が測られている
+  let roofH = known ? Math.max(0, t1 - t0) : 0;
   if (roof === 4) roofH = 0; // コンクリートの屋根 = 陸屋根
   if (Number.isFinite(t1) && t1 > 0) tags['roof:max_ele'] = String(t1); // 屋根の最高点の標高（LiDAR に写った木を除くのに使う）
+  const roofMaterial = { 1: 'roof_tiles', 2: 'slate', 3: 'metal', 4: 'concrete' }[roof];
+  if (roofMaterial) tags['roof:material'] = roofMaterial;
   if (roof === 2) tags['roof:colour'] = '#5f646b'; // スレート
   if (roof === 3) tags['roof:colour'] = '#8d949b'; // 亜鉛・アルミ
   if (Number.isFinite(h) && h > 0) {
@@ -75,7 +78,8 @@ function buildingTags(p) {
       tags['roof:height'] = String(Math.round(roofH * 10) / 10);
       tags.height = String(Math.round((h + roofH) * 10) / 10);
     } else {
-      tags['roof:shape'] = 'flat';
+      // 高低差が小さい（またはコンクリート）なら陸屋根。測られていない・尖塔まで含む外れ値なら形は決めない（建物の種類で選ぶ）
+      if (roof === 4 || (known && roofH <= 0.5)) tags['roof:shape'] = 'flat';
       tags.height = String(Math.round(h * 10) / 10);
     }
   }

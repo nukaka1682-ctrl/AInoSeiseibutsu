@@ -1,6 +1,7 @@
 // エリア設定と名所データ。
 // 名所の座標は「だいたいの位置」。起動時に OSM データ内の同名の地物を探して、
 // 見つかればその実際の位置に置き換える（src/game/landmarks.js）。
+import { pointInRing } from './geo.js';
 
 export const AREA_PRESETS = {
   toulouse: {
@@ -30,7 +31,50 @@ export const AREA_PRESETS = {
 export const DEFAULT_AREA = 'toulouse';
 
 // 地図データ形式のバージョン（変えると同梱データ・キャッシュが無効になる）
-export const DATA_VERSION = 2;
+export const DATA_VERSION = 3;
+
+// 旧市街（歴史地区）の範囲 [緯度, 経度]。右岸は環状の大通り（ダルコル・ストラスブール・カルノー・
+// フランソワ・ヴェルディエ・グラン・ロン・ジュール・ゲード）の内側、左岸はガロンヌ川と
+// シャルル・ド・フィット通りの間のサン・シプリアンの古い街。北西はデュポルタル通りまで
+export const OLD_TOWN = [
+  [43.6116, 1.4388], [43.6106, 1.4435], [43.6091, 1.4458], [43.6056, 1.4488], [43.6030, 1.4506],
+  [43.6003, 1.4523], [43.5967, 1.4527], [43.5955, 1.4513], [43.5941, 1.4482], [43.5928, 1.4446],
+  [43.5921, 1.4422], [43.5926, 1.4348], [43.5942, 1.4333], [43.5964, 1.4319], [43.5980, 1.4308],
+  [43.5993, 1.4296], [43.6010, 1.4285], [43.6020, 1.4279], [43.6043, 1.4281], [43.6052, 1.4320],
+  [43.6058, 1.4347], [43.6103, 1.4348], [43.6111, 1.4369],
+];
+
+// ローカル座標 (x, z) が旧市街の中かを調べる関数を作る（proj: geo.js の LocalProjection）
+export function oldTownTest(proj) {
+  const ring = OLD_TOWN.map(([lat, lon]) => proj.project(lat, lon));
+  const xs = ring.map((p) => p[0]), zs = ring.map((p) => p[1]);
+  const minX = Math.min(...xs), maxX = Math.max(...xs), minZ = Math.min(...zs), maxZ = Math.max(...zs);
+  const test = (x, z) => x >= minX && x <= maxX && z >= minZ && z <= maxZ && pointInRing(x, z, ring);
+  test.ring = ring; // 外形（旧市街の地面の下地を敷く）
+  return test;
+}
+
+// ガロンヌ川の流れの真ん中の線 [緯度, 経度]（南から北へ。地図データの水面の両岸の真ん中から）。旧市街のうち
+// この線より東（右岸）が歴史的な中心。左岸のサン・シプリアン（Place Olivier・Château d'eau の角）は街の小物を
+// 旧市街の外と同じにする（ユーザーの写真のメモ 1・5・7: 灰色の横向きの灯具の街灯、路上駐車の車、ごみ収集容器）
+export const GARONNE_AXIS = [
+  [43.580, 1.4300], [43.588, 1.4326], [43.590, 1.4343], [43.592, 1.4379], [43.594, 1.4391], [43.596, 1.4390],
+  [43.598, 1.4390], [43.600, 1.4387], [43.602, 1.4340], [43.6045, 1.4300], [43.607, 1.4240], [43.620, 1.4150],
+];
+
+// ローカル座標 (x, z) が旧市街の右岸（歴史的な中心）かを調べる関数を作る（街の小物の分け方に使う）
+export function historicCoreTest(proj) {
+  const old = oldTownTest(proj);
+  const axis = GARONNE_AXIS.map(([lat, lon]) => proj.project(lat, lon)); // z は北へ行くほど小さい
+  const east = (x, z) => {
+    for (let i = 0; i + 1 < axis.length; i++) {
+      const [ax, az] = axis[i], [bx, bz] = axis[i + 1];
+      if (z <= az && z >= bz) return x > ax + ((bx - ax) * (z - az)) / (bz - az || 1);
+    }
+    return true;
+  };
+  return (x, z) => old(x, z) && east(x, z);
+}
 
 // 名所。match は OSM の name タグに対する正規表現。
 export const LANDMARKS = [
@@ -102,7 +146,7 @@ export const LANDMARKS = [
     id: 'chateau-eau',
     name: "Galerie du Château d'Eau",
     ja: 'シャトー・ドー写真ギャラリー',
-    lat: 43.59880, lon: 1.43620,
+    lat: 43.59870, lon: 1.43693,
     match: /^(Galerie du |[Ll]e )?Ch[âa]teau d['’][Ee]au$/i,
     text: 'ポン・ヌフの左岸側のたもとに建つ、19世紀の給水塔を利用した写真ギャラリー。',
   },
@@ -250,6 +294,14 @@ export const LANDMARKS = [
     lat: 43.58413, lon: 1.43423,
     match: /^Stadium( de Toulouse)?$/i,
     text: 'ガロンヌ川の中州（ラミエ島）にあるスタジアム。サッカーのトゥールーズ FC の本拠地。',
+  },
+  {
+    id: 'cabanis',
+    name: 'Médiathèque José Cabanis',
+    ja: 'メディアテーク・ジョゼ・カバニス',
+    lat: 43.61024, lon: 1.45576,
+    match: /^M[ée]diath[èe]que Jos[ée] Cabanis$/i,
+    text: 'マタビオ駅の向かいに建つ市立図書館（2004 年）。中央に大きな四角い開口のある門の形で、屋上にガラスの庇が張り出す。',
   },
   {
     id: 'cite-espace',

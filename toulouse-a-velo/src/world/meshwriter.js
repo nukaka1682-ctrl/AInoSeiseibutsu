@@ -15,26 +15,29 @@ export class MeshWriter {
     return this.pos.length === 0;
   }
 
-  // a,b,c: [x,y,z], n: [nx,ny,nz], ta/tb/tc: [u,v], color: [r,g,b]
+  // a,b,c: [x,y,z], n: [nx,ny,nz], ta/tb/tc: [u,v], color: [r,g,b]（頂点ごとなら [[r,g,b] × 3]）
   tri(a, b, c, n, ta, tb, tc, color) {
+    let ca = color || [1, 1, 1], cb = ca, cc = ca;
+    if (Array.isArray(ca[0])) [ca, cb, cc] = color;
     const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
     const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
     const cx = uy * vz - uz * vy, cy = uz * vx - ux * vz, cz = ux * vy - uy * vx;
     if (cx * n[0] + cy * n[1] + cz * n[2] < 0) {
       [b, c] = [c, b];
       [tb, tc] = [tc, tb];
+      [cb, cc] = [cc, cb];
     }
     this.pos.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
     this.nor.push(n[0], n[1], n[2], n[0], n[1], n[2], n[0], n[1], n[2]);
     this.uv.push(ta[0], ta[1], tb[0], tb[1], tc[0], tc[1]);
-    const col = color || [1, 1, 1];
-    this.col.push(col[0], col[1], col[2], col[0], col[1], col[2], col[0], col[1], col[2]);
+    this.col.push(ca[0], ca[1], ca[2], cb[0], cb[1], cb[2], cc[0], cc[1], cc[2]);
   }
 
-  // 四角形 a-b-c-d（周回順）
+  // 四角形 a-b-c-d（周回順）。color は 1 色か、頂点ごとの [[r,g,b] × 4]
   quad(a, b, c, d, n, ta, tb, tc, td, color) {
-    this.tri(a, b, c, n, ta, tb, tc, color);
-    this.tri(a, c, d, n, ta, tc, td, color);
+    const pv = color && Array.isArray(color[0]);
+    this.tri(a, b, c, n, ta, tb, tc, pv ? [color[0], color[1], color[2]] : color);
+    this.tri(a, c, d, n, ta, tc, td, pv ? [color[0], color[2], color[3]] : color);
   }
 
   toGeometry() {

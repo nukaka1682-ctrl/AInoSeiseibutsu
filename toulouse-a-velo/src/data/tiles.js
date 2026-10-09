@@ -3,6 +3,7 @@
 // - 建物: 500 m 四方のタイルごと。public/data/<エリア>-tiles/<i>_<j>.json（scripts/fetch-data.mjs で作成）を
 //   優先し、なければ IGN の WFS から取得する
 // - 塀と木: タイルごと。地籍の敷地の境界と LiDAR から見つけたもの（data/walls.js）を同じファイルに入れておく
+// - 地面の覆い（cover）: タイルごとの 1 m 格子（公道・敷地の中・芝生・木の下。data/cover.js）
 // - 隣のタイルの、境から CONTEXT m 以内の建物（ctx）: 隣と接する壁（窓のない境界の壁）を見分けるのに使う
 import { fetchWfsLayer, normalizeCoords } from './bdtopo.js';
 import { IGN_LAYERS, fetchIgnArea, ignToOsm } from './ign.js';
@@ -110,7 +111,7 @@ export function splitTileFeatures(features, layout, areaBbox, i, j) {
   return { own, ctx };
 }
 
-// タイルのデータ: 建物（own・ctx）と塀・木。同梱ファイル → キャッシュ → IGN から取得して作る
+// タイルのデータ: 建物（own・ctx）と塀・木・地面の覆い。同梱ファイル → キャッシュ → IGN から取得して作る
 export async function loadTileData({ presetId, areaBbox, layout, i, j }) {
   const key = `tile:v${DATA_VERSION}:${presetId}:${areaBbox.s},${areaBbox.w}:${i}_${j}`;
   let data = null;
@@ -135,5 +136,6 @@ export async function loadTileData({ presetId, areaBbox, layout, i, j }) {
     ctx: ignToOsm({ batiment: data.ctx || [] }, areaBbox),
     walls: data.walls || [],
     trees: data.trees || [],
+    cover: data.cover || null,
   };
 }

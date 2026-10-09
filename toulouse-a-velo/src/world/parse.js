@@ -1,7 +1,7 @@
 // OSM の生データ（Overpass JSON）を、ゲームで使う地物（ローカル座標）に変換する。
 // three.js に依存しない（Node のテストから使える）。
 import {
-  Grid, centroid, clipRingToRect, closestOnSegment, hash01, pointInRing, ringBounds, signedArea, simplifyRing,
+  Grid, centroid, clipRingToRect, closestOnSegment, hash01, pointInPolygon, pointInRing, ringBounds, signedArea, simplifyRing,
 } from '../geo.js';
 
 export const FLOOR_HEIGHT = 3.1;
@@ -164,9 +164,15 @@ export function buildingInfo(b) {
   };
 }
 
-function waterKind(tags, area) {
+// 水面の低さ（depth、地面からの m）と種類。ガロンヌ川のような広い川（平均の幅 60 m 以上）は、実物の河岸の岸壁の高さに
+// 合わせて約 10 m 下（橋のアーチが入る高さ）。平均の幅は 2 × 面積 / 周長。
+// 川は何枚にも切れているので、最後に unifyWaterLevels で長い継ぎ目でつながった水の深さをそろえる
+export function waterKind(tags, area, perimeter = 0) {
   const w = tags.water;
-  if ((w === 'river' || tags.waterway === 'riverbank') && area > 20000) return { depth: 6, kind: 'river' };
+  if ((w === 'river' || tags.waterway === 'riverbank') && area > 20000) {
+    const width = perimeter > 0 ? (2 * area) / perimeter : 0;
+    return { depth: width > 60 ? 10 : 6, kind: 'river' };
+  }
   if (w === 'canal' || w === 'lock' || area > 20000) return { depth: 2.2, kind: 'canal' };
   return { depth: 0.7, kind: 'pond' };
 }
@@ -361,7 +367,12 @@ export function parseOsm(osm, proj, rect, bdtopo = []) {
     let extra = {};
     if (t.natural === 'water' || t.waterway === 'riverbank') {
       const area = Math.abs(signedArea(p.outer));
-      const wk = waterKind(t, area);
+      let perimeter = 0;
+      for (let i = 0; i < p.outer.length; i++) {
+        const a = p.outer[i], b = p.outer[(i + 1) % p.outer.length];
+        perimeter += Math.hypot(b[0] - a[0], b[1] - a[1]);
+      }
+      const wk = waterKind(t, area, perimeter);
       kind = 'water';
       extra = wk;
     } else if (t.highway && t.area === 'yes' && (t.highway === 'pedestrian' || t.highway === 'footway' || t.highway === 'service' || t.highway === 'living_street')) {
@@ -386,12 +397,82 @@ export function parseOsm(osm, proj, rect, bdtopo = []) {
     }
   }
 
+  unifyWaterLevels(areas);
   fillWaterUnderBridges(areas, roads);
-  return { nodePos, buildings, parts, roads, areas, rails, waterLines, trees, named };
+  return { nodePos, buildings, parts, roads, areas, rails, waterLines, trees, named, proj };
+}
+
+// 水面の高さをそろえる: 長い継ぎ目（合わせて minSeam m 以上）で接している水は、いちばん深い水と同じ深さ・種類にする。
+// データの川は何枚にも切れていて（範囲の切り口・データの継ぎ目）、平均の幅で決めた深さが切れ方で変わるため。
+// 運河・閘門は別の水面（閘門で上がる）なので含めない。支流の合流口のような短い継ぎ目も別の水面のまま（岸に段差の壁を作る）。
+// そのあと、運河に長く（minSeam / 2 m 以上）接する池・船だまりは運河と同じ水面にする（運河どうしはつながないので閘門は別のまま）
+export function unifyWaterLevels(areas, minSeam = 40) {
+  const all = areas.filter((a) => a.type === 'water' && !a.patch);
+  if (all.length < 2) return;
+  const isCanal = (a) => a.tags.water === 'canal' || a.tags.water === 'lock';
+  const grid = new Grid(200);
+  all.forEach((a, i) => grid.insertBounds(a.bounds.minX - 1, a.bounds.minZ - 1, a.bounds.maxX + 1, a.bounds.maxZ + 1, i));
+  // 辺の中点から水の外へ 0.6 m の点が、ほかの水の中にあれば継ぎ目（両側から数えるので、片側の長さは半分）
+  const seam = new Map();
+  all.forEach((a, i) => {
+    for (const [ring, hole] of [[a.outer, false], ...a.holes.map((h) => [h, true])]) {
+      const sg = (signedArea(ring) > 0 ? 1 : -1) * (hole ? -1 : 1);
+      for (let k = 0; k < ring.length; k++) {
+        const p = ring[k], q = ring[(k + 1) % ring.length];
+        const L = Math.hypot(q[0] - p[0], q[1] - p[1]);
+        if (L < 0.05) continue;
+        const x = (p[0] + q[0]) / 2 + ((q[1] - p[1]) / L) * sg * 0.6, z = (p[1] + q[1]) / 2 - ((q[0] - p[0]) / L) * sg * 0.6;
+        let hit = -1;
+        grid.queryPoint(x, z, 0, (j) => {
+          if (hit < 0 && j !== i && pointInPolygon(x, z, all[j])) hit = j;
+        });
+        if (hit < 0) continue;
+        const key = Math.min(i, hit) * all.length + Math.max(i, hit);
+        seam.set(key, (seam.get(key) || 0) + L / 2);
+      }
+    }
+  });
+  const pairs = [...seam].map(([key, len]) => [key % all.length, Math.floor(key / all.length), len]);
+  const parent = all.map((_, i) => i);
+  const find = (i) => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+  for (const [i, j, len] of pairs) {
+    if (len >= minSeam && !isCanal(all[i]) && !isCanal(all[j])) parent[find(i)] = find(j);
+  }
+  const deepest = new Map();
+  all.forEach((a, i) => {
+    if (isCanal(a)) return;
+    const r = find(i), d = deepest.get(r);
+    if (!d || a.depth > d.depth) deepest.set(r, a);
+  });
+  all.forEach((a, i) => {
+    if (isCanal(a)) return;
+    const d = deepest.get(find(i));
+    a.depth = d.depth;
+    a.kind = d.kind;
+  });
+  // 運河に接する池（池から池へも伝わる）
+  for (let pass = 0, changed = true; changed && pass < 4; pass++) {
+    changed = false;
+    const toCanal = new Map();
+    for (const [i, j, len] of pairs) {
+      for (const [x, y] of [[all[i], all[j]], [all[j], all[i]]]) {
+        if (x.kind === 'pond' && y.kind === 'canal') toCanal.set(x, [(toCanal.get(x)?.[0] || 0) + len, y]);
+      }
+    }
+    for (const [x, [len, y]] of toCanal) {
+      if (len < minSeam / 2) continue;
+      x.depth = y.depth;
+      x.kind = 'canal';
+      changed = true;
+    }
+  }
 }
 
 // IGN BD TOPO などでは、橋の下の部分が水面から切り抜かれている（穴になっている／水面が分断されている）。
 // そのままだと橋が陸の上に架かって見えるので、橋の下を水に戻す。
+// 橋の下を水で埋めるパッチ。深さは橋が渡る水路の深さ: 片側が池でもう片側が運河・川なら池は数えない。
+// 川に注ぐ運河・支流の口（両側の深さが違う）では浅い側の深さで埋め、深い側へは水の始まる所（+0.2 m）までしか広げない
+// （そこに深い水へ下りる段差の壁を岸の側で作る）。浅い側へは水の見つかった所より 2 m 先まで
 export function fillWaterUnderBridges(areas, roads) {
   const water = areas.filter((a) => a.type === 'water');
   if (!water.length) return;
@@ -411,13 +492,13 @@ export function fillWaterUnderBridges(areas, roads) {
 
   // 2) 橋に沿って調べ、橋の上流側と下流側の両方が水なら「橋の下も水」とみなしてパッチで埋める
   //    （BD TOPO では橋の下が岸から岸まで切り抜かれていて、橋の中心線上には水がない）
-  const depthAt = (x, z) => {
-    let d = 0;
+  const waterAt = (x, z) => {
+    let best = null;
     for (const a of water) {
       if (x < a.bounds.minX || x > a.bounds.maxX || z < a.bounds.minZ || z > a.bounds.maxZ) continue;
-      if (a.depth > d && pointInRing(x, z, a.outer) && !a.holes.some((h) => pointInRing(x, z, h))) d = a.depth;
+      if ((!best || a.depth > best.depth) && pointInRing(x, z, a.outer) && !a.holes.some((h) => pointInRing(x, z, h))) best = a;
     }
-    return d;
+    return best;
   };
   const OFFSETS = [4, 8, 13, 19, 26];
   const step = 1.5;
@@ -430,33 +511,55 @@ export function fillWaterUnderBridges(areas, roads) {
       const dx = (bx - ax) / len, dz = (bz - az) / len;
       for (let t = 0; t <= len; t += step) {
         const x = ax + dx * t, z = az + dz * t;
-        let depth = depthAt(x, z);
-        let reach = 0;
-        if (!depth) {
-          // 左右それぞれ、少しずつ離れながら水を探す
-          let dl = 0, dr = 0, wl = 0, wr = 0;
-          for (const o of OFFSETS) {
-            const off = r.width / 2 + o;
-            if (!dl) { dl = depthAt(x - dz * off, z + dx * off); wl = off; }
-            if (!dr) { dr = depthAt(x + dz * off, z - dx * off); wr = off; }
-          }
-          if (dl && dr) {
-            depth = Math.max(dl, dr);
-            reach = Math.max(wl, wr);
+        const here = waterAt(x, z);
+        const q = { x, z, dx, dz, depth: here ? here.depth : 0, gap: false, side: null };
+        if (!here) {
+          // 左右それぞれ、少しずつ離れながら水を探す（sg: 左 +1、右 -1）
+          const side = [1, -1].map((sg) => {
+            let prev = 0;
+            for (const o of OFFSETS) {
+              const off = r.width / 2 + o;
+              const a = waterAt(x - dz * off * sg, z + dx * off * sg);
+              if (a) return { a, sg, lo: prev, hi: off };
+              prev = off;
+            }
+            return null;
+          });
+          if (side[0] && side[1]) {
+            const ds = side.filter((s) => s.a.kind !== 'pond');
+            q.depth = Math.min(...(ds.length ? ds : side).map((s) => s.a.depth));
+            q.gap = true;
+            q.side = side;
           }
         }
-        samples.push({ x, z, dx, dz, depth, reach, gap: !depthAt(x, z) && depth > 0 });
+        samples.push(q);
       }
     }
+    // 深い側の水の始まる所（橋の中心からの距離）を二分法で
+    const edgeOf = (q, s) => {
+      let { lo, hi } = s;
+      for (let k = 0; k < 7; k++) {
+        const m = (lo + hi) / 2;
+        if (waterAt(q.x - q.dz * m * s.sg, q.z + q.dx * m * s.sg)) hi = m;
+        else lo = m;
+      }
+      return hi + 0.2;
+    };
     for (let i = 0; i < samples.length; i++) {
       if (!samples[i].gap) continue;
       let j = i;
       while (j < samples.length && samples[j].gap) j++;
-      const seg = samples.slice(Math.max(0, i - 1), Math.min(samples.length, j + 1));
-      const depth = Math.max(...seg.map((q) => q.depth));
-      const half = Math.max(...seg.map((q) => q.reach)) + 2;
-      const left = seg.map((q) => [q.x - q.dz * half, q.z + q.dx * half]);
-      const right = seg.map((q) => [q.x + q.dz * half, q.z - q.dx * half]).reverse();
+      const run = samples.slice(i, j);
+      const depth = Math.max(...run.map((q) => q.depth));
+      // 左右それぞれの広がり: 浅い側（パッチと同じ深さ以下）は一律、深い側はサンプルごと
+      const ext = [0, 1].map((k) => {
+        const shallow = Math.max(...run.map((q) => (q.side[k].a.depth > depth + 0.01 ? 0 : q.side[k].hi))) + 2;
+        return run.map((q) => (q.side[k].a.depth > depth + 0.01 ? edgeOf(q, q.side[k]) : shallow));
+      });
+      // 前後に 1 つずつ（水のある所まで）伸ばす。広がりは隣のサンプルと同じ
+      const seg = [...(i > 0 ? [[samples[i - 1], 0]] : []), ...run.map((q, k) => [q, k]), ...(j < samples.length ? [[samples[j], run.length - 1]] : [])];
+      const left = seg.map(([q, k]) => [q.x - q.dz * ext[0][k], q.z + q.dx * ext[0][k]]);
+      const right = seg.map(([q, k]) => [q.x + q.dz * ext[1][k], q.z - q.dx * ext[1][k]]).reverse();
       const outer = left.concat(right);
       const patch = { id: -1 - areas.length, type: 'water', name: '', tags: {}, outer, holes: [], depth, kind: depth >= 6 ? 'river' : 'canal', patch: true };
       patch.bounds = ringBounds(outer);

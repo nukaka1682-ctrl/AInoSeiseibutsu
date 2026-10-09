@@ -1,22 +1,31 @@
 // 建物の 3D メッシュ生成。OSM の外形を押し出し、壁に窓のテクスチャ、屋根に瓦を貼る。
+// 屋根は roofs.js のストレートスケルトンで、どんな外形にも寄棟・切妻をかける（隣と接する壁は切妻の壁）。
 // 300 m 四方のチャンクごとにまとめて描画コールを減らし、視錐台カリングを効かせる。
 import * as THREE from 'three';
 import { MeshWriter, writeFlatPolygon } from './meshwriter.js';
-import { Grid, centroid, hash01, isConvex, signedArea } from '../geo.js';
+import { Grid, centroid, hash01, isConvex, pointInRing, signedArea } from '../geo.js';
 import { writeTower } from './towers.js';
-import { CHURCH_TILE, STYLE, useFacadeAtlas } from './facades.js';
+import { CHURCH_TILE, STYLE, stylePlainColor, useContactShade, useFacadeAtlas } from './facades.js';
+import { ORDER } from './ground.js';
 import { facadeSpan } from './landmarkfacades.js';
+import { buildRoof, cleanRing, clipGable, ringsSimple, triangulate2 } from './roofs.js';
+import { GENOISE, eaveRuns, eaveShifts, placeChimneys, writeChimney, writeGenoise, writeRidgeTiles } from './roofdetail.js';
 
 const CHUNK = 300;
 export const BAY = 3.5; // 窓 1 列分の幅（m）
 
 // トゥールーズ「ばら色の街」の壁の色（レンガ）と、漆喰・石の色
-const BRICK = ['#c9846c', '#bf745b', '#d39277', '#b86c55', '#cc8b70', '#c27b63', '#d69c80'];
+const BRICK = ['#bb7c5f', '#b47257', '#c4876a', '#b06e54', '#bf8266', '#b8795d', '#c99173'];
 const STUCCO = ['#e4d6be', '#d9c6a5', '#ece2ce', '#d4bf9c', '#e8d2b3', '#dccbb4'];
 const STONE = ['#cfc5b3', '#c4b9a5', '#d8cfbf'];
 const GLASS = ['#8d9ba5', '#7f8f99'];
-const ROOF_TILE = ['#b4633f', '#a8573b', '#bb6e4a', '#9f5238', '#ad6244', '#b85f3c'];
+// 丸瓦の色: 年月を経た茶色・くすんだばら色と、葺き替えたばかりの明るい橙赤が建物ごとに混ざる（屋根の写真 #896450〜#bd8663、
+// 上から見た旧市街の屋根の連なり #b0705a〜#c08060。瓦のテクスチャの陰影・斜面の向きで暗くなる分だけ明るめ）
+const ROOF_TILE = ['#d79573', '#cd8668', '#e09c74', '#c28168', '#cd795a', '#d78660', '#e08158', '#ed9264'];
 const FLAT_ROOF = ['#9b928a', '#8f8b86', '#a59c90', '#878079'];
+// 煙突の筒: むき出しのレンガ（#8a5f49 前後）と、漆喰塗り（白〜クリーム）
+const CHIMNEY_BRICK = ['#8a5f49', '#94654c', '#9c6c52', '#83594a'];
+const CHIMNEY_RENDER = ['#e2d9c8', '#d8cdb8', '#ebe3d3'];
 
 const tmpColor = new THREE.Color();
 
@@ -30,10 +39,16 @@ function colorFromTag(value) {
   }
 }
 
+const parsedColors = new Map(); // 色の文字列 → [r, g, b]（毎回の文字列の解析を省く）
 function paletteColor(palette, id, salt) {
-  tmpColor.set(palette[Math.floor(hash01(id, salt) * palette.length)]);
+  const hex = palette[Math.floor(hash01(id, salt) * palette.length)];
+  let c = parsedColors.get(hex);
+  if (!c) {
+    tmpColor.set(hex);
+    parsedColors.set(hex, (c = [tmpColor.r, tmpColor.g, tmpColor.b]));
+  }
   const k = 0.93 + hash01(id, salt + 1) * 0.12;
-  return [tmpColor.r * k, tmpColor.g * k, tmpColor.b * k];
+  return [c[0] * k, c[1] * k, c[2] * k];
 }
 
 export function wallColor(b) {
@@ -46,7 +61,9 @@ export function wallColor(b) {
   if (mat === 'plaster' || mat === 'render') return paletteColor(STUCCO, b.id, 1);
   if (mat === 'glass') return paletteColor(GLASS, b.id, 1);
   if (b.info.isChurch) return paletteColor(BRICK, b.id, 1); // 南仏ゴシックのレンガ造り
-  return hash01(b.id, 2) < 0.66 ? paletteColor(BRICK, b.id, 1) : paletteColor(STUCCO, b.id, 1);
+  // 窓のない壁（境界の壁・切妻）は、ファサードの様式と同じ色にそろえる（漆喰の家はその色、レンガの家はレンガ）
+  const plaster = stylePlainColor(facadeStyle(b));
+  return plaster ? paletteColor([plaster], b.id, 1) : paletteColor(BRICK, b.id, 1);
 }
 
 // ファサードの様式（facades.js）: 壁の材料ごとに、トゥールーズで見かける割合で選ぶ
@@ -55,12 +72,15 @@ const STYLE_MIX = {
   stone: [[STYLE.cream, 0.6], [STYLE.brickStone, 0.2], [STYLE.taupe, 0.2]],
   concrete: [[STYLE.modern, 0.6], [STYLE.cream, 0.25], [STYLE.ochre, 0.15]],
   wood: [[STYLE.modern, 1]],
-  other: [[STYLE.brickStone, 0.2], [STYLE.brickShutters, 0.22], [STYLE.ochre, 0.12], [STYLE.taupe, 0.11], [STYLE.salmon, 0.12], [STYLE.cream, 0.1], [STYLE.rose, 0.13]],
+  other: [[STYLE.brickStone, 0.2], [STYLE.brickShutters, 0.24], [STYLE.ochre, 0.1], [STYLE.taupe, 0.1], [STYLE.salmon, 0.12], [STYLE.cream, 0.1], [STYLE.rose, 0.14]],
+  // 旧市街のレンガ造り・材料の分からない建物: 写真の街並みのとおり 8 割はレンガ（ばら色の漆喰にレンガの窓枠を含む）
+  oldTown: [[STYLE.brickStone, 0.32], [STYLE.brickShutters, 0.34], [STYLE.rose, 0.14], [STYLE.ochre, 0.07], [STYLE.salmon, 0.07], [STYLE.cream, 0.06]],
 };
 export function facadeStyle(b) {
   if (b.style != null) return b.style; // 決まった様式（landmarkfacades.js の歴史的な建物）
   const mat = b.tags['building:material'];
-  const mix = STYLE_MIX[mat === 'sandstone' || mat === 'limestone' ? 'stone' : mat === 'plaster' || mat === 'render' ? 'other' : mat] || STYLE_MIX.other;
+  const key = mat === 'sandstone' || mat === 'limestone' ? 'stone' : mat === 'plaster' || mat === 'render' ? 'other' : mat;
+  const mix = (b.oldTown && (key === 'brick' || !STYLE_MIX[key]) ? STYLE_MIX.oldTown : STYLE_MIX[key]) || STYLE_MIX.other;
   let r = hash01(b.id, 21);
   for (const [style, p] of mix) {
     if ((r -= p) < 0) return style;
@@ -69,14 +89,67 @@ export function facadeStyle(b) {
 }
 // ファサードの色はテクスチャに描いてあるので、頂点カラーは建物ごとのわずかな明るさの違いだけ
 export function facadeTint(b) {
-  const k = 0.9 + hash01(b.id, 22) * 0.14, warm = hash01(b.id, 23) * 0.04;
+  const [k, warm] = facadeColor(b, 0);
   return [k, k * (1 - warm * 0.5), k * (1 - warm)];
 }
+// 窓のあるファサードの頂点カラー: （明るさ, 暖かさ, 軒の高さ）。シェーダーで色合いと軒下の陰にする（facades.js の useFacadeAtlas）
+export function facadeColor(b, eave) {
+  return [0.9 + hash01(b.id, 22) * 0.14, hash01(b.id, 23) * 0.04, eave];
+}
 
-function roofColor(b, flat) {
+const SLATE = ['#5f646b', '#686c70', '#73787e'];
+
+// material: 'tile' | 'slate' | 'flat'（roofPlan）
+function roofColor(b, material) {
   const tag = colorFromTag(b.tags['roof:colour']);
   if (tag) return tag;
-  return flat ? paletteColor(FLAT_ROOF, b.id, 5) : paletteColor(ROOF_TILE, b.id, 5);
+  return paletteColor(material === 'flat' ? FLAT_ROOF : material === 'slate' ? SLATE : ROOF_TILE, b.id, 5);
+}
+
+// 屋根の形と材料を決める。
+//   shape: 'flat'（陸屋根）| 'pitched'（ストレートスケルトンの寄棟・切妻）| 'pyramidal' など（頂点 1 つの尖った屋根）
+//   material: 'tile'（丸瓦）| 'slate'（スレート・亜鉛: 灰色）| 'flat'（陸屋根の防水・砂利）
+//   height: 屋根の高さ（m、軒から。分からなければ 0 で、勾配から決める）
+// トゥールーズの旧市街は、IGN の屋根の最高点と最低点の差がある建物（9 割近く）がほぼすべて低い勾配の丸瓦屋根。
+// 灰色の陸屋根は、コンクリートの屋根・IGN が平らとする屋根・大きな工場や商業施設だけにする
+const BIG_FLAT_KINDS = /^(industrial|warehouse|retail|supermarket|parking|hangar|garages|greenhouse|service|office)$/;
+const POINTY = new Set(['pyramidal', 'dome', 'onion', 'cone', 'round']);
+export function roofPlan(b) {
+  const info = b.info, t = b.tags;
+  const mat = t['roof:material'];
+  const colour = colorFromTag(t['roof:colour']);
+  // 色が灰色（彩度が低い）か、材料がスレート・金属ならスレート・亜鉛の屋根
+  const greyish = colour && Math.max(...colour) - Math.min(...colour) < 0.08;
+  const slate = /^(slate|metal|zinc|copper|tin)$/.test(mat || '') || greyish;
+  let shape = info.roofShape;
+  if (info.kind === 'roof' || info.kind === 'carport' || mat === 'concrete' || mat === 'glass') shape = 'flat';
+  else if (POINTY.has(shape)) {
+    if (!isConvex(b.outer) || b.holes.length) shape = 'pitched';
+  } else if (shape === 'flat') {
+    // IGN で屋根の高低差が 0.5 m 以下でも、瓦の屋根は平らにはできないので低い瓦屋根にする
+    if (mat && /tile/.test(mat)) return { shape: 'pitched', material: 'tile', height: 0.5 };
+  } else if (shape === 'auto') {
+    // 屋根の高さが分かっていれば傾斜屋根。情報がなければ、教会・小さな建物は傾斜屋根、大きな建物・工場・商業施設は陸屋根
+    if (info.roofHeight > 0 || info.isChurch || (info.area < 2500 && !BIG_FLAT_KINDS.test(info.kind) && !(info.roofHeight === 0))) shape = 'pitched';
+    else shape = 'flat';
+  } else {
+    shape = 'pitched'; // gabled・hipped・half-hipped・mansard など
+  }
+  if (shape === 'flat') {
+    // 材料の分からない小さな平らな屋根（中庭の離れなど）は瓦の色、それ以外は灰色の陸屋根
+    const small = mat == null && !colour && info.area < 600 && !BIG_FLAT_KINDS.test(info.kind) && !/^(commercial|school|university|roof|carport)$/.test(info.kind);
+    return { shape, material: small ? 'tile' : 'flat', height: 0 };
+  }
+  return { shape, material: slate ? 'slate' : 'tile', height: info.roofHeight > 0 ? info.roofHeight : 0 };
+}
+
+// 屋根の勾配の範囲（高さ / 水平距離）: 丸瓦は 18〜42%（10〜23°。IGN の屋根の高さが低い古い屋根は 20% 前後まで下げ、
+// それより低い所だけ平らな terrasson にする）、スレート・亜鉛はもっと急、教会は 40〜80%、塔（キャピトルの主塔など）は尖った急な屋根
+function slopeRange(b, plan) {
+  if (b.info.kind === 'tower') return { minSlope: 0.8, maxSlope: 1.6, slope: 1.2, maxHeight: 10 };
+  if (b.info.isChurch) return { minSlope: 0.4, maxSlope: 0.8, slope: 0.6, maxHeight: 12 };
+  if (plan.material === 'slate') return { minSlope: 0.3, maxSlope: 1, slope: 0.6, maxHeight: 6 };
+  return { minSlope: 0.18, maxSlope: 0.42, slope: 0.33, maxHeight: 4 };
 }
 
 function outwardSign(ring) {
@@ -89,32 +162,33 @@ export function makePartyIndex(list) {
   const grid = new Grid(20);
   const segs = [];
   for (const b of list) {
+    if (b.info.minHeight > 1 || b.info.kind === 'roof') continue; // 浮いているパーツ・屋根だけの構造物は隣の壁を隠さない
     for (const ring of [b.outer, ...b.holes]) {
       for (let i = 0; i < ring.length; i++) {
         const p = ring[i], q = ring[(i + 1) % ring.length];
+        const sl = Math.sqrt((q[0] - p[0]) ** 2 + (q[1] - p[1]) ** 2);
+        if (sl < 0.3) continue;
         grid.insertSegment(p[0], p[1], q[0], q[1], segs.length);
-        segs.push({ p, q, b });
+        segs.push({ p, q, b, ux: (q[0] - p[0]) / sl, uz: (q[1] - p[1]) / sl, seen: 0 });
       }
     }
   }
   const TOL = 0.8;
+  let query = 0; // 同じ辺を 2 度数えないための印（問い合わせごとに増やす）
   // 辺 a→c のうち、隣の建物に接している区間 [t0, t1]（m）と、そこを隠す高さ
   return (b, a, c) => {
-    const L = Math.hypot(c[0] - a[0], c[1] - a[1]);
+    const L = Math.sqrt((c[0] - a[0]) ** 2 + (c[1] - a[1]) ** 2);
     if (L < 0.3) return [];
     const ux = (c[0] - a[0]) / L, uz = (c[1] - a[1]) / L;
     const out = [];
-    const seen = new Set();
+    const mark = ++query;
     grid.query(Math.min(a[0], c[0]) - TOL, Math.min(a[1], c[1]) - TOL, Math.max(a[0], c[0]) + TOL, Math.max(a[1], c[1]) + TOL, (k) => {
-      if (seen.has(k)) return;
-      seen.add(k);
       const s = segs[k];
-      if (s.b === b || s.b.info.minHeight > 1 || s.b.info.kind === 'roof') return;
-      const sl = Math.hypot(s.q[0] - s.p[0], s.q[1] - s.p[1]);
-      if (sl < 0.3) return;
-      if (Math.abs(((s.q[0] - s.p[0]) * ux + (s.q[1] - s.p[1]) * uz) / sl) < 0.97) return;
-      const d = (pt) => Math.abs((pt[0] - a[0]) * -uz + (pt[1] - a[1]) * ux);
-      if (d(s.p) > TOL || d(s.q) > TOL) return;
+      if (s.seen === mark) return;
+      s.seen = mark;
+      if (s.b === b || Math.abs(s.ux * ux + s.uz * uz) < 0.97) return;
+      const dp = Math.abs((s.p[0] - a[0]) * -uz + (s.p[1] - a[1]) * ux), dq = Math.abs((s.q[0] - a[0]) * -uz + (s.q[1] - a[1]) * ux);
+      if (dp > TOL || dq > TOL) return;
       const tp = (s.p[0] - a[0]) * ux + (s.p[1] - a[1]) * uz, tq = (s.q[0] - a[0]) * ux + (s.q[1] - a[1]) * uz;
       const t0 = Math.max(0, Math.min(tp, tq)), t1 = Math.min(L, Math.max(tp, tq));
       if (t1 - t0 > 0.3) out.push([t0, t1, s.b.info.height]);
@@ -141,7 +215,8 @@ function coverIntervals(L, covers) {
   return out;
 }
 
-function writeWalls(W, ring, sign, b, plainColor, facade, party = null) {
+// covers: 辺ごとの、隣の建物に接している区間（makePartyIndex の結果）
+function writeWalls(W, ring, sign, b, plainColor, facade, covers = null) {
   const info = b.info;
   const y0 = info.minHeight;
   const y1 = info.height;
@@ -151,6 +226,7 @@ function writeWalls(W, ring, sign, b, plainColor, facade, party = null) {
   const bayShift = Math.floor(hash01(b.id, 9) * 4);
   const sv = facadeStyle(b) * 1000; // v に様式の番号を入れる（facades.js）
   const tint = facadeTint(b);
+  const fc = facadeColor(b, y1);
   let along = 0;
   const n = ring.length;
   for (let i = 0; i < n; i++) {
@@ -165,10 +241,11 @@ function writeWalls(W, ring, sign, b, plainColor, facade, party = null) {
     if (span) {
       const top = Math.max(y1, y0 + facade.height);
       W.capitole.quad(A(y0), C(y0), C(top), A(top), nrm, [span[0], 0], [span[1], 0], [span[1], (top - y0) / facade.height], [span[0], (top - y0) / facade.height]);
+      if (y0 < 0.5 && W.contact) writeContact(W.contact, A(0), C(0), nrm);
       continue;
     }
     // 隣の建物に接する所: 隣の高さまでは隠れるので作らず、それより上は窓のない壁（境界の壁）
-    const parts = coverIntervals(L, party ? party(b, a, c) : []);
+    const parts = coverIntervals(L, covers?.[i] || []);
     for (const [t0, t1, cover] of parts) {
       if (cover >= y1 - 0.2) continue;
       const P = (t, y) => [a[0] + (dx / L) * t, y, a[1] + (dz / L) * t];
@@ -178,6 +255,7 @@ function writeWalls(W, ring, sign, b, plainColor, facade, party = null) {
         W.plain.quad(P(t0, yc), P(t1, yc), P(t1, y1), P(t0, y1), nrm, [t0 / 4, yc / 4], [t1 / 4, yc / 4], [t1 / 4, y1 / 4], [t0 / 4, y1 / 4], plainColor);
         continue;
       }
+      if (y0 < 0.5 && W.contact && l >= 1.5 && info.kind !== 'roof') writeContact(W.contact, P(t0, 0), P(t1, 0), nrm);
       if (info.isChurch && L >= 1.6) {
         // 教会の壁: 地面からの高さで窓の段がそろう
         const s0 = (along + t0) / CHURCH_TILE.w, s1 = (along + t1) / CHURCH_TILE.w;
@@ -195,16 +273,28 @@ function writeWalls(W, ring, sign, b, plainColor, facade, party = null) {
       if (y0 < 0.5) {
         const gt = Math.min(y1, y0 + groundH);
         const v1 = (gt - y0) / groundH;
-        W.ground.quad(P(t0, y0), P(t1, y0), P(t1, gt), P(t0, gt), nrm, [u0, sv], [u1, sv], [u1, sv + v1], [u0, sv + v1], tint);
+        W.ground.quad(P(t0, y0), P(t1, y0), P(t1, gt), P(t0, gt), nrm, [u0, sv], [u1, sv], [u1, sv + v1], [u0, sv + v1], fc);
         yb = gt;
       }
       if (y1 > yb + 0.05) {
         const v1 = (y1 - yb) / floorH;
-        W.upper.quad(P(t0, yb), P(t1, yb), P(t1, y1), P(t0, y1), nrm, [u0, sv], [u1, sv], [u1, sv + v1], [u0, sv + v1], tint);
+        W.upper.quad(P(t0, yb), P(t1, yb), P(t1, y1), P(t0, y1), nrm, [u0, sv], [u1, sv], [u1, sv + v1], [u0, sv + v1], fc);
       }
     }
     along += L;
   }
+}
+
+const CONTACT_W = 1.1; // 壁際の地面の陰の幅（m）
+
+// 壁際の地面の陰（空が半分ふさがれて暗い）: 壁の足元から外へ CONTACT_W m の帯。濃さは UV の v（0 = 壁際）で決める
+function writeContact(w, a, c, nrm) {
+  const ox = nrm[0] * CONTACT_W, oz = nrm[2] * CONTACT_W;
+  // 一段高い歩道の上では歩道の面に載せる（w.groundAt: 歩道の高さ）
+  const y = (x, z) => (w.groundAt ? w.groundAt(x, z) : 0) + 0.02;
+  const ya = y(a[0] + ox * 0.3, a[2] + oz * 0.3), yc = y(c[0] + ox * 0.3, c[2] + oz * 0.3);
+  const yc2 = y(c[0] + ox * 0.9, c[2] + oz * 0.9), ya2 = y(a[0] + ox * 0.9, a[2] + oz * 0.9);
+  w.quad([a[0], ya, a[2]], [c[0], yc, c[2]], [c[0] + ox, yc2, c[2] + oz], [a[0] + ox, ya2, a[2] + oz], [0, 1, 0], [0.5, 0], [0.5, 0], [0.5, 1], [0.5, 1]);
 }
 
 // 傾斜した屋根の三角形。法線を計算し、瓦が勾配方向に流れるよう UV を合わせる
@@ -223,86 +313,201 @@ function roofTri(w, a, b, c, color) {
   w.tri(a, b, c, [nx, ny, nz], uv(a), uv(b), uv(c), color);
 }
 
-function chooseRoof(b, ring) {
-  const info = b.info;
-  let shape = info.roofShape;
-  const quadOk = ring.length === 4 && b.holes.length === 0 && isConvex(ring);
-  if (shape === 'auto') {
-    if (quadOk && info.area < 3000) shape = 'gabled';
-    else shape = 'flat';
-  }
-  if ((shape === 'gabled' || shape === 'hipped' || shape === 'half-hipped' || shape === 'saltbox') && !quadOk) shape = 'flat';
-  if ((shape === 'pyramidal' || shape === 'dome' || shape === 'onion' || shape === 'cone' || shape === 'round') && (!isConvex(ring) || b.holes.length)) shape = 'flat';
-  if (shape !== 'gabled' && shape !== 'hipped' && shape !== 'half-hipped' && shape !== 'saltbox' &&
-      shape !== 'pyramidal' && shape !== 'dome' && shape !== 'onion' && shape !== 'cone' && shape !== 'round') shape = 'flat';
-  return shape;
+// 辺の重み（roofs.js）: 隣の建物（自分の軒の高さ − 3 m 以上の高さ）と接している長さが辺の半分以上なら 0（切妻の壁）
+const PARTY_DROP = 3;
+export function edgeWeights(b, rings, covers) {
+  return rings.map((ring, ri) => ring.map((a, i) => {
+    const c = ring[(i + 1) % ring.length];
+    const L = Math.hypot(c[0] - a[0], c[1] - a[1]);
+    let cov = 0;
+    for (const [t0, t1, h] of covers[ri][i]) if (h >= b.info.height - PARTY_DROP) cov += t1 - t0;
+    return cov >= 0.5 * L ? 0 : 1;
+  }));
 }
 
-function writeRoof(W, ring, b, wColor, plainColor) {
+// 尖った屋根（ピラミッド・円錐など、凸形の建物だけ）
+function writePointyRoof(W, ring, b, rColor) {
   const info = b.info;
   const top = info.height;
-  const shape = chooseRoof(b, ring);
-
-  if (shape === 'flat') {
-    // 小さな住宅系は瓦、大きい建物は灰色の陸屋根
-    const tiled = !b.tags['roof:colour'] && info.area < 600 && !/^(industrial|warehouse|retail|commercial|office|supermarket|parking|school|university)$/.test(info.kind);
-    if (tiled) writeFlatPolygon(W.roof, ring, b.holes, top, 1.8, roofColor(b, false));
-    else writeFlatPolygon(W.flat, ring, b.holes, top, 4, roofColor(b, true));
-    return;
-  }
-
-  const rColor = roofColor(b, false);
-  if (shape === 'pyramidal' || shape === 'dome' || shape === 'onion' || shape === 'cone' || shape === 'round') {
-    const c = centroid(ring);
-    const size = Math.sqrt(info.area);
-    let rh = info.roofHeight;
-    if (!(rh > 0)) rh = shape === 'pyramidal' ? Math.min(6, size * 0.35) : Math.min(14, size * 0.6);
-    const apex = [c[0], top + rh, c[1]];
-    for (let i = 0; i < ring.length; i++) {
-      const a = ring[i], d = ring[(i + 1) % ring.length];
-      roofTri(W.roof, [a[0], top, a[1]], [d[0], top, d[1]], apex, rColor);
-    }
-    return;
-  }
-
-  // 切妻（gabled）・寄棟（hipped）: 短い2辺の中点を結ぶ線を棟にする
-  let [A, B, C, D] = ring;
-  const len = (p, q) => Math.hypot(q[0] - p[0], q[1] - p[1]);
-  if (len(A, B) + len(C, D) > len(B, C) + len(D, A)) [A, B, C, D] = [B, C, D, A];
-  const short = (len(A, B) + len(C, D)) / 2;
+  const c = centroid(ring);
+  const size = Math.sqrt(info.area);
   let rh = info.roofHeight;
-  if (!(rh > 0)) rh = info.isChurch ? Math.min(9, short * 0.42) : Math.min(3.5, short * 0.2);
-  const yr = top + rh;
-  let R1 = [(A[0] + B[0]) / 2, (A[1] + B[1]) / 2];
-  let R2 = [(C[0] + D[0]) / 2, (C[1] + D[1]) / 2];
-  const hipped = shape !== 'gabled' && shape !== 'saltbox';
-  if (hipped) {
-    const rl = len(R1, R2);
-    const inset = Math.min(short / 2, rl / 2 - 0.05);
-    if (inset > 0 && rl > 0) {
-      const ux = (R2[0] - R1[0]) / rl, uz = (R2[1] - R1[1]) / rl;
-      R1 = [R1[0] + ux * inset, R1[1] + uz * inset];
-      R2 = [R2[0] - ux * inset, R2[1] - uz * inset];
+  if (!(rh > 0)) rh = info.roofShape === 'pyramidal' ? Math.min(6, size * 0.35) : Math.min(14, size * 0.6);
+  const apex = [c[0], top + rh, c[1]];
+  for (let i = 0; i < ring.length; i++) {
+    const a = ring[i], d = ring[(i + 1) % ring.length];
+    roofTri(W.roof, [a[0], top, a[1]], [d[0], top, d[1]], apex, rColor);
+  }
+}
+
+// 大きな建物で、IGN の屋根の高さを屋根全体に広げると勾配がこれより緩いもの（工場・商業施設・病院などの金属の低い屋根や、
+// 屋上の設備の分だけ高低差がある陸屋根）は、瓦ではなく灰色の陸屋根にする
+const LOW_PITCH = 0.08;
+const LOW_PITCH_AREA = 2000;
+
+// 屋根を書く。rings: [外周, ...穴]（壁と同じ輪）、covers: 辺ごとの隣と接する区間。
+// 傾斜屋根が作れなければ（外形が乱れているなど）、軒の高さの陸屋根にする。
+// 返り値: 'pitched'（傾斜屋根）| 'flat'（陸屋根）| 'fallback'（傾斜屋根を作れず陸屋根）
+function writeRoof(W, rings, b, plainColor, covers, plan) {
+  const info = b.info;
+  const top = info.height;
+  const [outer, ...holes] = rings;
+  const tile = plan.material === 'tile';
+  const rColor = roofColor(b, plan.material);
+  if (plan.shape === 'flat') {
+    if (tile) writeFlatPolygon(W.roof, outer, holes, top, 1.8, rColor);
+    else writeFlatPolygon(W.flat, outer, holes, top, 4, rColor);
+    return 'flat';
+  }
+  if (POINTY.has(plan.shape)) {
+    writePointyRoof(W, outer, b, rColor);
+    return 'pitched';
+  }
+  const w = tile ? W.roof : W.flat;
+  let weights = edgeWeights(b, rings, covers);
+  // 切妻（OSM の roof:shape=gabled）の四角形: 短い 2 辺を切妻の壁にする
+  if (info.roofShape === 'gabled' && outer.length === 4 && !holes.length) {
+    const len = (i) => Math.hypot(outer[(i + 1) % 4][0] - outer[i][0], outer[(i + 1) % 4][1] - outer[i][1]);
+    const s = len(0) + len(2) < len(1) + len(3) ? 0 : 1;
+    weights = [weights[0].map((x, i) => (i % 2 === s ? 0 : x))];
+  }
+  let roof = null;
+  try {
+    if (ringsSimple(rings)) roof = buildRoof(outer, holes, { weights, height: plan.height, ...slopeRange(b, plan) });
+  } catch (err) {
+    console.warn(`建物 ${b.id} の屋根を作れませんでした`, err); // 想定外の外形でも、タイル全体は止めない
+  }
+  if (!roof) {
+    writeFlatPolygon(w, outer, holes, top, tile ? 1.8 : 4, rColor);
+    return 'fallback';
+  }
+  if (tile && plan.height > 0 && info.area > LOW_PITCH_AREA && !info.isChurch && !b.tags['roof:material'] && plan.height < LOW_PITCH * roof.reach) {
+    writeFlatPolygon(W.flat, outer, holes, top, 4, roofColor(b, 'flat'));
+    return 'flat';
+  }
+  const R = roof.roof;
+  const at = (arr, i) => [arr[i], top + arr[i + 1], arr[i + 2]];
+  // 伝統的な家は軒の génoise と軒の出（屋根の軒の頂点を外へ動かして屋根面を延ばす）
+  const eave = traditionalHouse(b, plan) ? houseEave(b, rings, roof, covers) : null;
+  const atR = eave ? (arr, i) => (arr[i + 1] < 1e-6 && eave.corner(arr[i], arr[i + 2])) || at(arr, i) : at;
+  for (let i = 0; i < R.length; i += 9) roofTri(w, atR(R, i), atR(R, i + 3), atR(R, i + 6), rColor);
+  const T = roof.top;
+  if (T.length) {
+    // 上限で平らになった上面（terrasson）: 広ければ亜鉛・防水の灰色、狭ければ屋根の続き
+    let area = 0;
+    for (let i = 0; i < T.length; i += 9) area += Math.abs((T[i + 3] - T[i]) * (T[i + 8] - T[i + 2]) - (T[i + 6] - T[i]) * (T[i + 5] - T[i + 2])) / 2;
+    const flat = area > 60;
+    const tc = flat ? paletteColor(FLAT_ROOF, b.id, 6) : rColor;
+    for (let i = 0; i < T.length; i += 9) {
+      const p0 = at(T, i), p1 = at(T, i + 3), p2 = at(T, i + 6);
+      if (flat) W.flat.tri(p0, p1, p2, [0, 1, 0], [p0[0] / 4, -p0[2] / 4], [p1[0] / 4, -p1[2] / 4], [p2[0] / 4, -p2[2] / 4], tc);
+      else roofTri(w, p0, p1, p2, tc);
     }
   }
-  const P = (p, y) => [p[0], y, p[1]];
-  roofTri(W.roof, P(B, top), P(C, top), P(R2, yr), rColor);
-  roofTri(W.roof, P(B, top), P(R2, yr), P(R1, yr), rColor);
-  roofTri(W.roof, P(D, top), P(A, top), P(R1, yr), rColor);
-  roofTri(W.roof, P(D, top), P(R1, yr), P(R2, yr), rColor);
-  if (hipped) {
-    roofTri(W.roof, P(A, top), P(B, top), P(R1, yr), rColor);
-    roofTri(W.roof, P(C, top), P(D, top), P(R2, yr), rColor);
-  } else {
-    // 切妻の三角形の壁
-    const sign = outwardSign(ring);
-    for (const [p, q, r] of [[A, B, R1], [C, D, R2]]) {
-      const dx = q[0] - p[0], dz = q[1] - p[1];
-      const L = Math.hypot(dx, dz) || 1;
-      const nrm = [(dz / L) * sign, 0, (-dx / L) * sign];
-      W.plain.tri(P(p, top), P(q, top), P(r, yr), nrm, [0, top / 4], [L / 4, top / 4], [L / 8, yr / 4], plainColor || wColor);
+  if (tile) writeRoofDetail(W, b, roof, rColor, eave);
+  // 切妻の壁（重み 0 の辺の上の三角形）: 隣の建物より高い所だけ、窓のない壁で埋める
+  for (const g of roof.gables) {
+    const ring = rings[g.ring];
+    const sign = g.ring === 0 ? outwardSign(ring) : -outwardSign(ring);
+    const dx = g.b[0] - g.a[0], dz = g.b[1] - g.a[1];
+    const L = Math.hypot(dx, dz);
+    const nrm = [(dz / L) * sign, 0, (-dx / L) * sign];
+    for (const [t0, t1, cover] of coverIntervals(L, covers[g.ring][g.edge])) {
+      const poly = clipGable(g.pts, t0, t1, Math.max(0, cover - top));
+      if (!poly) continue;
+      const idx = triangulate2(poly);
+      const P = (q) => [g.a[0] + (dx / L) * q[0], top + q[1], g.a[1] + (dz / L) * q[0]];
+      const U = (q) => [q[0] / 4, (top + q[1]) / 4];
+      for (let i = 0; i < idx.length; i += 3) {
+        const p0 = poly[idx[i]], p1 = poly[idx[i + 1]], p2 = poly[idx[i + 2]];
+        W.plain.tri(P(p0), P(p1), P(p2), nrm, U(p0), U(p1), U(p2), plainColor);
+      }
     }
   }
+  return 'pitched';
+}
+
+// génoise・煙突をつける建物: 旧市街・フォーブールのレンガ・漆喰の家（瓦の傾斜屋根）。1 階が店の家（BD TOPO では commercial）も含める。
+// 教会・塔・名所（決まった様式）・現代的な様式・高い集合住宅・大きな工場や商業施設・物置や車庫・浮いたパーツは除く
+const NOT_HOUSE = /^(school|university|roof|carport|church|cathedral|chapel|tower|hospital|stadium|train_station|transportation|shed|garage|hut)$/;
+export function traditionalHouse(b, plan) {
+  const info = b.info;
+  if (plan.material !== 'tile' || info.isChurch || b.style != null || info.minHeight > 0.5) return false;
+  if (info.height < 3 || info.height > 22 || info.area > 2500) return false;
+  if (BIG_FLAT_KINDS.test(info.kind) || NOT_HOUSE.test(info.kind)) return false;
+  if (info.kind === 'commercial' && info.area > 800) return false; // 大きな商業施設
+  return facadeStyle(b) !== STYLE.modern;
+}
+
+// 頂点の座標の鍵（屋根の三角形の頂点と外形の頂点を突き合わせる）
+const vkey = (x, z) => `${Math.round(x * 1000)},${Math.round(z * 1000)}`;
+
+// 伝統的な家の軒: 外周の軒の辺のうち、隣の建物が軒より 1.5 m 以上低い区間（génoise が見え、隣の屋根にめり込まない所）に
+// génoise を並べ、軒の辺の頂点を外へ ext だけずらす（軒の出）。中庭の軒は省く（通りから見えない）。
+// 返り値: { runs, rows, ext, corner(x, z): 外形の頂点を軒の出で動かした位置 [x, y, z]（動かさない頂点は null） }
+function houseEave(b, rings, roof, covers) {
+  const top = b.info.height;
+  const outer = rings[0];
+  const sign = outwardSign(outer);
+  const spans = outer.map(() => null), isEave = outer.map(() => false);
+  for (const { ring, edge } of roof.eaves) {
+    if (ring !== 0) continue;
+    isEave[edge] = true;
+    const a = outer[edge], c = outer[(edge + 1) % outer.length];
+    const L = Math.hypot(c[0] - a[0], c[1] - a[1]);
+    const sp = [];
+    for (const [t0, t1, h] of coverIntervals(L, covers[0][edge])) {
+      if (h > top - 1.5) continue;
+      const last = sp[sp.length - 1];
+      if (last && t0 - last[1] < 0.06) last[1] = t1;
+      else sp.push([t0, t1]);
+    }
+    spans[edge] = sp;
+  }
+  // 段数: 小さな家は 2 段のことが多く、ほかは 3 段。軒の出 = いちばん上の段の迫り出し + 瓦の端の出（0.22〜0.30 m）
+  const rows = b.info.height < 7 && hash01(b.id, 43) < 0.6 ? 2 : 3;
+  const ext = rows * GENOISE.step + GENOISE.lip;
+  const shift = new Map();
+  eaveShifts(outer, sign, isEave).forEach((m, i) => m && shift.set(vkey(outer[i][0], outer[i][1]), m));
+  const corner = (x, z) => {
+    const m = shift.get(vkey(x, z));
+    return m ? [x + m[0] * ext, top - m[2] * ext * roof.slope, z + m[1] * ext] : null;
+  };
+  // 小口: 角の向こうの辺（切妻・境の壁）に軒の高さ近くまで隣の家が接していれば、隣の家の軒に隠れるのでふさがない
+  const n = outer.length;
+  const hidden = (edge, t) => covers[0][edge].some(([c0, c1, h]) => c0 < t + 0.3 && c1 > t - 0.3 && h >= top - 0.5);
+  const len = (i) => Math.hypot(outer[(i + 1) % n][0] - outer[i][0], outer[(i + 1) % n][1] - outer[i][1]);
+  const runs = eaveRuns(outer, sign, spans, 2.5);
+  for (const r of runs) {
+    const pe = (r.edge - 1 + n) % n, ne = (r.edge + 1) % n;
+    if (r.capA && hidden(pe, len(pe))) r.capA = false;
+    if (r.capB && hidden(ne, 0)) r.capB = false;
+  }
+  return { runs, rows, ext, corner };
+}
+
+// 屋根の細部（roofdetail.js）: 伝統的な家だけ、軒の génoise・煙突と、3 m 以上の棟・隅棟の棟瓦
+function writeRoofDetail(W, b, roof, rColor, eave) {
+  if (!eave) return;
+  const top = b.info.height;
+  const { rows } = eave;
+  // いちばん上の段の上端が、壁から rows × step の所の屋根の下面に接する（その先へ瓦の端が lip だけ出る）
+  const base = top - rows * GENOISE.step * roof.slope - rows * GENOISE.rowH;
+  const k = 0.88 + hash01(b.id, 44) * 0.12;
+  const gColor = [k, k * 0.98, k * 0.95];
+  for (const run of eave.runs) writeGenoise(W.genoise, run, base, rows, gColor);
+  const chimneys = placeChimneys(roof, b.id, b.info.area);
+  if (chimneys.length) {
+    const brick = paletteColor(CHIMNEY_BRICK, b.id, 45);
+    const render = paletteColor(CHIMNEY_RENDER, b.id, 46);
+    const cap = paletteColor(FLAT_ROOF, b.id, 47);
+    const rTri = (p, q, r) => roofTri(W.roof, p, q, r, rColor);
+    for (const c of chimneys) writeChimney(W.plain, rTri, c, top, c.render ? render : brick, cap);
+  }
+  // 棟瓦: 屋根とほぼ同じ色で、ほんの少し暗くくすむ（漆喰で固めた上瓦）。大きな屋根・高い建物・現代的な建物には載せない
+  // （遠くからしか見えないので三角形を節約する）
+  const rc = [rColor[0] * 0.91, rColor[1] * 0.9, rColor[2] * 0.89];
+  writeRidgeTiles(W.roof, roof.ridges, top, eave.corner, rc);
 }
 
 export function createBuildingMaterials(tex) {
@@ -310,70 +515,110 @@ export function createBuildingMaterials(tex) {
   return {
     upper: useFacadeAtlas(std(tex.upper)),
     ground: useFacadeAtlas(std(tex.shopfront)),
-    plain: std(tex.plain),
+    plain: useContactShade(std(tex.plain)),
     capitole: std(tex.capitole, { alphaTest: 0.5 }), // キャピトルの正面（屋上の手すりの上は透明）
     tower: std(tex.tower), // サン・セルナン・ジャコバンの八角形の鐘楼
-    church: std(tex.church), // 教会の壁（石の縞・控え壁・半円アーチの窓）
+    // 名所の専用モデル（monuments.js）: レンガ・ルーバーなどの区画のテクスチャ、金属（ドーム・屋根・鉄柵・庇）、
+    // 広場に埋め込んだブロンズ（地面より手前に出して描く。低い視点で暗い空を映して黒く見えないよう、金属感は控えめ）
+    monument: std(tex.monument, { roughness: 0.88 }),
+    monumentMetal: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.42, metalness: 0.55 }),
+    monumentInlay: new THREE.MeshStandardMaterial({
+      vertexColors: true, roughness: 0.55, metalness: 0.25, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -8,
+    }),
+    church: useContactShade(std(tex.church)), // 教会の壁（石の縞・控え壁・半円アーチの窓）
+    enclosureBrick: std(tex.enclosureBrick, { roughness: 0.95 }), // 敷地の塀（レンガ）
+    enclosureRender: std(tex.enclosureRender, { roughness: 0.95 }), // 敷地の塀（漆喰）
     roof: std(tex.roof, { roughness: 0.85 }),
+    genoise: std(tex.genoise, { roughness: 0.9 }), // 軒の génoise（漆喰に丸瓦の端の列）
     flat: std(tex.flatRoof),
+    // 壁際の地面の陰（半透明の黒。川の上には描かない: 地面と同じステンシル）
+    contact: new THREE.MeshBasicMaterial({
+      color: '#1c1610', alphaMap: tex.contact, transparent: true, depthWrite: false,
+      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -8,
+      stencilWrite: true, stencilRef: 1, stencilFunc: THREE.NotEqualStencilFunc,
+      stencilFail: THREE.KeepStencilOp, stencilZFail: THREE.KeepStencilOp, stencilZPass: THREE.KeepStencilOp,
+    }),
   };
 }
 
 const nextFrame = () => new Promise((r) => setTimeout(r, 0));
+const now = () => globalThis.performance?.now() ?? Date.now();
+const YIELD_MS = 30; // これだけ続けて計算したらフレームを譲る
 
-// context: 隣のタイルの建物（作らないが、接する壁を見分けるのに使う）、towers: 八角形の鐘楼（towers.js）
-export async function buildBuildings(parsed, materials, onProgress, facade = null, { context = [], towers = [] } = {}) {
+// context: 隣のタイルの建物（作らないが、接する壁を見分けるのに使う）、towers: 八角形の鐘楼（towers.js）、
+// skip: 描かない建物（名所の専用モデル monuments.js が代わりに建つ。当たり判定は呼び出し側で元の外形のまま）
+export async function buildBuildings(parsed, materials, onProgress, facade = null, { context = [], towers = [], groundAt = null, skip = null } = {}) {
   const group = new THREE.Group();
   group.name = 'buildings';
   const chunks = new Map();
+  const contact = new MeshWriter(); // 壁際の地面の陰はエリア（タイル）でひとつにまとめる
+  contact.groundAt = groundAt;
   const getChunk = (x, z) => {
     const key = `${Math.floor(x / CHUNK)},${Math.floor(z / CHUNK)}`;
     let c = chunks.get(key);
     if (!c) {
-      c = { upper: new MeshWriter(), ground: new MeshWriter(), plain: new MeshWriter(), capitole: new MeshWriter(), church: new MeshWriter(), tower: new MeshWriter(), roof: new MeshWriter(), flat: new MeshWriter() };
+      c = { upper: new MeshWriter(), ground: new MeshWriter(), plain: new MeshWriter(), capitole: new MeshWriter(), church: new MeshWriter(), tower: new MeshWriter(), roof: new MeshWriter(), genoise: new MeshWriter(), flat: new MeshWriter(), contact };
       chunks.set(key, c);
     }
     return c;
   };
 
-  const list = parsed.buildings.filter((b) => !b.hasParts).concat(parsed.parts);
-  const stats = { total: list.length, OSM: 0, IGN: 0, 'OSM（階数）': 0, 推定: 0 };
+  const skipped = skip ? [...skip] : [];
+  const keep = (b) => !skip?.has(b) && !(b.hasParent && skipped.some((q) => pointInRing(b.inside[0], b.inside[1], q.outer)));
+  const list = parsed.buildings.filter((b) => !b.hasParts).concat(parsed.parts).filter(keep);
+  // ms: 組み立ての計算時間（フレームを譲って待った時間は除く）
+  const stats = { total: list.length, OSM: 0, IGN: 0, 'OSM（階数）': 0, 推定: 0, roofs: { pitched: 0, flat: 0, fallback: 0 }, ms: 0 };
+  let lastYield = now();
   const party = makePartyIndex(list.concat(context.filter((b) => !b.hasParts)));
   for (const t of towers) writeTower(t, getChunk(t.x, t.z).tower);
   for (let i = 0; i < list.length; i++) {
     const b = list[i];
     stats[b.info.heightSource] = (stats[b.info.heightSource] || 0) + 1;
     const W = getChunk(b.inside[0], b.inside[1]);
-    // 傾斜屋根を作れない形（四角形以外）で屋根の高さが分かっている場合は、屋根の中間の高さで陸屋根にする
-    if (chooseRoof(b, b.outer) === 'flat' && b.info.roofShape !== 'flat' && b.info.roofHeight > 0 && !b.info.raised) {
-      b.info.height += b.info.roofHeight / 2;
-      b.info.raised = true;
-    }
+    // 外形のとげ・重なった頂点を除く（頂点を間引くだけなので、壁と屋根の両方にこの輪を使う）
+    const outer = cleanRing(b.outer);
+    const rings = outer ? [outer, ...b.holes.map((h) => cleanRing(h)).filter(Boolean)] : [b.outer, ...b.holes];
+    // 八角形の鐘楼（towers.js のモデル）の中にある塔の外形は、尖った屋根をかけない（モデルの冠が見えるように）
+    const inTower = towers.some((t) => t.building !== b && Math.hypot(b.inside[0] - t.x, b.inside[1] - t.z) < t.radius + 1);
+    const plan = !outer ? { shape: 'flat', material: 'flat', height: 0 } : inTower ? { shape: 'flat', material: 'tile', height: 0 } : roofPlan(b);
+    // 辺ごとの、隣の建物と接する区間（壁・屋根の切妻で使う）
+    const covers = rings.map((ring) => ring.map((a, k) => party(b, a, ring[(k + 1) % ring.length])));
     const color = wallColor(b);
-    const plainColor = color;
-    writeWalls(W, b.outer, outwardSign(b.outer), b, plainColor, facade, party);
-    for (const h of b.holes) writeWalls(W, h, -outwardSign(h), b, plainColor, null, party); // 中庭の壁は内向き
+    writeWalls(W, rings[0], outwardSign(rings[0]), b, color, facade, covers[0]);
+    for (let k = 1; k < rings.length; k++) writeWalls(W, rings[k], -outwardSign(rings[k]), b, color, null, covers[k]); // 中庭の壁は内向き
     if (b.info.minHeight > 0.5) {
       // 浮いているパーツ（張り出しなど）の底面
-      writeFlatPolygon(W.plain, b.outer, b.holes, b.info.minHeight, 4, plainColor, false);
+      writeFlatPolygon(W.plain, rings[0], rings.slice(1), b.info.minHeight, 4, color, false);
     }
-    writeRoof(W, b.outer, b, color, plainColor);
-    if (i % 1500 === 1499) {
+    stats.roofs[writeRoof(W, rings, b, color, covers, plan)]++;
+    // 組み立てが長くなったら 1 フレーム譲る（走行中のタイルの読み込みでカクつかないように）
+    const busy = now() - lastYield;
+    if (busy > YIELD_MS) {
+      stats.ms += busy;
       onProgress?.(i / list.length);
       await nextFrame();
+      lastYield = now();
     }
   }
 
   for (const c of chunks.values()) {
-    for (const key of ['upper', 'ground', 'plain', 'capitole', 'church', 'tower', 'roof', 'flat']) {
+    for (const key of ['upper', 'ground', 'plain', 'capitole', 'church', 'tower', 'roof', 'genoise', 'flat']) {
       if (c[key].empty) continue;
       const mesh = new THREE.Mesh(c[key].toGeometry(), materials[key]);
-      mesh.castShadow = true;
+      mesh.castShadow = key !== 'genoise'; // 軒の génoise は細かいので影の地図には描かない
       mesh.receiveShadow = true;
       mesh.matrixAutoUpdate = false;
       group.add(mesh);
     }
   }
+  if (!contact.empty && materials.contact) {
+    const mesh = new THREE.Mesh(contact.toGeometry(), materials.contact);
+    mesh.renderOrder = ORDER.marking + 0.5;
+    mesh.matrixAutoUpdate = false;
+    mesh.name = 'contact-shade';
+    group.add(mesh);
+  }
+  stats.ms += now() - lastYield;
   onProgress?.(1);
   return { group, stats };
 }
