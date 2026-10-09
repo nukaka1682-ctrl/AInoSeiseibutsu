@@ -123,8 +123,16 @@ for (const v of views) {
       const s = window.__tav;
       s.phase = 'shot';
       const c = window.__tavDebug.camera;
-      c.position.set(...cam.pos);
-      c.lookAt(...cam.look);
+      if (cam.rel) {
+        // rel: 自転車から見た [右, 上, 前]（m）で指定する（通りの名前で置いたとき、軒を見上げるなど）
+        const b = s.bike, fx = Math.sin(b.heading), fz = -Math.cos(b.heading);
+        const at = ([r, u, f]) => [b.x + fz * -r + fx * f, b.y + u, b.z + fx * r + fz * f];
+        c.position.set(...at(cam.pos));
+        c.lookAt(...at(cam.look));
+      } else {
+        c.position.set(...cam.pos);
+        c.lookAt(...cam.look);
+      }
     }, v.cam);
     for (let i = 0; i < 25; i++) {
       await page.waitForTimeout(1000);

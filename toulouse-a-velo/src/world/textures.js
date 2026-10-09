@@ -623,6 +623,49 @@ export function makeContactTexture() {
   return t;
 }
 
+// 軒の génoise（roofdetail.js）: 横 1 m に丸瓦の端が 6 枚、縦 1 枚が 1 段分。白〜クリームの漆喰に山形（∩）に伏せた
+// 丸瓦の端が並び（素焼きの縁と、奥の陰）、下の帯は段の下面の漆喰（縦に繰り返すと段が交互に見える）
+export function makeGenoiseTexture() {
+  const W = 256, H = 64;
+  const [c, ctx] = canvas(W, H);
+  const rnd = mulberry32(23);
+  ctx.fillStyle = '#efe8da';
+  ctx.fillRect(0, 0, W, H);
+  // 漆喰の汚れ・ざらつき
+  for (let i = 0; i < 500; i++) {
+    ctx.fillStyle = rnd() < 0.5 ? 'rgba(120,105,85,0.10)' : 'rgba(255,255,250,0.25)';
+    ctx.fillRect(rnd() * W, rnd() * H, 1 + rnd() * 3, 1 + rnd() * 2);
+  }
+  const n = 6, tw = W / n, base = 50; // 瓦の端の下端（キャンバスの y）。その下は目地
+  for (let i = 0; i < n; i++) {
+    const cx = (i + 0.5) * tw;
+    const r = 150 + rnd() * 40, g = 80 + rnd() * 30, b = 55 + rnd() * 20;
+    const rx = tw * 0.42, ry = 40;
+    // 素焼きの瓦の縁（外側の半楕円）
+    ctx.fillStyle = `rgb(${r | 0},${g | 0},${b | 0})`;
+    ctx.beginPath();
+    ctx.ellipse(cx, base, rx, ry, 0, Math.PI, 0);
+    ctx.fill();
+    // 奥の空洞（陰。漆喰で半ば埋まっている）
+    ctx.fillStyle = 'rgb(104,74,58)';
+    ctx.beginPath();
+    ctx.ellipse(cx, base, rx * 0.6, ry * 0.62, 0, Math.PI, 0);
+    ctx.fill();
+    // 上の縁の光
+    ctx.strokeStyle = 'rgba(255,215,180,0.35)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.ellipse(cx, base, rx - 1, ry - 1, 0, Math.PI * 1.15, Math.PI * 1.85);
+    ctx.stroke();
+  }
+  // 瓦の下の目地と、段の下面の漆喰（少し陰になる）
+  ctx.fillStyle = '#e6decd';
+  ctx.fillRect(0, base, W, 4);
+  ctx.fillStyle = '#ddd4c2';
+  ctx.fillRect(0, base + 4, W, H - base - 4);
+  return toTexture(c);
+}
+
 export function makeTextures() {
   const facades = makeFacadeAtlases();
   return {
@@ -635,6 +678,7 @@ export function makeTextures() {
     enclosureBrick: makeEnclosureTexture('brick'),
     enclosureRender: makeEnclosureTexture('render'),
     roof: makeRoofTileTexture(),
+    genoise: makeGenoiseTexture(),
     flatRoof: makeNoiseTexture({ base: '#ffffff', spots: ['#777', '#999', '#555'], seed: 4, count: 3000, alpha: 0.3 }),
     asphalt: makeAsphaltTexture(),
     sidewalk: makeSidewalkTexture(),
