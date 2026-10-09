@@ -13,7 +13,9 @@ import { buildEnclosures, clearRoads, projectTrees, projectWalls } from './enclo
 import { findCapitoleFacade, markBrickSites } from './landmarkfacades.js';
 import { findTowers } from './towers.js';
 import { areaFrame, makeSurfaceAt } from './assemble.js';
-import { buildGroundBase, buildGroundDetail, makeWaterTest } from './ground.js';
+import { buildGroundBase, buildGroundDetailAsync, makeWaterTest } from './ground.js';
+import { POST_HIT, planStreets } from './streets.js';
+import { oldTownTest } from '../config.js';
 import { CollisionWorld } from '../game/collision.js';
 import { RoadNetwork } from '../game/roadnet.js';
 import { resolveLandmarks } from '../game/landmarks.js';
@@ -46,18 +48,22 @@ export async function assembleStreamWorld({ base, bbox, presetId, buildingMats, 
   const landmarks = resolveLandmarks(parsed, proj, rect, roadnet);
   const surfaceAt = makeSurfaceAt(parsed, roadnet);
   const collision = new StreamCollision(rect, inWater, onRoad);
+  const inOldTown = oldTownTest(proj);
+  planStreets(parsed, inOldTown); // 通りの種類・交差点・横断歩道（エリアで 1 回）
   // 並木道（IGN のデータには個々の木がないので、LiDAR の木がないタイルで使う）
   const avenues = parsed.roads.filter((r) => CAR_ROADS.has(r.type) || r.type === 'pedestrian');
 
   const streamer = new TileStreamer({
-    presetId, bbox, rect, proj, layout, parsed, roadnet, inWater, onRoad, avenues,
+    presetId, bbox, rect, proj, layout, parsed, roadnet, inWater, onRoad, avenues, inOldTown,
     materials: buildingMats, groundMats, waterDepthAt: ground.waterDepthAt, collision, group,
   });
   for (const lm of landmarks) lm.y = 0;
+  // 一段高い歩道の高さ（読み込んだタイルの歩道から。歩道はタイルの境を少しはみ出すので、隣のタイルも見る）
+  const heightAt = (x, z) => streamer.heightAt(x, z);
 
   return {
     proj, rect, parsed, roadnet, ground, collision, trees: null, landmarks, group, surfaceAt,
-    heightAt: () => 0, groundAt: null, stream: streamer,
+    heightAt, groundAt: heightAt, stream: streamer,
     stats: {
       buildings: { total: 0 },
       roads: parsed.roads.length,
@@ -181,9 +187,11 @@ class TileStreamer {
     const context = parseOsm(data.ctx, this.proj, this.rect, []).buildings;
     const group = new THREE.Group();
     group.name = `tile-${t.key}`;
+    const walls = clearRoads(projectWalls(data.walls, this.proj), (x, z) => this.roadnet.onRoad(x, z, 0.3));
 
-    // 地面（緑地・道路・線路・橋）
-    const ground = buildGroundDetail(this.parsed, B, this.groundMats, this.waterDepthAt);
+    // 地面（緑地・道路・歩道・線路・橋）。歩道はこのタイルと隣のタイルの境近くの建物・塀の壁まで延ばす
+    // 歩道の計算は重いので、道ごとに区切ってフレームに譲りながら作る
+    const ground = await buildGroundDetailAsync(this.parsed, B, this.groundMats, this.waterDepthAt, { buildings: buildings.concat(context), walls, inOldTown: this.inOldTown }, pause);
     group.add(ground.group);
     await pause();
     if (t.state !== 'loading') return disposeGroup(group);
@@ -193,15 +201,15 @@ class TileStreamer {
     const towers = findTowers(this.proj, buildings);
     markBrickSites(this.proj, buildings, this.parsed.areas);
     const tb = performance.now();
-    const built = await buildBuildings(tp, this.materials, null, facade, { context, towers });
+    const built = await buildBuildings(tp, this.materials, null, facade, { context, towers, groundAt: ground.heightAt });
     const buildingMs = performance.now() - tb;
     group.add(built.group);
     if (t.state !== 'loading') return disposeGroup(group);
 
     // 塀
     const cw = new CollisionWorld({ minX: B.minX - 80, maxX: B.maxX + 80, minZ: B.minZ - 80, maxZ: B.maxZ + 80 });
-    const walls = clearRoads(projectWalls(data.walls, this.proj), (x, z) => this.roadnet.onRoad(x, z, 0.3));
     group.add(buildEnclosures(walls, this.materials, cw));
+    for (const [x, z] of ground.posts) cw.addCircle(x, z, POST_HIT); // 横断歩道の脇の車止め
 
     // 木: LiDAR で見つけたもの（水の上・道路の真ん中・橋の上は除く）。なければ公園と並木道に植える
     const bGrid = new Grid(30);
@@ -250,7 +258,7 @@ class TileStreamer {
     const ms = performance.now() - t0;
     const roofs = built.stats.roofs;
     console.info(`タイル ${t.key}: 建物 ${buildings.length} 棟（傾斜屋根 ${roofs.pitched}・陸屋根 ${roofs.flat}・作れず陸屋根 ${roofs.fallback}）・三角形 ${tris}・組み立て ${ms.toFixed(0)} ms（建物の計算 ${built.stats.ms.toFixed(0)} ms、待ちを含め ${buildingMs.toFixed(0)} ms）`);
-    Object.assign(t, { group, cw, buildings: buildings.length, trees: treePts.length, walls: walls.length, triangles: tris, buildMs: ms, state: 'ready' });
+    Object.assign(t, { group, cw, heightAt: ground.heightAt, buildings: buildings.length, trees: treePts.length, walls: walls.length, triangles: tris, buildMs: ms, state: 'ready' });
     this.group.add(group);
     this.collision.add(cw);
     this.onTileReady?.(t, buildings);
@@ -272,6 +280,18 @@ class TileStreamer {
     this.totals.trees -= t.trees;
     this.totals.walls -= t.walls;
     this.totals.triangles -= t.triangles;
+  }
+
+  // 歩道は道の中心線のあるタイルが作り、横へ最大で車道の半分＋縁石＋SIDEWALK_MAX はみ出すので、その幅まで隣のタイルも見る
+  heightAt(x, z) {
+    let h = 0;
+    const m = 22;
+    for (const t of this.tiles.values()) {
+      const b = t.bounds;
+      if (t.state !== 'ready' || x < b.minX - m || x > b.maxX + m || z < b.minZ - m || z > b.maxZ + m) continue;
+      h = Math.max(h, t.heightAt(x, z));
+    }
+    return h;
   }
 
   get readyCount() {
