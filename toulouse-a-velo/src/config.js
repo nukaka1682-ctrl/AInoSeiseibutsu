@@ -124,7 +124,7 @@ export const LANDMARKS = [
     id: 'chateau-eau',
     name: "Galerie du Château d'Eau",
     ja: 'シャトー・ドー写真ギャラリー',
-    lat: 43.59880, lon: 1.43620,
+    lat: 43.59870, lon: 1.43693,
     match: /^(Galerie du |[Ll]e )?Ch[âa]teau d['’][Ee]au$/i,
     text: 'ポン・ヌフの左岸側のたもとに建つ、19世紀の給水塔を利用した写真ギャラリー。',
   },
@@ -272,6 +272,14 @@ export const LANDMARKS = [
     lat: 43.58413, lon: 1.43423,
     match: /^Stadium( de Toulouse)?$/i,
     text: 'ガロンヌ川の中州（ラミエ島）にあるスタジアム。サッカーのトゥールーズ FC の本拠地。',
+  },
+  {
+    id: 'cabanis',
+    name: 'Médiathèque José Cabanis',
+    ja: 'メディアテーク・ジョゼ・カバニス',
+    lat: 43.61024, lon: 1.45576,
+    match: /^M[ée]diath[èe]que Jos[ée] Cabanis$/i,
+    text: 'マタビオ駅の向かいに建つ市立図書館（2004 年）。中央に大きな四角い開口のある門の形で、屋上にガラスの庇が張り出す。',
   },
   {
     id: 'cite-espace',

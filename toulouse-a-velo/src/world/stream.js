@@ -12,6 +12,7 @@ import { buildTrees, fillParkTrees, planeTreeTest, streetTrees } from './trees.j
 import { buildEnclosures, clearRoads, projectTrees, projectWalls, tameWalls } from './enclosures.js';
 import { findCapitoleFacade, markBrickSites } from './landmarkfacades.js';
 import { findTowers } from './towers.js';
+import { buildMonuments, findMonuments, monumentClearance } from './monuments.js';
 import { areaFrame, makeSurfaceAt } from './assemble.js';
 import { buildGroundBase, buildGroundDetailAsync, makeWaterTest } from './ground.js';
 import { POST_HIT, planStreets } from './streets.js';
@@ -204,16 +205,26 @@ class TileStreamer {
     const facade = findCapitoleFacade({ areas: this.parsed.areas, buildings });
     const towers = findTowers(this.proj, buildings);
     markBrickSites(this.proj, buildings, this.parsed.areas);
+    // 名所の専用モデル（シャトー・ドー・スタディアム・カバニス・雄鶏の像・オクシタン十字）。置き換える外形は描かない
+    // （当たり判定は元の外形のまま。カバニスの中央の開口の下だけは通り抜けられる）
+    const onCarRoad = (x, z) => this.roadnet.onRoad(x, z, 0.3);
+    const monuments = findMonuments(this.proj, { buildings, areas: this.parsed.areas, facade, bounds: B, onRoad: onCarRoad });
     const tb = performance.now();
-    const built = await buildBuildings(tp, this.materials, null, facade, { context, towers, groundAt: ground.heightAt });
+    const built = await buildBuildings(tp, this.materials, null, facade, { context, towers, groundAt: ground.heightAt, skip: new Set(monuments.flatMap((m) => m.replaced)) });
     const buildingMs = performance.now() - tb;
     group.add(built.group);
+    const mon = buildMonuments(monuments, this.materials, { groundAt: ground.heightAt, onRoad: onCarRoad });
+    group.add(mon.group);
     if (t.state !== 'loading') return disposeGroup(group);
 
     // 塀
     const cw = new CollisionWorld({ minX: B.minX - 80, maxX: B.maxX + 80, minZ: B.minZ - 80, maxZ: B.maxZ + 80 });
     group.add(buildEnclosures(walls, this.materials, cw));
     for (const [x, z] of ground.posts) cw.addCircle(x, z, POST_HIT); // 横断歩道の脇の車止め
+    for (const c of mon.colliders) {
+      if (c.length === 4) cw.addSegment(...c); // 像の台・塔の鉄柵（円 [x, z, r] か線分 [ax, az, bx, bz]）
+      else cw.addCircle(...c);
+    }
 
     // 木: LiDAR で見つけたもの（水の上・道路の真ん中・橋の上は除く）。なければ公園と並木道に植える
     const bGrid = new Grid(30);
@@ -236,6 +247,8 @@ class TileStreamer {
       treePts = fillParkTrees(parks, [], free).concat(streetTrees(roads, (x, z) => inB(x, z) && !this.roadnet.onRoad(x, z, 0.2) && !this.inWater(x, z) && !insideBuilding(x, z)));
     }
     treePts = treePts.concat(this.bankTrees.filter((t) => inB(t.x, t.z))); // 街の外れの川岸の土手の木
+    const clear = monumentClearance(monuments);
+    treePts = treePts.filter((p) => !clear(p.x ?? p[0], p.z ?? p[1])); // 像・塔のまわりには植えない
     // 街路・運河沿いはプラタナス。横に広い LiDAR の塊を分けた木は、道路・水・建物の上には置かない
     const trees = buildTrees(treePts, {
       isPlane: planeTreeTest(this.roadnet, this.inWater),
@@ -245,8 +258,9 @@ class TileStreamer {
 
     // 当たり判定（建物の壁。道路が横切る所は通路として開ける。道路の上でない木の幹）
     const isPassage = (a, b) => this.roadnet.crossesRoad(a[0], a[1], b[0], b[1]);
+    const passThrough = new Set(monuments.flatMap((m) => m.open || []));
     for (const b of buildings) {
-      if (!b.info.collide) continue;
+      if (!b.info.collide || passThrough.has(b)) continue;
       cw.addRing(b.outer, isPassage);
       for (const h of b.holes) cw.addRing(h, isPassage);
     }

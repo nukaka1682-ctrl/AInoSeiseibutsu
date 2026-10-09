@@ -13,6 +13,7 @@ import { tileBounds, tileLayout } from '../data/tiles.js';
 import { buildTrees, fillParkTrees, planeTreeTest, streetTrees } from './trees.js';
 import { buildEnclosures, clearRoads, projectTrees, projectWalls, tameWalls } from './enclosures.js';
 import { findTowers } from './towers.js';
+import { buildMonuments, findMonuments, monumentClearance } from './monuments.js';
 import { findCapitoleFacade, markBrickSites } from './landmarkfacades.js';
 import { oldTownTest } from '../config.js';
 import { POST_HIT } from './streets.js';
@@ -39,6 +40,12 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   const parsed = parseOsm(data.osm, proj, rect, data.bdtopo);
   const roadnet = new RoadNetwork(parsed.roads);
   const group = new THREE.Group();
+  const facade = findCapitoleFacade(parsed); // キャピトルの正面には専用のテクスチャ
+  // 名所の専用モデル（シャトー・ドー・スタディアム・カバニス・雄鶏の像・オクシタン十字）。置き換える外形は描かない
+  // （当たり判定は元の外形のまま。カバニスの中央の開口の下だけは通り抜けられる）
+  const onCarRoad = (x, z) => roadnet.onRoad(x, z, 0.3);
+  const monuments = findMonuments(proj, { buildings: parsed.buildings, areas: parsed.areas, facade, bounds: rect, onRoad: onCarRoad });
+  const passThrough = new Set(monuments.flatMap((m) => m.open || []));
 
   // 当たり判定。道路の中心線が建物の壁を横切っている所（建物の下をくぐる通路など）は壁を開けておく
   const collision = new CollisionWorld(rect);
@@ -49,7 +56,7 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
     return hit;
   };
   for (const b of parsed.buildings) {
-    if (!b.info.collide) continue;
+    if (!b.info.collide || passThrough.has(b)) continue;
     collision.addRing(b.outer, isPassage);
     for (const h of b.holes) collision.addRing(h, isPassage);
   }
@@ -69,7 +76,6 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
     return hit;
   };
 
-  const facade = findCapitoleFacade(parsed); // キャピトルの正面には専用のテクスチャ
   progress('道路と川を作成中…', 0.15);
   await pause();
   // 塀（地籍の敷地の境界と LiDAR から見つけたもの）。歩道は建物の壁・塀まで延ばすので、地面より先に用意する
@@ -103,8 +109,17 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   treePts = treePts.concat(ground.bankTrees || []); // 街の外れの川岸の土手の木
   const towers = findTowers(proj, parsed.buildings); // 八角形の鐘楼は専用のモデル
   markBrickSites(proj, parsed.buildings, parsed.areas);
-  const buildings = await buildBuildings(parsed, buildingMats, (p) => progress(`建物を建てています… ${Math.round(p * 100)}%`, 0.3 + p * 0.6), facade, { towers, groundAt: ground.heightAt });
+  const clear = monumentClearance(monuments);
+  treePts = treePts.filter((p) => !clear(p.x ?? p[0], p.z ?? p[1])); // 像・塔のまわりには植えない
+  const skip = new Set(monuments.flatMap((m) => m.replaced));
+  const buildings = await buildBuildings(parsed, buildingMats, (p) => progress(`建物を建てています… ${Math.round(p * 100)}%`, 0.3 + p * 0.6), facade, { towers, groundAt: ground.heightAt, skip });
   group.add(buildings.group);
+  const mon = buildMonuments(monuments, buildingMats, { groundAt: ground.heightAt, onRoad: onCarRoad });
+  group.add(mon.group);
+  for (const c of mon.colliders) {
+    if (c.length === 4) collision.addSegment(...c); // 像の台・塔の鉄柵（円 [x, z, r] か線分 [ax, az, bx, bz]）
+    else collision.addCircle(...c);
+  }
   const buildingStats = buildings.stats;
 
   // 街路・運河沿いはプラタナス。横に広い LiDAR の塊を分けた木は、道路・水・建物の上には置かない

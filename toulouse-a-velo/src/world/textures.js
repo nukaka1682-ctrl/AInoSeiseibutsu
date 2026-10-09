@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { mulberry32 } from '../geo.js';
 import { makeCapitoleTexture, makeChurchTexture, makeFacadeAtlases } from './facades.js';
 import { makeTowerTexture } from './towers.js';
+import { makeMonumentTexture } from './monuments.js';
 
 function canvas(w, h) {
   const c = document.createElement('canvas');
@@ -630,6 +631,7 @@ export function makeTextures() {
     shopfront: facades.ground,
     capitole: makeCapitoleTexture(),
     tower: makeTowerTexture(),
+    monument: makeMonumentTexture(), // 名所の専用モデル（monuments.js）
     church: makeChurchTexture(),
     plain: makePlainWallTexture(),
     enclosureBrick: makeEnclosureTexture('brick'),

@@ -3,7 +3,7 @@
 // 300 m 四方のチャンクごとにまとめて描画コールを減らし、視錐台カリングを効かせる。
 import * as THREE from 'three';
 import { MeshWriter, writeFlatPolygon } from './meshwriter.js';
-import { Grid, centroid, hash01, isConvex, signedArea } from '../geo.js';
+import { Grid, centroid, hash01, isConvex, pointInRing, signedArea } from '../geo.js';
 import { writeTower } from './towers.js';
 import { CHURCH_TILE, STYLE, stylePlainColor, useContactShade, useFacadeAtlas } from './facades.js';
 import { ORDER } from './ground.js';
@@ -426,6 +426,13 @@ export function createBuildingMaterials(tex) {
     plain: useContactShade(std(tex.plain)),
     capitole: std(tex.capitole, { alphaTest: 0.5 }), // キャピトルの正面（屋上の手すりの上は透明）
     tower: std(tex.tower), // サン・セルナン・ジャコバンの八角形の鐘楼
+    // 名所の専用モデル（monuments.js）: レンガ・ルーバーなどの区画のテクスチャ、金属（ドーム・屋根・鉄柵・庇）、
+    // 広場に埋め込んだブロンズ（地面より手前に出して描く。低い視点で暗い空を映して黒く見えないよう、金属感は控えめ）
+    monument: std(tex.monument, { roughness: 0.88 }),
+    monumentMetal: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.42, metalness: 0.55 }),
+    monumentInlay: new THREE.MeshStandardMaterial({
+      vertexColors: true, roughness: 0.55, metalness: 0.25, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -8,
+    }),
     church: useContactShade(std(tex.church)), // 教会の壁（石の縞・控え壁・半円アーチの窓）
     enclosureBrick: std(tex.enclosureBrick, { roughness: 0.95 }), // 敷地の塀（レンガ）
     enclosureRender: std(tex.enclosureRender, { roughness: 0.95 }), // 敷地の塀（漆喰）
@@ -445,8 +452,9 @@ const nextFrame = () => new Promise((r) => setTimeout(r, 0));
 const now = () => globalThis.performance?.now() ?? Date.now();
 const YIELD_MS = 30; // これだけ続けて計算したらフレームを譲る
 
-// context: 隣のタイルの建物（作らないが、接する壁を見分けるのに使う）、towers: 八角形の鐘楼（towers.js）
-export async function buildBuildings(parsed, materials, onProgress, facade = null, { context = [], towers = [], groundAt = null } = {}) {
+// context: 隣のタイルの建物（作らないが、接する壁を見分けるのに使う）、towers: 八角形の鐘楼（towers.js）、
+// skip: 描かない建物（名所の専用モデル monuments.js が代わりに建つ。当たり判定は呼び出し側で元の外形のまま）
+export async function buildBuildings(parsed, materials, onProgress, facade = null, { context = [], towers = [], groundAt = null, skip = null } = {}) {
   const group = new THREE.Group();
   group.name = 'buildings';
   const chunks = new Map();
@@ -462,7 +470,9 @@ export async function buildBuildings(parsed, materials, onProgress, facade = nul
     return c;
   };
 
-  const list = parsed.buildings.filter((b) => !b.hasParts).concat(parsed.parts);
+  const skipped = skip ? [...skip] : [];
+  const keep = (b) => !skip?.has(b) && !(b.hasParent && skipped.some((q) => pointInRing(b.inside[0], b.inside[1], q.outer)));
+  const list = parsed.buildings.filter((b) => !b.hasParts).concat(parsed.parts).filter(keep);
   // ms: 組み立ての計算時間（フレームを譲って待った時間は除く）
   const stats = { total: list.length, OSM: 0, IGN: 0, 'OSM（階数）': 0, 推定: 0, roofs: { pitched: 0, flat: 0, fallback: 0 }, ms: 0 };
   let lastYield = now();
