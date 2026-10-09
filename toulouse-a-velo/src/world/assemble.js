@@ -7,6 +7,9 @@ import { Grid, LocalProjection, pointInPolygon, pointInRing } from '../geo.js';
 import { CAR_ROADS, parseOsm } from './parse.js';
 import { buildBuildings } from './buildings.js';
 import { buildGround, makeWaterTest } from './ground.js';
+import { buildCoverMesh } from './cover.js';
+import { tileBounds, tileLayout } from '../data/tiles.js';
+import { oldTownTest } from '../config.js';
 import { buildTrees, fillParkTrees, planeTreeTest, streetTrees } from './trees.js';
 import { buildEnclosures, clearRoads, projectTrees, projectWalls } from './enclosures.js';
 import { findTowers } from './towers.js';
@@ -66,7 +69,12 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   const facade = findCapitoleFacade(parsed); // キャピトルの正面には専用のテクスチャ
   progress('道路と川を作成中…', 0.15);
   await pause();
-  const ground = buildGround(parsed, rect, groundMats);
+  // 地面の覆い（500 m のブロックごと。fetch-data の bakeSite と同じ区切り）。覆いのある所の緑地は覆いにまかせる
+  const layout = tileLayout(rect);
+  const covers = (data.cover || []).map((c) => ({ c, b: tileBounds(layout, c.i, c.j) }));
+  const inOldTown = oldTownTest(proj);
+  const ground = buildGround(parsed, rect, groundMats, { covered: covers.map(({ b }) => b), inOldTown });
+  for (const { c, b } of covers) ground.group.add(buildCoverMesh(c, b, groundMats.cover, inOldTown, parsed));
   group.add(ground.group);
 
   // 塀（地籍の敷地の境界と LiDAR から見つけたもの）

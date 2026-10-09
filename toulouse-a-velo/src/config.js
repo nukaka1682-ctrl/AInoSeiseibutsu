@@ -31,7 +31,7 @@ export const AREA_PRESETS = {
 export const DEFAULT_AREA = 'toulouse';
 
 // 地図データ形式のバージョン（変えると同梱データ・キャッシュが無効になる）
-export const DATA_VERSION = 2;
+export const DATA_VERSION = 3;
 
 // 旧市街（歴史地区）の範囲 [緯度, 経度]。右岸は環状の大通り（ダルコル・ストラスブール・カルノー・
 // フランソワ・ヴェルディエ・グラン・ロン・ジュール・ゲード）の内側、左岸はガロンヌ川と

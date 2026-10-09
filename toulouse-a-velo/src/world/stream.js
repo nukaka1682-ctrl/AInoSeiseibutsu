@@ -14,6 +14,8 @@ import { findCapitoleFacade, markBrickSites } from './landmarkfacades.js';
 import { findTowers } from './towers.js';
 import { areaFrame, makeSurfaceAt } from './assemble.js';
 import { buildGroundBase, buildGroundDetail, makeWaterTest } from './ground.js';
+import { buildCoverMesh } from './cover.js';
+import { oldTownTest } from '../config.js';
 import { CollisionWorld } from '../game/collision.js';
 import { RoadNetwork } from '../game/roadnet.js';
 import { resolveLandmarks } from '../game/landmarks.js';
@@ -51,7 +53,7 @@ export async function assembleStreamWorld({ base, bbox, presetId, buildingMats, 
 
   const streamer = new TileStreamer({
     presetId, bbox, rect, proj, layout, parsed, roadnet, inWater, onRoad, avenues,
-    materials: buildingMats, groundMats, waterDepthAt: ground.waterDepthAt, collision, group,
+    materials: buildingMats, groundMats, waterDepthAt: ground.waterDepthAt, collision, group, inOldTown: oldTownTest(proj),
   });
   for (const lm of landmarks) lm.y = 0;
 
@@ -182,8 +184,9 @@ class TileStreamer {
     const group = new THREE.Group();
     group.name = `tile-${t.key}`;
 
-    // 地面（緑地・道路・線路・橋）
-    const ground = buildGroundDetail(this.parsed, B, this.groundMats, this.waterDepthAt);
+    // 地面（地面の覆い・緑地・道路・線路・橋）。覆いのあるタイルでは、緑地は覆い（芝生・木の下）にまかせる
+    const ground = buildGroundDetail(this.parsed, B, this.groundMats, this.waterDepthAt, { covered: data.cover ? [B] : [], inOldTown: this.inOldTown });
+    if (data.cover) ground.group.add(buildCoverMesh(data.cover, B, this.groundMats.cover, this.inOldTown, this.parsed));
     group.add(ground.group);
     await pause();
     if (t.state !== 'loading') return disposeGroup(group);
@@ -281,10 +284,11 @@ class TileStreamer {
   }
 }
 
-// タイルのメッシュを捨てる（共有のマテリアルは残す。木のマテリアルはタイルごとなので捨てる）
+// タイルのメッシュを捨てる（共有のマテリアルは残す。木と地面の覆いのマテリアルはタイルごとなので捨てる）
 function disposeGroup(group) {
   group.traverse((o) => {
     if (o.geometry) o.geometry.dispose();
+    o.userData.dispose?.();
     if (o.isInstancedMesh) {
       o.dispose();
       o.material.dispose();

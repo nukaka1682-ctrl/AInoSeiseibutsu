@@ -4,12 +4,14 @@
 // 川や運河は地面より低い位置に水面を置き、ステンシルで地面に「穴」をあけて見せる。
 import * as THREE from 'three';
 import { MeshWriter, writeFlatPolygon } from './meshwriter.js';
+import { COVER_COLORS, createCoverShared } from './cover.js';
 import { CAR_ROADS } from './parse.js';
-import { Grid, clipPolylineToRect, clipRingToRect, closestOnSegment, pointInPolygon, signedArea } from '../geo.js';
+import { Grid, centroid, clipPolylineToRect, clipRingToRect, closestOnSegment, freeRects, pointInPolygon, signedArea } from '../geo.js';
 
 export const ORDER = {
   waterMask: -50,
   ground: -40,
+  cover: -39, // 地面の覆い（cover.js）
   water: -35,
   green: -30,
   parking: -29,
@@ -33,6 +35,21 @@ const c3 = (hex, k = 1) => {
 const GREEN_COLOR = {
   grass: c3('#ffffff'), forest: c3('#c9d8b8'), cemetery: c3('#d7dccb'), pitch: c3('#e6f2d6'),
 };
+
+// 広場の舗装。覆いのあるタイルでは、名前で決まった舗装の広場のほかは描かない（広場は覆いの公道になり、広場の中の
+// 芝生・木の下も見える。data/cover.js の stampCover）。覆いのない所では、旧市街の広場（キャピトル広場など）は覆いの公道と
+// 同じばら色がかった石畳。名前で決まった舗装の広場: Place Olivier は赤みがかった黄土色の固めた砂利・樹脂舗装（利用者の
+// 写真 #a07f62 前後。砂利のテクスチャの平均 #c7b898 に掛けてその色になる色）
+const PLAZA_SURFACES = [
+  { match: /^Place Olivier$/i, tex: 'gravel', uv: 3, color: c3('#cdb0a4') },
+];
+const namedSurface = (area) => PLAZA_SURFACES.find((p) => p.match.test(area.name || ''));
+export function plazaSurface(area, inOldTown = () => false) {
+  const s = namedSurface(area);
+  if (s) return s;
+  const [x, z] = centroid(area.outer);
+  return inOldTown(x, z) ? { tex: 'paving', uv: 4, color: c3(COVER_COLORS.old) } : { tex: 'paving', uv: 4, color: c3('#ffffff') };
+}
 
 export function createGroundMaterials(tex) {
   const flat = (map, extra = {}) => new THREE.MeshLambertMaterial({
@@ -74,6 +91,7 @@ export function createGroundMaterials(tex) {
     quai: new THREE.MeshStandardMaterial({ map: tex.plain, vertexColors: true, roughness: 0.95 }),
     deck: new THREE.MeshStandardMaterial({ map: tex.asphalt, vertexColors: true, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -6 }),
     bridge: new THREE.MeshStandardMaterial({ map: tex.plain, vertexColors: true, roughness: 0.9 }),
+    cover: createCoverShared(tex, ORDER.cover),
   };
 }
 
@@ -220,10 +238,10 @@ export function makeWaterTest(areas) {
 }
 
 // 地図から生成する地面（エリア全体をまとめて作る）
-export function buildGround(parsed, rect, mats) {
+export function buildGround(parsed, rect, mats, opts) {
   const base = buildGroundBase(parsed, rect, mats);
   const pad = 120;
-  const detail = buildGroundDetail(parsed, { minX: rect.minX - pad, minZ: rect.minZ - pad, maxX: rect.maxX + pad, maxZ: rect.maxZ + pad }, mats, base.waterDepthAt);
+  const detail = buildGroundDetail(parsed, { minX: rect.minX - pad, minZ: rect.minZ - pad, maxX: rect.maxX + pad, maxZ: rect.maxZ + pad }, mats, base.waterDepthAt, opts);
   base.group.add(detail.group);
   return { ...base, bridges: detail.bridges };
 }
@@ -339,7 +357,10 @@ export function buildGroundBase(parsed, rect, mats) {
 
 // 緑地・広場・駐車場・道路・線路・橋を、範囲 clip の中だけ作る（広いエリアではタイルごとに呼ぶ）。
 // 範囲をまたぐ緑地は切り取り、道路は範囲の端で切る。橋は中ほどの点が範囲に入るものだけ
-export function buildGroundDetail(parsed, clip, mats, waterDepthAt) {
+// covered: 地面の覆い（cover.js）のある矩形の配列。その中の緑地と広場は描かない（芝生・木の下・広場の舗装は覆いの方が
+// 正確）。ただし運動場（人工芝は近赤外を返さず、覆いでは敷地の中の地面になる）と名前で舗装の決まった広場は残す。
+// inOldTown(x, z): 旧市街か（広場の舗装）
+export function buildGroundDetail(parsed, clip, mats, waterDepthAt, { covered = [], inOldTown = () => false } = {}) {
   const group = new THREE.Group();
   group.name = 'ground-detail';
   const writers = new Map();
@@ -351,20 +372,28 @@ export function buildGroundDetail(parsed, clip, mats, waterDepthAt) {
   };
   const clipRect = [clip.minX, clip.minZ, clip.maxX, clip.maxZ];
   const overlaps = (b) => b.maxX > clip.minX && b.minX < clip.maxX && b.maxZ > clip.minZ && b.minZ < clip.maxZ;
-  const contains = (b) => b.minX >= clip.minX && b.maxX <= clip.maxX && b.minZ >= clip.minZ && b.maxZ <= clip.maxZ;
 
   // ---- 緑地・広場・駐車場 ----
+  const greenClips = freeRects(clip, covered); // 覆いのない所（緑地はここだけに描く）
   for (const a of parsed.areas) {
     if (a.type === 'water' || !overlaps(a.bounds)) continue;
-    let outer = a.outer, holes = a.holes;
-    if (!contains(a.bounds)) {
-      outer = clipRingToRect(outer, ...clipRect);
-      if (outer.length < 3) continue;
-      holes = holes.map((h) => clipRingToRect(h, ...clipRect)).filter((h) => h.length >= 3);
+    const green = a.type !== 'plaza' && a.type !== 'parking' && a.type !== 'pitch';
+    const toCover = green || (a.type === 'plaza' && !namedSurface(a)); // 覆いのある所では覆いにまかせる
+    for (const r of toCover ? greenClips : [clip]) {
+      const b = a.bounds;
+      if (!(b.maxX > r.minX && b.minX < r.maxX && b.maxZ > r.minZ && b.minZ < r.maxZ)) continue;
+      let outer = a.outer, holes = a.holes;
+      if (!(b.minX >= r.minX && b.maxX <= r.maxX && b.minZ >= r.minZ && b.maxZ <= r.maxZ)) {
+        outer = clipRingToRect(outer, r.minX, r.minZ, r.maxX, r.maxZ);
+        if (outer.length < 3) continue;
+        holes = holes.map((h) => clipRingToRect(h, r.minX, r.minZ, r.maxX, r.maxZ)).filter((h) => h.length >= 3);
+      }
+      if (a.type === 'plaza') {
+        const s = plazaSurface(a, inOldTown);
+        writeFlatPolygon(W(ORDER.plaza, s.tex), outer, holes, 0, s.uv, s.color);
+      } else if (a.type === 'parking') writeFlatPolygon(W(ORDER.parking, 'asphalt'), outer, holes, 0, 4, c3('#d0d0d0'));
+      else writeFlatPolygon(W(ORDER.green, 'grass'), outer, holes, 0, 6, GREEN_COLOR[a.type] || GREEN_COLOR.grass);
     }
-    if (a.type === 'plaza') writeFlatPolygon(W(ORDER.plaza, 'paving'), outer, holes, 0, 4, c3('#ffffff'));
-    else if (a.type === 'parking') writeFlatPolygon(W(ORDER.parking, 'asphalt'), outer, holes, 0, 4, c3('#d0d0d0'));
-    else writeFlatPolygon(W(ORDER.green, 'grass'), outer, holes, 0, 6, GREEN_COLOR[a.type] || GREEN_COLOR.grass);
   }
   // ---- 道路 ----
   const bridges = [];
