@@ -3,7 +3,7 @@
 // 見た目は Wikimedia Commons のトゥールーズのレンガ壁の写真を手本にしたテクスチャ（textures.js の makeEnclosureTexture）。
 import * as THREE from 'three';
 import { MeshWriter } from './meshwriter.js';
-import { hash01 } from '../geo.js';
+import { Grid, closestOnSegment, hash01 } from '../geo.js';
 
 const THICK = 0.4;
 const CAP = [0.78, 0.45, 0.32]; // 笠木の瓦（瓦のテクスチャに掛ける色）
@@ -31,6 +31,70 @@ export function clearRoads(segs, onRoad) {
       }
     }
   }
+  return out;
+}
+
+// LiDAR の誤検出らしい高い塀をならす（木・電柱・街灯が塀に見えたもの。ぽつんと短くて高い塀は細いレンガの柱に見える）。
+// 焼いた塀は高さ TALL m 超が 4 割ほどある（実際の敷地の塀はたいてい 2〜3 m）。
+// - 高さ TALL m 超で、ほかの塀の端が LONE m 以内にない（ひとつだけの）短い塀: 長さ 2 m 未満は捨て、4 m 未満は SHORT_CAP m に
+// - それ以外の高い塀: 建物（buildings の外形）に端が付いていなければ TALL m に下げる（建物に付いた長い塀は残す）
+const TALL = 4, SHORT_CAP = 2.5, ATTACH = 1.5, LONE = 1;
+export function tameWalls(segs, buildings = []) {
+  let grid = null; // 建物の索引（高い長い塀があるときだけ作る）
+  const attached = (x, z) => {
+    if (!grid) {
+      grid = new Grid(40);
+      buildings.forEach((b, i) => b.bounds && grid.insertBounds(b.bounds.minX - ATTACH, b.bounds.minZ - ATTACH, b.bounds.maxX + ATTACH, b.bounds.maxZ + ATTACH, i));
+    }
+    let hit = false;
+    grid.queryPoint(x, z, 0, (k) => {
+      if (hit) return;
+      const r = buildings[k].outer;
+      for (let i = 0, j = r.length - 1; i < r.length && !hit; j = i++) {
+        if (closestOnSegment(x, z, r[j][0], r[j][1], r[i][0], r[i][1]).d2 < ATTACH * ATTACH) hit = true;
+      }
+    });
+    return hit;
+  };
+  // 塀の端の索引（1 m のマス）
+  const ends = new Map();
+  const cell = (x, z) => `${Math.floor(x / LONE)},${Math.floor(z / LONE)}`;
+  segs.forEach((sg, i) => {
+    for (const [x, z] of [[sg[0], sg[1]], [sg[2], sg[3]]]) {
+      const k = cell(x, z);
+      const l = ends.get(k);
+      if (l) l.push(i, x, z);
+      else ends.set(k, [i, x, z]);
+    }
+  });
+  const lone = (i) => {
+    const sg = segs[i];
+    for (const [x, z] of [[sg[0], sg[1]], [sg[2], sg[3]]]) {
+      const cx = Math.floor(x / LONE), cz = Math.floor(z / LONE);
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dz = -1; dz <= 1; dz++) {
+          const l = ends.get(`${cx + dx},${cz + dz}`);
+          if (!l) continue;
+          for (let k = 0; k < l.length; k += 3) if (l[k] !== i && (l[k + 1] - x) ** 2 + (l[k + 2] - z) ** 2 < LONE * LONE) return false;
+        }
+      }
+    }
+    return true;
+  };
+  const out = [];
+  segs.forEach((sg, i) => {
+    const [ax, az, bx, bz, h] = sg;
+    if (h <= TALL) {
+      out.push(sg);
+      return;
+    }
+    const L = Math.hypot(bx - ax, bz - az);
+    if (L < 4 && lone(i)) {
+      if (L >= 2) out.push([ax, az, bx, bz, SHORT_CAP]);
+      return;
+    }
+    out.push(attached(ax, az) || attached(bx, bz) ? sg : [ax, az, bx, bz, TALL]);
+  });
   return out;
 }
 

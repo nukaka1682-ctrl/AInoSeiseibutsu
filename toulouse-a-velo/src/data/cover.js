@@ -189,7 +189,7 @@ export function coverStamps(parsed) {
   for (const a of parsed.areas || []) {
     if (a.type !== 'plaza') continue;
     const paved = PAVED_PLAZAS.test(a.name || '');
-    s.push({ rings: [a.outer, ...(a.holes || [])], bounds: ringBounds(a.outer, 0), map: paved ? MAP_PAVED_PLAZA : MAP_PLAZA, mineral: paved ? null : MAP_PLAZA_MINERAL });
+    s.push({ rings: [a.outer, ...(a.holes || [])], bounds: ringBounds(a.outer, 0), map: paved ? MAP_PAVED_PLAZA : MAP_PLAZA, mineral: paved ? null : MAP_PLAZA_MINERAL, plaza: true });
   }
   for (const a of parsed.areas || []) {
     if (a.type === 'grass' || a.type === 'forest' || a.type === 'cemetery') s.push({ rings: [a.outer, ...(a.holes || [])], bounds: ringBounds(a.outer, 0), keepOut: true });
@@ -216,8 +216,8 @@ function ringBounds(pts, pad) {
 
 // 種類の格子 grid（rect: ローカル座標の範囲、行 0 = minZ）に stamps を描き込む。マスの中心が多角形の中（偶奇規則、
 // 穴あり）・線から half 以内なら、種類を map で付け替える（多角形の中の芝生と木の下が PLAZA_GREEN_MIN に足りなければ
-// mineral で）。keepOut の多角形の中は線では変えない。data を書き換えて返す
-export function stampCover(grid, rect, stamps) {
+// mineral で）。keepOut の多角形の中は線では変えない。data を書き換えて返す。plazaMask（cols × rows）があれば広場の中を 255 にする
+export function stampCover(grid, rect, stamps, plazaMask = null) {
   const { cols, rows, data } = grid;
   const sx = (rect.maxX - rect.minX) / cols, sz = (rect.maxZ - rect.minZ) / rows;
   const xs = [];
@@ -261,6 +261,7 @@ export function stampCover(grid, rect, stamps) {
         if (green < PLAZA_GREEN_MIN * all) map = st.mineral;
       }
       eachInRings(st.rings, r0, r1, (i) => (data[i] = map[data[i]]));
+      if (plazaMask && st.plaza) eachInRings(st.rings, r0, r1, (i) => (plazaMask[i] = 255));
     } else {
       const pts = st.line, h2 = st.half * st.half;
       for (let k = 0; k + 1 < pts.length; k++) {

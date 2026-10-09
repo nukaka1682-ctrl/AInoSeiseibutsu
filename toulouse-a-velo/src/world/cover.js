@@ -1,7 +1,8 @@
 // 地面の覆い（data/cover.js で 1 m ごとに分類したもの）を描く。タイル（またはブロック）ごとに 1 枚の板で、
 // 種類の格子を「種類ごとの重み」の RGBA テクスチャ（R = 公道・広場、G = 敷地の中の地面、B = 芝生、A = 木の下）にして、
 // シェーダーで種類ごとの繰り返しテクスチャを混ぜる。境目は 1 m の格子が見えないよう、ノイズでずらして柔らかくぼかす。
-// - 公道・広場: 旧市街はばら色がかった花崗岩・石灰岩の石畳、外は明るい灰色の舗装
+// - 公道・広場: 旧市街の広場（地図の広場の中）はばら色がかった花崗岩・石灰岩の石畳、旧市街のそれ以外（広い交差点・地図にない
+//   小さな広場など、通りの石畳の帯のあいだ）は通り（streets.js）と同じ小舗石で、帯とすき間が一続きの面に見えるように。外は明るい灰色の舗装
 // - 敷地の中の地面（中庭・車寄せ・駐車場・新しい街区の道・工場の敷地・墓地）: ほとんどは灰色のアスファルトとコンクリートで、
 //   ところどころ（2 割ほど）ベージュの砂利。旧市街の中庭は石畳が多い
 // - 芝生: 緑〜夏に乾いた黄緑
@@ -20,7 +21,9 @@ const SEG = 20; // 板の分割数（頂点ごとの「旧市街か」を補間�
 export const COVER_COLORS = {
   old: '#f2dcc6', public: '#c6c0b8', asphalt: '#a4a4a6', gravel: '#d6d0c6', concrete: '#f2f3f5',
   lawn: '#c9d6a6', dry: '#e6dba0', shade: '#7f8a62', earth: '#a08d78', pavers: '#d8d5cf',
+  setts: '#ffeee4', // 旧市街の通りの小舗石（streets.js の頂点カラー warm と同じ）
 };
+const SETT_TILE = 2.56; // 小舗石のテクスチャ 1 枚の大きさ（m。streets.js と同じ）
 // 舗石のマスの R の値（他の 3 つは 0）。合計が 1 に足りない分 ×1/(1 − 値) が舗石の割合（線形補間・ミップマップでも成り立つ）
 export const PAVED_LEVEL = 128;
 
@@ -28,7 +31,7 @@ export const PAVED_LEVEL = 128;
 export function createCoverShared(tex, order) {
   const u = {
     tPaving: { value: tex.paving }, tSidewalk: { value: tex.sidewalk }, tGravel: { value: tex.gravel },
-    tGround: { value: tex.ground }, tGrass: { value: tex.grass },
+    tGround: { value: tex.ground }, tGrass: { value: tex.grass }, tSetts: { value: tex.setts },
   };
   for (const [k, hex] of Object.entries(COVER_COLORS)) u[`c_${k}`] = { value: new THREE.Color(hex) };
   return { uniforms: u, order };
@@ -51,12 +54,25 @@ export function coverTexture({ cols, rows, data }) {
   return t;
 }
 
+// 広場の中の印（1 バイト / マス）のテクスチャ。旧市街にかからない板は共有の真っ黒な 1 × 1
+function maskTexture(data, cols, rows) {
+  const t = new THREE.DataTexture(data, cols, rows, THREE.RedFormat, THREE.UnsignedByteType);
+  t.unpackAlignment = 1;
+  t.magFilter = THREE.LinearFilter;
+  t.minFilter = THREE.LinearMipmapLinearFilter;
+  t.generateMipmaps = true;
+  t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+  t.needsUpdate = true;
+  return t;
+}
+const NO_PLAZA = maskTexture(new Uint8Array(1), 1, 1);
+
 const NOISE = /* glsl */ `
 varying vec2 vCoverPos;
 varying float vOldTown;
-uniform sampler2D coverMap, tPaving, tSidewalk, tGravel, tGround, tGrass;
+uniform sampler2D coverMap, plazaMap, tPaving, tSidewalk, tGravel, tGround, tGrass, tSetts;
 uniform vec4 coverRect;
-uniform vec3 c_old, c_public, c_asphalt, c_gravel, c_concrete, c_lawn, c_dry, c_shade, c_earth, c_pavers;
+uniform vec3 c_old, c_public, c_asphalt, c_gravel, c_concrete, c_lawn, c_dry, c_shade, c_earth, c_pavers, c_setts;
 float cvHash(vec2 p) {
   // sin を使わない格子点のハッシュ（大きな座標でも GPU ごとの差が出にくい）
   p = 50.0 * fract(p * 0.3183099 + vec2(0.71, 0.113));
@@ -74,7 +90,8 @@ const FRAGMENT = /* glsl */ `
   vec2 cp = vCoverPos;
   // 境目をずらす（1 m の格子の角を消す）
   vec2 wv = vec2(cvNoise(cp * 0.6), cvNoise(cp * 0.6 + 31.7)) - 0.5;
-  vec4 w = texture2D(coverMap, (cp + wv * 1.5 - coverRect.xy) * coverRect.zw);
+  vec2 cuv = (cp + wv * 1.5 - coverRect.xy) * coverRect.zw;
+  vec4 w = texture2D(coverMap, cuv);
   // 舗石の割合: 4 つの合計の不足分から（PAVED_LEVEL = 128）
   float pav = clamp((1.0 - dot(w, vec4(1.0))) * (255.0 / 127.0), 0.0, 1.0);
   w.r = max(w.r - pav * (128.0 / 255.0), 0.0);
@@ -89,7 +106,9 @@ const FRAGMENT = /* glsl */ `
   vec3 gravel = texture2D(tGravel, cp / 3.0).rgb;
   vec3 paving = mix(texture2D(tPaving, cp / 4.0).rgb, vec3(1.0), 0.25) * c_old;
   vec3 sidewalk = texture2D(tSidewalk, cp / 4.0).rgb;
-  vec3 pub = mix(sidewalk * c_public, paving, vOldTown);
+  // 旧市街: 地図の広場の中は花崗岩の石畳、ほかは通りと同じ小舗石
+  vec3 setts = texture2D(tSetts, cp / ${SETT_TILE.toFixed(2)}).rgb * c_setts;
+  vec3 pub = mix(sidewalk * c_public, mix(setts, paving, texture2D(plazaMap, cuv).r), vOldTown);
   // 敷地の中: アスファルト → コンクリート → ところどころ砂利（big の大きい所）
   vec3 priv = mix(sidewalk * c_asphalt, texture2D(tGround, cp / 6.0).rgb * c_concrete, smoothstep(0.42, 0.52, big));
   priv = mix(priv, gravel * c_gravel, smoothstep(0.64, 0.7, big));
@@ -123,21 +142,26 @@ function onBeforeCompile(uniforms) {
 // parsed: 地図（広場と並木道の名前で覆いを補正する。data/cover.js の coverStamps）
 export function buildCoverMesh(cover, bounds, shared, inOldTown = () => false, parsed = null) {
   const grid = decodeCover(cover);
-  if (parsed) stampCover(grid, bounds, coverStamps(parsed));
-  paveAllees(grid);
   const w = bounds.maxX - bounds.minX, h = bounds.maxZ - bounds.minZ;
+  const cx = (bounds.minX + bounds.maxX) / 2, cz = (bounds.minZ + bounds.maxZ) / 2;
   const g = new THREE.PlaneGeometry(w, h, SEG, SEG);
   g.rotateX(-Math.PI / 2);
   g.deleteAttribute('uv');
-  const cx = (bounds.minX + bounds.maxX) / 2, cz = (bounds.minZ + bounds.maxZ) / 2;
   const pos = g.attributes.position;
   const old = new Float32Array(pos.count);
-  for (let i = 0; i < pos.count; i++) old[i] = inOldTown(cx + pos.getX(i), cz + pos.getZ(i)) ? 1 : 0;
+  let anyOld = false;
+  for (let i = 0; i < pos.count; i++) if ((old[i] = inOldTown(cx + pos.getX(i), cz + pos.getZ(i)) ? 1 : 0)) anyOld = true;
   g.setAttribute('oldTown', new THREE.BufferAttribute(old, 1));
+  // 旧市街にかかる板だけ、広場の中の印（公道を花崗岩の石畳にする所）を作る
+  const mask = parsed && anyOld ? new Uint8Array(grid.cols * grid.rows) : null;
+  if (parsed) stampCover(grid, bounds, coverStamps(parsed), mask);
+  paveAllees(grid);
   const map = coverTexture(grid);
+  const plaza = mask ? maskTexture(mask, grid.cols, grid.rows) : NO_PLAZA;
   const uniforms = {
     ...shared.uniforms,
     coverMap: { value: map },
+    plazaMap: { value: plaza },
     coverRect: { value: new THREE.Vector4(bounds.minX, bounds.minZ, 1 / w, 1 / h) },
   };
   const mat = new THREE.MeshLambertMaterial({
@@ -163,6 +187,7 @@ export function buildCoverMesh(cover, bounds, shared, inOldTown = () => false, p
   m.name = 'ground-cover';
   m.userData.dispose = () => {
     map.dispose();
+    if (plaza !== NO_PLAZA) plaza.dispose();
     mat.dispose();
   };
   return m;

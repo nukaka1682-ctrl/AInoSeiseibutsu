@@ -12,6 +12,7 @@
 // 断面は道全体で同じ位置に置き（ANCHOR m ごとに必ず残す）、タイルの外へ少し延ばして計算してから範囲で切るので、
 // 隣のタイルとは境目で同じ形になる。
 import { CAR_ROADS } from './parse.js';
+import { bridgeGroups } from './bridges.js';
 import { Grid, clipPolylineToRect, clipRingToRect, closestOnSegment, hash01, pointInPolygon, signedArea } from '../geo.js';
 
 export const CURB_H = 0.13; // 縁石（一段高い歩道）の高さ
@@ -113,6 +114,16 @@ export function planStreets(parsed, inOld = notOld) {
     inf.cum = cumulative(road.pts);
     inf.cont = new Set();
     info.set(road, inf);
+  }
+  // 橋の帯は橋面（bridges.js）と同じ幅に: 並んだ way をまとめた親は、並んだ way の外側の縁まで（ポン・ヌフは実物の幅）。
+  // 左右で幅が違うので bandL / bandR（折れ線の向きの左 / 右）も持つ
+  const groups = bridgeGroups(parsed.roads);
+  for (const [road, inf] of info) {
+    const g = inf.kind === 'bridge' && groups.get(road);
+    if (!g) continue;
+    inf.bandL = g.extL ?? g.half;
+    inf.bandR = g.extR ?? g.half;
+    inf.band = Math.max(inf.bandL, inf.bandR);
   }
   // 交差点: 道の頂点を座標で束ねる
   const nodes = new Map();
@@ -291,7 +302,7 @@ function makeRoadIndex(parsed, plan, clip, pad = INDEX_PAD) {
       const [ax, az] = pts[i], [bx, bz] = pts[i + 1];
       if (Math.max(ax, bx) < clip.minX - pad || Math.min(ax, bx) > clip.maxX + pad || Math.max(az, bz) < clip.minZ - pad || Math.min(az, bz) > clip.maxZ + pad) continue;
       grid.insertBounds(Math.min(ax, bx) - r, Math.min(az, bz) - r, Math.max(ax, bx) + r, Math.max(az, bz) + r, segs.length);
-      segs.push({ ax, az, bx, bz, road, band: inf.band });
+      segs.push({ ax, az, bx, bz, road, band: inf.band, bandL: inf.bandL, bandR: inf.bandR });
     }
   }
   // (x, z) がほかの道路（続きの道を除く）の帯（片側 band + margin）の中か
@@ -302,7 +313,11 @@ function makeRoadIndex(parsed, plan, clip, pad = INDEX_PAD) {
       if (hit) return;
       const s = segs[k];
       if (s.road === self || cont?.has(s.road)) return;
-      if (closestOnSegment(x, z, s.ax, s.az, s.bx, s.bz).d2 < (s.band + margin) ** 2) hit = true;
+      const c = closestOnSegment(x, z, s.ax, s.az, s.bx, s.bz);
+      let band = s.band;
+      // 橋: 点のある側（線の向きの左が正）の幅
+      if (s.bandL !== undefined) band = (x - c.x) * (s.az - s.bz) + (z - c.z) * (s.bx - s.ax) >= 0 ? s.bandL : s.bandR;
+      if (c.d2 < (band + margin) ** 2) hit = true;
     });
     return hit;
   };
