@@ -13,7 +13,7 @@ import { tileBounds, tileLayout } from '../data/tiles.js';
 import { buildTrees, fillParkTrees, planeTreeTest, streetTrees } from './trees.js';
 import { buildEnclosures, clearRoads, projectTrees, projectWalls, tameWalls } from './enclosures.js';
 import { findTowers } from './towers.js';
-import { buildMonuments, findMonuments, monumentClearance } from './monuments.js';
+import { buildMonuments, findMonuments, monumentClearance, monumentSolid } from './monuments.js';
 import { findCapitoleFacade, markBrickSites } from './landmarkfacades.js';
 import { historicCoreTest, oldTownTest } from '../config.js';
 import { POST_HIT, planStreets } from './streets.js';
@@ -136,10 +136,11 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   // 街の小物（街灯・車止め・路上駐車の車・ごみ箱）。遠い物は描かない（毎フレーム furniture.cull）。
   // 旧市街の小物（燭台形の街灯・駐車なし）は右岸の歴史的な中心だけ（左岸のサン・シプリアンは外と同じ）
   const pad = 120;
+  const onMonument = monumentSolid(mon.colliders); // 雄鶏の像の台・シャトー・ドーの柵の内側には置かない
   const furniture = buildFurniture({
     parsed, plan: planStreets(parsed, inOldTown), clip: { minX: rect.minX - pad, minZ: rect.minZ - pad, maxX: rect.maxX + pad, maxZ: rect.maxZ + pad },
     curbs: ground.curbs, inOldTown: historicCoreTest(proj), heightAt: ground.heightAt, onRoad: (x, z, m) => roadnet.onRoad(x, z, m),
-    solid: (x, z) => insideBuilding(x, z) || inWater(x, z), trunks: trees.userData.trunks,
+    solid: (x, z) => insideBuilding(x, z) || inWater(x, z) || onMonument(x, z), trunks: trees.userData.trunks,
   }, collision);
   group.add(furniture.group);
 

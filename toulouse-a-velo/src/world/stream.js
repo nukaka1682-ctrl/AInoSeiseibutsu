@@ -12,7 +12,7 @@ import { buildTrees, fillParkTrees, planeTreeTest, streetTrees } from './trees.j
 import { buildEnclosures, clearRoads, projectTrees, projectWalls, tameWalls } from './enclosures.js';
 import { findCapitoleFacade, markBrickSites } from './landmarkfacades.js';
 import { findTowers } from './towers.js';
-import { buildMonuments, findMonuments, monumentClearance } from './monuments.js';
+import { buildMonuments, findMonuments, monumentClearance, monumentSolid } from './monuments.js';
 import { areaFrame, makeSurfaceAt } from './assemble.js';
 import { buildGroundBase, buildGroundDetailAsync, makeWaterTest } from './ground.js';
 import { POST_HIT, planStreets } from './streets.js';
@@ -273,9 +273,10 @@ class TileStreamer {
 
     // 街の小物（街灯・車止め・路上駐車の車・ごみ箱）。縁石の区間はこのタイルの歩道から。遠い物は描かない。
     // 旧市街の小物（燭台形の街灯・駐車なし）は右岸の歴史的な中心だけ（左岸のサン・シプリアンは外と同じ）
+    const onMonument = monumentSolid(mon.colliders); // 雄鶏の像の台・シャトー・ドーの柵の内側には置かない
     const furniture = buildFurniture({
       parsed: this.parsed, plan: planStreets(this.parsed, this.inOldTown), clip: B, curbs: ground.streetStats.curbs, inOldTown: this.inCore,
-      heightAt: ground.heightAt, onRoad: (x, z, m) => this.roadnet.onRoad(x, z, m), solid: (x, z) => insideBuilding(x, z) || this.inWater(x, z), trunks: trees.userData.trunks,
+      heightAt: ground.heightAt, onRoad: (x, z, m) => this.roadnet.onRoad(x, z, m), solid: (x, z) => insideBuilding(x, z) || this.inWater(x, z) || onMonument(x, z), trunks: trees.userData.trunks,
     }, cw);
     furniture.cull(this.focus[0], this.focus[1], true);
     group.add(furniture.group);

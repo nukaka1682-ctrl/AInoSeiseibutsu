@@ -295,6 +295,12 @@ export function monumentClearance(list) {
   return (x, z) => circles.some(([cx, cz, r]) => Math.hypot(x - cx, z - cz) < r);
 }
 
+// 名所の台・柵の内側（街の小物 furniture.js を置かない所）。buildMonuments の当たり判定の円 [x, z, r] だけを見る
+export function monumentSolid(colliders, pad = 0.4) {
+  const circles = colliders.filter((c) => c.length === 3);
+  return (x, z) => circles.some(([cx, cz, r]) => Math.hypot(x - cx, z - cz) < r + pad);
+}
+
 // ---------------------------------------------------------------- メッシュ
 
 // テクスチャの区画（makeMonumentTexture）。1 区画 = 256 px 四方
