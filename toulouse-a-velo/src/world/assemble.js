@@ -8,6 +8,8 @@ import { CAR_ROADS, parseOsm } from './parse.js';
 import { buildBuildings } from './buildings.js';
 import { buildGround, makeWaterTest } from './ground.js';
 import { makeDeckTest } from './bridges.js';
+import { buildCoverMesh } from './cover.js';
+import { tileBounds, tileLayout } from '../data/tiles.js';
 import { buildTrees, fillParkTrees, planeTreeTest, streetTrees } from './trees.js';
 import { buildEnclosures, clearRoads, projectTrees, projectWalls } from './enclosures.js';
 import { findTowers } from './towers.js';
@@ -72,7 +74,12 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   await pause();
   // 塀（地籍の敷地の境界と LiDAR から見つけたもの）。歩道は建物の壁・塀まで延ばすので、地面より先に用意する
   const walls = clearRoads(projectWalls(data.walls || [], proj), (x, z) => roadnet.onRoad(x, z, 0.3));
-  const ground = buildGround(parsed, rect, groundMats, { buildings: parsed.buildings, walls, inOldTown: oldTownTest(proj) });
+  // 地面の覆い（500 m のブロックごと。fetch-data の bakeSite と同じ区切り）。覆いのある所の緑地は覆いにまかせる
+  const layout = tileLayout(rect);
+  const covers = (data.cover || []).map((c) => ({ c, b: tileBounds(layout, c.i, c.j) }));
+  const inOldTown = oldTownTest(proj);
+  const ground = buildGround(parsed, rect, groundMats, { buildings: parsed.buildings, walls, inOldTown, covered: covers.map(({ b }) => b) });
+  for (const { c, b } of covers) ground.group.add(buildCoverMesh(c, b, groundMats.cover, inOldTown, parsed));
   group.add(ground.group);
   for (const [x, z] of ground.posts) collision.addCircle(x, z, POST_HIT); // 横断歩道の脇の車止め
   group.add(buildEnclosures(walls, buildingMats, collision));

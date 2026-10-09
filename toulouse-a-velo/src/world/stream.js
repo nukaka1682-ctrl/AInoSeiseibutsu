@@ -17,6 +17,7 @@ import { buildGroundBase, buildGroundDetailAsync, makeWaterTest } from './ground
 import { POST_HIT, planStreets } from './streets.js';
 import { oldTownTest } from '../config.js';
 import { makeDeckTest } from './bridges.js';
+import { buildCoverMesh } from './cover.js';
 import { CollisionWorld } from '../game/collision.js';
 import { RoadNetwork } from '../game/roadnet.js';
 import { resolveLandmarks } from '../game/landmarks.js';
@@ -191,9 +192,10 @@ class TileStreamer {
     group.name = `tile-${t.key}`;
     const walls = clearRoads(projectWalls(data.walls, this.proj), (x, z) => this.roadnet.onRoad(x, z, 0.3));
 
-    // 地面（緑地・道路・歩道・線路・橋）。歩道はこのタイルと隣のタイルの境近くの建物・塀の壁まで延ばす
-    // 歩道の計算は重いので、道ごとに区切ってフレームに譲りながら作る
-    const ground = await buildGroundDetailAsync(this.parsed, B, this.groundMats, this.waterDepthAt, { buildings: buildings.concat(context), walls, inOldTown: this.inOldTown }, pause);
+    // 地面（地面の覆い・緑地・道路・歩道・線路・橋）。覆いのあるタイルでは、緑地は覆い（芝生・木の下）にまかせる。
+    // 歩道はこのタイルと隣のタイルの境近くの建物・塀の壁まで延ばす。歩道の計算は重いので、道ごとに区切ってフレームに譲りながら作る
+    const ground = await buildGroundDetailAsync(this.parsed, B, this.groundMats, this.waterDepthAt, { buildings: buildings.concat(context), walls, inOldTown: this.inOldTown, covered: data.cover ? [B] : [] }, pause);
+    if (data.cover) ground.group.add(buildCoverMesh(data.cover, B, this.groundMats.cover, this.inOldTown, this.parsed));
     group.add(ground.group);
     await pause();
     if (t.state !== 'loading') return disposeGroup(group);
@@ -304,10 +306,11 @@ class TileStreamer {
   }
 }
 
-// タイルのメッシュを捨てる（共有のマテリアルは残す。木のマテリアルはタイルごとなので捨てる）
+// タイルのメッシュを捨てる（共有のマテリアルは残す。木と地面の覆いのマテリアルはタイルごとなので捨てる）
 function disposeGroup(group) {
   group.traverse((o) => {
     if (o.geometry) o.geometry.dispose();
+    o.userData.dispose?.();
     if (o.isInstancedMesh) {
       o.dispose();
       o.material.dispose();
