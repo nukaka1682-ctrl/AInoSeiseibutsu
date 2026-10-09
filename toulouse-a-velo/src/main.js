@@ -435,6 +435,7 @@ function beginPlay() {
   }
   const p = spawnPoint(w);
   bike.place(p.x, p.z, p.heading, groundForTeleport(p.x, p.z));
+  if (!w.stream) w.furniture?.cull(p.x, p.z, true); // 一度に作る街: 始まる前から近くの小物を描く（遊んでいる間は update で）
   updateAttribution();
   rig.initialized = false;
 
@@ -614,7 +615,7 @@ function update(dt, forced) {
     holding = !w.stream.readyAt(bike.x, bike.z);
     if (holding && !state.holdNotice) toast('この先の街並みを読み込み中…', 2, true);
     state.holdNotice = holding;
-  }
+  } else w.furniture?.cull(bike.x, bike.z); // 街の小物は自転車の近くの物だけ描く
   if (holding) bike.speed = 0;
   else {
     bike.update(dt, ctl, {

@@ -54,6 +54,28 @@ export function oldTownTest(proj) {
   return test;
 }
 
+// ガロンヌ川の流れの真ん中の線 [緯度, 経度]（南から北へ。地図データの水面の両岸の真ん中から）。旧市街のうち
+// この線より東（右岸）が歴史的な中心。左岸のサン・シプリアン（Place Olivier・Château d'eau の角）は街の小物を
+// 旧市街の外と同じにする（ユーザーの写真のメモ 1・5・7: 灰色の横向きの灯具の街灯、路上駐車の車、ごみ収集容器）
+export const GARONNE_AXIS = [
+  [43.580, 1.4300], [43.588, 1.4326], [43.590, 1.4343], [43.592, 1.4379], [43.594, 1.4391], [43.596, 1.4390],
+  [43.598, 1.4390], [43.600, 1.4387], [43.602, 1.4340], [43.6045, 1.4300], [43.607, 1.4240], [43.620, 1.4150],
+];
+
+// ローカル座標 (x, z) が旧市街の右岸（歴史的な中心）かを調べる関数を作る（街の小物の分け方に使う）
+export function historicCoreTest(proj) {
+  const old = oldTownTest(proj);
+  const axis = GARONNE_AXIS.map(([lat, lon]) => proj.project(lat, lon)); // z は北へ行くほど小さい
+  const east = (x, z) => {
+    for (let i = 0; i + 1 < axis.length; i++) {
+      const [ax, az] = axis[i], [bx, bz] = axis[i + 1];
+      if (z <= az && z >= bz) return x > ax + ((bx - ax) * (z - az)) / (bz - az || 1);
+    }
+    return true;
+  };
+  return (x, z) => old(x, z) && east(x, z);
+}
+
 // 名所。match は OSM の name タグに対する正規表現。
 export const LANDMARKS = [
   {

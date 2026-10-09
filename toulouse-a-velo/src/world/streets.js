@@ -642,7 +642,8 @@ export function* streetSteps(parsed, plan, clip, { buildings = [], walls = [], w
   const extent = makeExtent(obstacles, soft, roads, waterDepthAt);
   const inClip = (x, z) => x >= clip.minX && x < clip.maxX && z >= clip.minZ && z < clip.maxZ;
   const H = plan.curbHeight;
-  const stats = { stations: 0, crossings: 0, posts: 0, postPts: [] }; // postPts: 車止めの位置（当たり判定用）
+  // postPts: 車止めの位置（当たり判定用）。curbs: 書いた縁石の区間（街の小物を縁石に沿って置くため。furniture.js）
+  const stats = { stations: 0, crossings: 0, posts: 0, postPts: [], curbs: [] };
   // 石の色は日陰の青い空の光で冷たく見えるので、頂点カラーで少し暖かく（写真: 小舗石の日陰 #5d5656、Rue du Taur の
   // 石の板はばら色のベージュ）。slabWide: 広い歩行者の通りの石の板は少し暗く灰色寄り（Rue de la Pomme・Alsace-Lorraine）。
   // 側溝の石は日なたで赤く見えないよう、ほぼ無彩色（写真 sidewalk-curb: 灰色の花崗岩）
@@ -806,6 +807,8 @@ export function* streetSteps(parsed, plan, clip, { buildings = [], walls = [], w
     writeRaised(P, red, plan.info.get(road).gutter);
     // 区間の端の面（交差点で切った所・行き止まり・タイルの境）
     writeEnds(P, red);
+    // 縁石の区間: s（道の始点からの距離）、a（縁石の車道側）・c（縁石の歩道側）、n（歩道の向き）、e（歩道の幅）
+    stats.curbs.push({ road, rows: P.map((r) => ({ s: r.st.s, ax: r.a[0], az: r.a[1], cx: r.c[0], cz: r.c[1], nx: r.nx, nz: r.nz, e: r.e, facade: !!r.facade })) });
   };
 
   // ---- 旧市街の石畳（壁から壁まで）。taur: 小舗石の車道＋側溝＋石の板の歩道
