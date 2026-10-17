@@ -414,6 +414,9 @@ function buildQuayWalls(list, mats) {
     const t = hash01(Math.round(ax * 7 + az * 13), 3);
     const brick = BANK.brickA.map((c, j) => c * (1 - t) + BANK.brickB[j] * t);
     w.quad([ax, h0, az], [bx, h0, bz], [bx, bt, bz], [ax, at, az], [nx, 0, nz], [0, 0], [L / 4, 0], [L / 4, hb / 4], [0, ha / 4], brick);
+    // 足元の石積みの帯（遊歩道から 1.3 m。写真では淡い石の切石の土台の上にレンガが積まれている）。壁の面より 3 cm 手前
+    const sa = Math.min(at, ab + 1.3), sb = Math.min(bt, bb + 1.3), ox = nx * 0.03, oz = nz * 0.03;
+    if (sa > h0 + 0.5 && sb > h0 + 0.5) w.quad([ax + ox, h0, az + oz], [bx + ox, h0, bz + oz], [bx + ox, sb, bz + oz], [ax + ox, sa, az + oz], [nx, 0, nz], [0, 0], [L / 2, 0], [L / 2, (sb - h0) / 2], [0, (sa - h0) / 2], BANK.quayBase);
     const k = 5, ux = -nx * k, uz = -nz * k, cy = (y) => y - 0.02;
     w.quad([ax, cy(at), az], [ax + ux, cy(at), az + uz], [bx + ux, cy(bt), bz + uz], [bx, cy(bt), bz], [0, 1, 0], [0, 0], [0, k / 4], [L / 4, k / 4], [L / 4, 0], BANK.quayCoping);
   }

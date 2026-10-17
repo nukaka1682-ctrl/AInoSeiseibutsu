@@ -34,3 +34,20 @@ test('地形の上の塀: 平らな地面では上端 = 地面 + 高さ。平ら
   const f = buildEnclosures([[0, 0, 10, 0, 2.5]], mats, null, null);
   assert.ok(f.children.length >= 2);
 });
+
+test('盛り土の脇の塀は土留め: 上端は盛り土の上 + 胸壁、盛り土の側に平らな面の印', () => {
+  // 東西の塀（z = 0）。北（z < 0）は 5 m の格子で 3 m 下がる斜面の下、南（z > 0）の 5 m 先は盛り土の上（3 m 高い）
+  const emb = { flat: false, h: (x, z) => (z >= 5 ? 3 : z <= 0 ? 0 : (3 * z) / 5) };
+  const P = wallProfile(emb, -20, 0, 20, 0, 2);
+  for (const p of P) {
+    assert.ok(p.fill && p.fill.y === 3, `土留めの印 ${JSON.stringify(p.fill)}`);
+    assert.ok(Math.abs(p.top - 4) < 1e-9, `上端は盛り土 + 1 m ${p.top}`);
+  }
+  // 法線 (-uz, ux) = (0, 1) の側（南）が盛り土
+  assert.equal(P[0].fill.s, 1);
+  // 平らな地面・ゆるい坂では印なし
+  for (const p of wallProfile({ flat: false, h: (x, z) => 0.1 * z }, -20, 0, 20, 0, 2)) assert.equal(p.fill, null);
+  // メッシュも作れる（平らな面の分のメッシュが増える）
+  const mats = { enclosureBrick: {}, enclosureRender: {}, roof: {} };
+  assert.ok(buildEnclosures([[-20, 0, 20, 0, 2]], mats, null, emb).children.length >= 3);
+});

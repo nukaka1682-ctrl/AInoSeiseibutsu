@@ -134,6 +134,26 @@ test('岸壁: 水辺から遠い段差・水の上の台地・車道には壁を
   for (const w of cw) assert.ok(Math.min(Math.abs(w.ax), Math.abs(w.bx)) > 4, `車道の上の壁 ${w.ax}`);
 });
 
+test('岸壁: なまった斜面に沿って走る遊歩道は坂ではなく下の段の道（岸壁の下の船着き場）', () => {
+  // 上の河岸 142 m（z < 0）から遊歩道 134 m へ。遊歩道は斜面の途中（z = 8、なまった格子では 139 m 前後）を、斜面に少し斜めに走る
+  const quay = (x, z) => 142 - 8 * ss(z / 20);
+  const T = synth(quay);
+  const path = { type: 'footway', width: 3, pts: [[-150, 6], [150, 12]], bridge: false, tunnel: false, layer: 0 };
+  const walls = sharpenQuays(T, [0, 0], 300, { inWater: (x, z) => z > 30, paths: [path] });
+  // 遊歩道の上は下の段（134 m）まで下がり、壁はその山側（北）に立つ
+  for (const x of [-100, -40, 30, 90]) {
+    const z = 6 + ((x + 150) / 300) * 6;
+    assert.ok(Math.abs(T.h(x, z) - (134 - DATUM)) < 1, `遊歩道 ${x}: ${T.h(x, z) + DATUM}`);
+  }
+  assert.ok(walls.filter((w) => Math.abs(w.ax) < 100).length > 10, '壁がある');
+  for (const w of walls) if (Math.abs(w.ax) < 100) assert.ok(w.az < 9 + ((w.ax + 150) / 300) * 6, `壁が遊歩道の川側 ${w.ax},${w.az}`);
+  // 斜面を下りる坂道（斜面を横切る）は坂のまま、壁でふさがない
+  const T2 = synth(quay);
+  const ramp = { type: 'footway', width: 3, pts: [[0, -30], [0, 28]], bridge: false, tunnel: false, layer: 0 };
+  const w2 = sharpenQuays(T2, [0, 0], 300, { inWater: (x, z) => z > 30, paths: [ramp] });
+  for (const w of w2) assert.ok(!segmentsCross(w.ax, w.az, w.bx, w.bz, 0, -30, 0, 28), '坂を横切る壁');
+});
+
 test('格子の 1 点だけの穴・とげを直す。同じ読み込み結果から作った地形は別々に手直しされる', () => {
   const T = synth(() => DATUM);
   const g = T.near, k = Math.floor(g.rows / 2) * g.cols + Math.floor(g.cols / 2);
