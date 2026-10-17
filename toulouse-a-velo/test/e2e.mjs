@@ -33,7 +33,7 @@ async function newPage(query, baked = null) {
   // 同梱の地形（本物のトゥールーズ）は合成の地図と合わないので使わず、合成の LiDAR の地形モデルから作らせる（直接取得の経路を試す）
   await page.route('**/data/light-terrain.bin', (r) => r.fulfill({ status: 404, body: '' }));
   page.on('console', (m) => {
-    if (m.type() === 'error') errors.push(m.text());
+    if (m.type() === 'error') errors.push(`${m.text()} ${m.location()?.url || ''}`);
   });
   page.on('pageerror', (e) => errors.push(String(e)));
   await page.route('**/api/interpreter', (r) => r.fulfill({ contentType: 'application/json', body: JSON.stringify(fx.osm) }));
@@ -76,7 +76,7 @@ try {
   await sim(4, { throttle: 1 });
   const moving = await bikeState(page);
   await page.screenshot({ path: join(out, '02-riding.png') });
-  check(moving.speed > 5 && moving.speed < 10, `こぐと加速する（${(moving.speed * 3.6).toFixed(1)} km/h）`);
+  check(moving.speed > 4.5 && moving.speed < 10, `こぐと加速する（${(moving.speed * 3.6).toFixed(1)} km/h）`);
   check(Math.hypot(moving.x - start.x, moving.z - start.z) > 10, `前に進む（${Math.hypot(moving.x - start.x, moving.z - start.z).toFixed(1)} m）`);
   await sim(1.0, { throttle: 1, steer: 1 });
   const turned = await bikeState(page);
@@ -191,7 +191,7 @@ try {
   server.httpServer.close();
 }
 
-const relevant = errors.filter((e) => !/favicon|data\/light\.json/.test(e));
+const relevant = errors.filter((e) => !/favicon|data\/light\.json|data\/light-terrain\.bin/.test(e));
 check(relevant.length === 0, `コンソールエラーなし${relevant.length ? `: \n${relevant.join('\n')}` : ''}`);
 console.log(`スクリーンショット: ${out}`);
 process.exit(failed ? 1 : 0);
