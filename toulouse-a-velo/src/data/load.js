@@ -7,6 +7,7 @@
 import { fetchOverpass } from './overpass.js';
 import { fetchBdTopo } from './bdtopo.js';
 import { fetchIgnArea } from './ign.js';
+import { fixReverseOneway } from './oneway.js';
 import { cacheGet, cachePut } from './cache.js';
 import { DATA_VERSION } from '../config.js';
 
@@ -93,11 +94,11 @@ export async function loadAreaData({ bbox, presetId, onStatus, forceNetwork = fa
   if (!forceNetwork) {
     onStatus?.('事前に用意された地図データを確認中…');
     const baked = await loadBaked(presetId, bbox, provider);
-    if (baked) return { ...baked, provider: baked.provider || 'osm', source: '同梱データ' };
+    if (baked) return { ...(await fixReverseOneway(baked, presetId)), provider: baked.provider || 'osm', source: '同梱データ' };
 
     onStatus?.('キャッシュを確認中…');
     const cached = await cacheGet(areaKey(bbox, provider));
-    if (cached) return { ...cached, source: 'キャッシュ' };
+    if (cached) return { ...(await fixReverseOneway(cached, presetId)), source: 'キャッシュ' };
   }
   const data = await fetchAreaData(bbox, { provider, onStatus });
   cachePut(areaKey(bbox, provider), data);

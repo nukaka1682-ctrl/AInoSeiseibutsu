@@ -191,7 +191,8 @@ export function makePartyIndex(list) {
       if (dp > TOL || dq > TOL) return;
       const tp = (s.p[0] - a[0]) * ux + (s.p[1] - a[1]) * uz, tq = (s.q[0] - a[0]) * ux + (s.q[1] - a[1]) * uz;
       const t0 = Math.max(0, Math.min(tp, tq)), t1 = Math.min(L, Math.max(tp, tq));
-      if (t1 - t0 > 0.3) out.push([t0, t1, s.b.info.height]);
+      // 隠す高さは、土台の高さの違いを足した b からの相対（坂の上下で隣り合う建物）
+      if (t1 - t0 > 0.3) out.push([t0, t1, s.b.info.height + (s.b.terrainBase || 0) - (b.terrainBase || 0)]);
     });
     return out;
   };
@@ -282,6 +283,17 @@ function writeWalls(W, ring, sign, b, plainColor, facade, covers = null) {
       }
     }
     along += L;
+  }
+}
+
+// 坂に建つ建物の台座: 外形の各辺に、高さ foot（負）から 0 までの壁
+function writePlinth(w, ring, sign, foot, color) {
+  for (let i = 0; i < ring.length; i++) {
+    const a = ring[i], c = ring[(i + 1) % ring.length];
+    const dx = c[0] - a[0], dz = c[1] - a[1], L = Math.hypot(dx, dz);
+    if (L < 0.05) continue;
+    const n = [(dz / L) * sign, 0, (-dx / L) * sign];
+    w.quad([a[0], foot, a[1]], [c[0], foot, c[1]], [c[0], 0, c[1]], [a[0], 0, a[1]], n, [0, foot / 4], [L / 4, foot / 4], [L / 4, 0], [0, 0], color);
   }
 }
 
@@ -547,11 +559,15 @@ const YIELD_MS = 30; // これだけ続けて計算したらフレームを譲�
 
 // context: 隣のタイルの建物（作らないが、接する壁を見分けるのに使う）、towers: 八角形の鐘楼（towers.js）、
 // skip: 描かない建物（名所の専用モデル monuments.js が代わりに建つ。当たり判定は呼び出し側で元の外形のまま）
-export async function buildBuildings(parsed, materials, onProgress, facade = null, { context = [], towers = [], groundAt = null, skip = null } = {}) {
+// terrain: 地形。建物ごとに土台の高さ（外形の中のいちばん高い地面の少し下）を決めて、建物全体（壁・屋根・塔）をその高さに建てる。
+// 坂の下側は、壁の下に地面まで台座を足す
+export async function buildBuildings(parsed, materials, onProgress, facade = null, { context = [], towers = [], groundAt = null, skip = null, terrain = null } = {}) {
   const group = new THREE.Group();
   group.name = 'buildings';
   const chunks = new Map();
-  const contact = new MeshWriter(); // 壁際の地面の陰はエリア（タイル）でひとつにまとめる
+  const T = terrain && !terrain.flat ? terrain : null;
+  // 壁際の地面の陰はエリア（タイル）でひとつにまとめる。ぼけた陰なので、地面との差 8 cm までは切らずに 10 cm 浮かせる
+  const contact = new MeshWriter({ drape: T, lift: 0.1, tol: 0.08 });
   contact.groundAt = groundAt;
   const getChunk = (x, z) => {
     const key = `${Math.floor(x / CHUNK)},${Math.floor(z / CHUNK)}`;
@@ -569,8 +585,35 @@ export async function buildBuildings(parsed, materials, onProgress, facade = nul
   // ms: 組み立ての計算時間（フレームを譲って待った時間は除く）
   const stats = { total: list.length, OSM: 0, IGN: 0, 'OSM（階数）': 0, 推定: 0, roofs: { pitched: 0, flat: 0, fallback: 0 }, ms: 0 };
   let lastYield = now();
+  if (T) {
+    // 土台の高さ。建物のパーツ（building:part）は、それを含む建物の土台に揃える
+    const all = parsed.buildings.concat(context);
+    const parents = new Grid(40);
+    all.forEach((b, k) => b.hasParts && parents.insertBounds(b.bounds.minX, b.bounds.minZ, b.bounds.maxX, b.bounds.maxZ, k));
+    for (const b of all.concat(parsed.parts)) {
+      const r = T.range(b.outer);
+      b.terrainRange = r;
+      // 土台: 坂の上側の壁（入口・窓）が埋まらないように、いちばん高い地面の 0.3 m 下（ただし下から 2 割の高さ + 4 m まで。
+      // 坂のとても長い建物だけ上側が少し埋まる）。下側は台座で地面まで
+      b.terrainBase = Math.max(r.p20, Math.min(r.max - 0.3, r.p20 + 4));
+    }
+    for (const p of parsed.parts) {
+      parents.queryPoint(p.inside[0], p.inside[1], 0, (k) => {
+        if (pointInRing(p.inside[0], p.inside[1], all[k].outer)) p.terrainBase = all[k].terrainBase;
+      });
+    }
+  }
   const party = makePartyIndex(list.concat(context.filter((b) => !b.hasParts)));
-  for (const t of towers) writeTower(t, getChunk(t.x, t.z).tower);
+  const KEYS = ['upper', 'ground', 'plain', 'capitole', 'church', 'tower', 'roof', 'genoise', 'flat'];
+  const setBase = (W, y) => {
+    for (const k of KEYS) W[k].yOffset = y;
+  };
+  for (const t of towers) {
+    const W = getChunk(t.x, t.z);
+    setBase(W, T ? (t.building?.terrainBase ?? T.h(t.x, t.z)) : 0);
+    writeTower(t, W.tower);
+    setBase(W, 0);
+  }
   for (let i = 0; i < list.length; i++) {
     const b = list[i];
     stats[b.info.heightSource] = (stats[b.info.heightSource] || 0) + 1;
@@ -584,6 +627,16 @@ export async function buildBuildings(parsed, materials, onProgress, facade = nul
     // 辺ごとの、隣の建物と接する区間（壁・屋根の切妻で使う）
     const covers = rings.map((ring) => ring.map((a, k) => party(b, a, ring[(k + 1) % ring.length])));
     const color = wallColor(b);
+    if (T) {
+      setBase(W, b.terrainBase ?? 0);
+      // 坂の下側の台座（壁の下から、外形の中のいちばん低い地面の 0.2 m 下まで）
+      const drop = b.terrainBase - (b.terrainRange?.min ?? b.terrainBase);
+      if (b.info.minHeight < 0.5 && drop > 0.05) {
+        const pc = color.map((c) => c * 0.82);
+        writePlinth(W.plain, rings[0], outwardSign(rings[0]), -drop - 0.2, pc);
+        for (let k = 1; k < rings.length; k++) writePlinth(W.plain, rings[k], -outwardSign(rings[k]), -drop - 0.2, pc); // 中庭の壁の下も
+      }
+    }
     writeWalls(W, rings[0], outwardSign(rings[0]), b, color, facade, covers[0]);
     for (let k = 1; k < rings.length; k++) writeWalls(W, rings[k], -outwardSign(rings[k]), b, color, null, covers[k]); // 中庭の壁は内向き
     if (b.info.minHeight > 0.5) {
@@ -591,6 +644,7 @@ export async function buildBuildings(parsed, materials, onProgress, facade = nul
       writeFlatPolygon(W.plain, rings[0], rings.slice(1), b.info.minHeight, 4, color, false);
     }
     stats.roofs[writeRoof(W, rings, b, color, covers, plan)]++;
+    if (T) setBase(W, 0);
     // 組み立てが長くなったら 1 フレーム譲る（走行中のタイルの読み込みでカクつかないように）
     const busy = now() - lastYield;
     if (busy > YIELD_MS) {

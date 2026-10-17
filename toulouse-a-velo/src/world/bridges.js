@@ -4,7 +4,7 @@
 //   （レンガのヴォールト）、アーチの間の壁（スパンドレル）、上流・下流に尖った水切りと段々の石のピラミッドの笠を作る。
 //   ポン・ヌフは写真と実物の寸法を手本に、大きさの違う 7 つのかご形のアーチ（中ほどがいちばん大きい約 30 m）、
 //   白い石の迫石とレンガが交互のアーチの輪、橋脚の上を貫く丸い穴（デグロワール、直径約 4 m、石の縁取り）、
-//   橋脚の下の低い石の台、両側の欄干の 5 灯の燭台形の街灯（25〜30 m おき）。
+//   橋脚の下の低い石の台、両側の欄干の白鳥の首の街灯（吊り下げの灯具 1 つ、25〜30 m おき）、淡い花崗岩の板の歩道。
 // - 近代の橋（ポン・サン・ピエール、ポン・サン・ミシェル、歩道橋、高速道路など、石の橋の一覧にないもの）: 薄いコンクリートの桁と細い橋脚。
 // - 浅い水（運河）や道路の上の橋: 平らな橋（側面と底）。
 // 橋の側面は、橋の軸に沿った距離 s と高さ y の 2 次元で組み立てて、橋の折れ線に沿って 3D に置く。
@@ -15,6 +15,9 @@ import { MeshWriter } from './meshwriter.js';
 import { CAR_ROADS } from './parse.js';
 import { Grid, clipPolylineToRect, closestOnSegment } from '../geo.js';
 import { offsets, roadStyle } from './ground.js';
+import { DATUM } from './terrain.js';
+import { cleanProfile, fitDeckEnds } from './terraincond.js';
+import { laneLayout, writeRoadMarkings } from './markings.js';
 
 const c3 = (hex, k = 1) => {
   const c = new THREE.Color(hex);
@@ -52,8 +55,8 @@ const COL = {
   nose: T('#d6c3a0'), // 水切り
   footing: T('#b9a77a'), // 橋脚の下の台
   cornice: T('#b3a58c'),
-  parapet: T('#ac997d'),
-  coping: T('#c0b39c'),
+  parapet: T('#d9cfbd'), // 淡い石の欄干（写真 10・11）
+  coping: T('#e3dacb'),
   flat: T('#c58a6e'),
   concrete: T('#b7b3ab'),
   concreteDark: T('#9a978f'),
@@ -323,24 +326,155 @@ export function archRise(a, depth, ring) {
 
 // ---- メッシュ ----
 
-// 橋（tile の中の橋 bridges）を作る。allRoads: エリア全体の道路（並んだ橋のまとまりを調べる）
-export function buildBridges(bridges, allRoads, mats, waterDepthAt, clipRect) {
+// ---- 地形があるときの橋の高さ ----
+// 橋のまとまり（親の way）ごとの橋面の縦断面を地形に登録する（terrain.deck）。事前取得で表面モデルから測った縦断面
+// （両端の緯度経度で合わせる）があればそれ、なければ両端の地面を結ぶ線に少し山なりを足したもの。両端は 30 m かけて
+// 地面の高さに合わせる（取り付けの道路と段差ができないように）。戻り値: 親の way → 縦断面 { pts, y, step, length, half }
+const deckCache = new WeakMap();
+export function setupDecks(terrain, roads, proj, waterDepthAt = () => 0) {
+  if (!terrain || terrain.flat) return new Map();
+  const info = bridgeGroups(roads);
+  const baked = (terrain.profiles || []).map((b) => ({ ...b, pa: proj.project(...b.a), pb: proj.project(...b.b) }));
+  const near = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1]) < 3;
+  const out = new Map();
+  const raw = [], seen = new Set();
+  for (const v of info.values()) {
+    const r = v.root;
+    if (seen.has(r)) continue;
+    seen.add(r);
+    const fr = polyFrame(r.pts), L = fr.length, step = 5;
+    const p0 = r.pts[0], p1 = r.pts[r.pts.length - 1];
+    const b = baked.find((e) => near(e.pa, p0) && near(e.pb, p1));
+    const n = Math.max(2, Math.ceil(L / step) + 1);
+    const h0 = terrain.h(p0[0], p0[1]), h1 = terrain.h(p1[0], p1[1]);
+    // 測った縦断面（外れ値を捨てる。信用できなければ両端の地面を結ぶ直線 + ゆるいアーチ）
+    let y = null;
+    if (b) {
+      const ys = [];
+      for (let k = 0; k < n; k++) ys.push(b.y[Math.min(b.y.length - 1, Math.round(Math.min(L, k * step) / step))] - DATUM);
+      y = cleanProfile(ys);
+    }
+    if (!y) {
+      y = [];
+      for (let k = 0; k < n; k++) {
+        const t = Math.min(L, k * step) / (L || 1);
+        y.push(h0 + (h1 - h0) * t + Math.min(1.2, 0.01 * L) * 4 * t * (1 - t));
+      }
+    }
+    raw.push({ r, y, L, step, p0, p1, h0, h1, measured: !!b });
+  }
+  // 両端の高さ: ふつうの道路につながる端は地面（取り付ける道路の高さ）、ほかの橋の端とだけつながる所（高架の続き）は両方の端の平均。
+  // 差が大きいときは橋の中に長い坂を作る（fitDeckEnds）。どの橋も、端では必ず道路とつながる
+  const ends = [];
+  raw.forEach((e, i) => {
+    ends.push({ i, k: 0, p: e.p0, y: e.y[0] });
+    ends.push({ i, k: 1, p: e.p1, y: e.y[e.y.length - 1] });
+  });
+  const endGrid = new Grid(20);
+  ends.forEach((e, j) => endGrid.insertPoint(e.p[0], e.p[1], j));
+  // 橋ではない道路の点（橋の端がふつうの道路につながるか）
+  const roadNodes = new Grid(20);
+  for (const o of roads) if (!o.bridge && !o.tunnel) for (const q of o.pts) roadNodes.insertPoint(q[0], q[1], q);
+  const onLand = (p) => {
+    let hit = false;
+    roadNodes.queryPoint(p[0], p[1], 1.5, (q) => {
+      if (!hit && Math.hypot(q[0] - p[0], q[1] - p[1]) < 1.5) hit = true;
+    });
+    return hit;
+  };
+  const target = (e, i, k) => {
+    const p = k ? e.p1 : e.p0;
+    if (onLand(p)) return k ? e.h1 : e.h0;
+    const mates = [];
+    endGrid.queryPoint(p[0], p[1], 2, (j) => {
+      const o = ends[j];
+      if (o.i !== i && Math.hypot(o.p[0] - p[0], o.p[1] - p[1]) < 2) mates.push(o.y);
+    });
+    if (!mates.length) return k ? e.h1 : e.h0;
+    const own = k ? e.y[e.y.length - 1] : e.y[0];
+    return (own + mates.reduce((s, v) => s + v, 0)) / (mates.length + 1);
+  };
+  const targets = raw.map((e, i) => [target(e, i, 0), target(e, i, 1)]);
+  raw.forEach((e, i) => {
+    const { r } = e;
+    const y = fitDeckEnds(e.y, e.step, e.L, targets[i][0], targets[i][1]);
+    const { step, L } = e;
+    // 半幅: 並んだ way（歩道橋など）も含めた橋全体
+    let half = deckHalf(r);
+    for (const [m, mv] of info) {
+      if (mv.root !== r || m === r) continue;
+      const mid = m.pts[m.pts.length >> 1];
+      let d2 = Infinity;
+      for (let i = 0; i + 1 < r.pts.length; i++) d2 = Math.min(d2, closestOnSegment(mid[0], mid[1], ...r.pts[i], ...r.pts[i + 1]).d2);
+      half = Math.max(half, Math.sqrt(d2) + deckHalf(m));
+    }
+    out.set(r, { pts: r.pts, y, step, length: L, half: half + 0.3, measured: e.measured });
+  });
+  terrain.setDecks([...out.values()]);
+  deckCache.set(terrain, out);
+  return out;
+}
+
+// 橋 root の頂点の高さの置き換え: 蛇腹より上（相対 y ≥ −1.5）は縦断面に載せ、下（アーチ・橋脚）は縦断面の 1.5 m 下から
+// 水面（陸の上なら地面）まで引き延ばす。wet: 水の区間（相対の高さで作った水面の深さ depth。区間の外は最大の深さ）
+function deckMap(terrain, prof, wet, waterDepthAt) {
+  const dMax = Math.max(2, ...wet.map((w) => w.depth));
+  const fr = polyFrame(prof.pts);
+  const sAt = (x, z) => {
+    let best = Infinity, s = 0;
+    for (let i = 0; i + 1 < prof.pts.length; i++) {
+      const c = closestOnSegment(x, z, ...prof.pts[i], ...prof.pts[i + 1]);
+      if (c.d2 < best) {
+        best = c.d2;
+        s = fr.cum[i] + c.t * (fr.cum[i + 1] - fr.cum[i]);
+      }
+    }
+    return s;
+  };
+  return (x, y, z) => {
+    const s = sAt(x, z), D = terrain.deckY(prof, s);
+    if (y >= -1.5) return D + y;
+    const dRef = Math.max(2, wet.find((w) => s >= w.s0 - 4 && s <= w.s1 + 4)?.depth ?? dMax);
+    const low = waterDepthAt(x, z) > 0 ? terrain.waterLevel(x, z) : terrain.h(x, z);
+    if (y < -dRef) return low + (y + dRef);
+    const k = (D - 1.5 - low) / Math.max(0.5, dRef - 1.5);
+    return D - 1.5 + (y + 1.5) * k;
+  };
+}
+
+// 橋（tile の中の橋 bridges）を作る。allRoads: エリア全体の道路（並んだ橋のまとまりを調べる）。terrain: 地形（あれば橋面を縦断面に載せる）
+export function buildBridges(bridges, allRoads, mats, waterDepthAt, clipRect, terrain = null) {
   const info = bridgeGroups(allRoads);
-  const deck = new MeshWriter();
-  const body = new MeshWriter();
+  const decks = terrain && !terrain.flat ? deckCache.get(terrain) : null;
+  const deck = new MeshWriter(decks ? { maxEdge: 5 } : {});
+  const body = new MeshWriter(decks ? { maxEdge: 5 } : {});
+  const walk = new MeshWriter(decks ? { maxEdge: 5 } : {}); // 石の橋の歩道（花崗岩の板）
+  const marks = new MeshWriter(decks ? { maxEdge: 5 } : {}); // 橋面の標示
+  const writers = [deck, body, walk, marks];
   for (const road of bridges) {
     const v = info.get(road);
     if (!v) continue;
     const root = info.get(v.root);
-    if (!root.style) root.style = bridgeStyle(v.root, root, waterDepthAt);
-    writeDeck(deck, body, road, v.half, root.style.kind, info, clipRect);
-    if (v.root === road) writeStructure(body, road, root);
+    const prof = decks?.get(v.root);
+    if (!root.style) root.style = bridgeStyle(v.root, root, waterDepthAt, prof ? (x, z) => terrain.waterLevel(x, z) : null, prof && ((s) => terrain.deckY(prof, s)));
+    if (prof) {
+      const map = deckMap(terrain, prof, root.style.wet, waterDepthAt);
+      for (const w of writers) w.map = map;
+    }
+    writeDeck({ deck, body, walk, marks }, road, v.half, root.style.kind, info, clipRect);
+    if (v.root === road) {
+      writeStructure(body, road, root, walk);
+      if (prof) writeLandPiers(body, road, root, prof, terrain, waterDepthAt, Math.max(2, ...root.style.wet.map((w) => w.depth)));
+    }
+    for (const w of writers) w.map = null;
   }
   const g = new THREE.Group();
   g.name = 'bridges';
-  if (!deck.empty) {
-    const m = new THREE.Mesh(deck.toGeometry(), mats.deck);
+  for (const [w, mat, order] of [[deck, mats.deck, 0], [walk, mats.deckWalk || mats.deck, 0], [marks, mats.deckMarks, 0.5]]) {
+    if (w.empty || !mat) continue;
+    const m = new THREE.Mesh(w.toGeometry(), mat);
     m.receiveShadow = true;
+    m.renderOrder = order; // 標示は橋面の後に描く（深度を書かない）
     g.add(m);
   }
   if (!body.empty) {
@@ -352,8 +486,25 @@ export function buildBridges(bridges, allRoads, mats, waterDepthAt, clipRect) {
   return g;
 }
 
-// 橋の種類と、水の区間ごとのアーチの並び
-export function bridgeStyle(road, v, waterDepthAt) {
+// 陸の上の高い橋（道路・線路を越える橋）: 橋面が地面より 2.5 m 以上高い所に、約 25 m ごとにコンクリートの橋脚
+function writeLandPiers(w, road, v, prof, terrain, waterDepthAt, dRef) {
+  const fr = polyFrame(road.pts);
+  const n = Math.floor(fr.length / 25);
+  for (let k = 1; k <= n; k++) {
+    const s = (fr.length * k) / (n + 1);
+    const [x, z] = fr.at(road.pts, s);
+    if (waterDepthAt(x, z) > 0) continue;
+    const D = terrain.deckY(prof, s);
+    if (D - terrain.h(x, z) < 2.5) continue;
+    const [ux, uz] = fr.tangent(fr.locate(s)[0]);
+    const off = ((v.extL ?? 3) - (v.extR ?? 3)) / 2;
+    writePier(w, x - uz * off, z + ux * off, ux, uz, ((v.extL ?? 3) + (v.extR ?? 3)) * 0.3, 0.6, 1.2, SLAB_BOTTOM, -dRef - 0.6, COL.concreteDark);
+  }
+}
+
+// 橋の種類と、水の区間ごとのアーチの並び。levelAt(x, z) / deckAt(s): 地形があるときの水面と橋面の高さ（水の区間の深さを
+// 本当の橋面から水面までの高さにして、アーチの大きさを本物の橋に合わせる）
+export function bridgeStyle(road, v, waterDepthAt, levelAt = null, deckAt = null) {
   const fr = polyFrame(road.pts);
   const step = 1.5;
   const depths = [];
@@ -362,6 +513,14 @@ export function bridgeStyle(road, v, waterDepthAt) {
     depths.push(waterDepthAt(x, z));
   }
   const wet = wetIntervals(depths, step).map((w) => ({ ...w, s1: Math.min(w.s1, fr.length) }));
+  if (levelAt && deckAt) {
+    for (const w of wet) {
+      const hs = [];
+      for (let s = w.s0; s <= w.s1; s += 4) hs.push(deckAt(s) - levelAt(...fr.at(road.pts, s)));
+      hs.sort((a, b) => a - b);
+      if (hs.length) w.depth = Math.max(w.depth, Math.min(18, hs[hs.length >> 1]));
+    }
+  }
   if (!wet.length) return { kind: 'flat', wet };
   // 石の橋の一覧にない橋と、高速道路・幹線道路を含むまとまりは近代の橋
   const members = v.members || [road];
@@ -392,15 +551,25 @@ export function bridgeStyle(road, v, waterDepthAt) {
 }
 
 // 橋面と欄干（way ごと）。並んだ橋の橋面の上には欄干を立てない
-function writeDeck(deck, body, road, half, kind, info, clipRect) {
+function writeDeck({ deck, body, walk, marks }, road, half, kind, info, clipRect) {
   const topY = CAR_ROADS.has(road.type) ? 0.08 : 0.14; // 歩道橋は少し高くして、重なっても Z ファイティングしないように
   const st = roadStyle(road);
   const modern = kind === 'modern';
+  const car = CAR_ROADS.has(road.type) && st.tex === 'asphalt';
+  // 車道の標示（中央線・バスレーン・自転車レーン。ポン・ヌフは写真 10・11）。橋の両端 4 m はあける
+  if (car) {
+    const cum = [0];
+    for (let i = 1; i < road.pts.length; i++) cum.push(cum[i - 1] + Math.hypot(road.pts[i][0] - road.pts[i - 1][0], road.pts[i][1] - road.pts[i - 1][1]));
+    const total = cum[cum.length - 1];
+    const clip = { minX: clipRect[0], minZ: clipRect[1], maxX: clipRect[2], maxZ: clipRect[3] };
+    writeRoadMarkings(road, cum, laneLayout(road), [[-1, 4], [total - 4, total + 1]], clip, marks, marks, { y: topY + 0.01, solid: true });
+  }
   for (const pts of clipPolylineToRect(road.pts, ...clipRect)) {
     if (pts.length < 2) continue;
-    // 車道の橋は、車道の両側を明るい歩道に（暗いアスファルトのテクスチャを明るくする色）
-    const car = CAR_ROADS.has(road.type) && st.tex === 'asphalt';
-    writeDeckRibbon(deck, pts, half, car ? road.width / 2 : half, topY, st.tex === 'asphalt' ? st.color : c3('#c9c4ba'), c3('#e2d8ca', 1.6));
+    // 車道の橋は、車道の両側を明るい歩道に（暗いアスファルトのテクスチャを明るくする色）。
+    // 石の橋は淡い花崗岩の板の歩道（写真 10・11）と、車道の縁の濃い石の帯（縁石）。並んだ橋の内側は今までどおり
+    const stone = car && !modern && kind !== 'flat';
+    writeDeckRibbon(deck, pts, half, car ? road.width / 2 : half, topY, st.tex === 'asphalt' ? st.color : c3('#c9c4ba'), c3('#e2d8ca', 1.6), stone ? { walk, road, info } : null);
     const edge = offsets(pts, half);
     const cor = offsets(pts, half + 0.3);
     const par = offsets(pts, half + 0.1);
@@ -431,15 +600,20 @@ function writeDeck(deck, body, road, half, kind, info, clipRect) {
         vq(ca, cb, CORNICE, ct, n, COL.cornice);
         hq(a, b, cb, ca, CORNICE, down, COL.cornice);
         hq(pa, pb, cb, ca, ct, up, COL.cornice);
-        vq(pa, pb, ct, top, n, COL.parapet);
+        // 欄干の面は淡い切り石（写真 10・11: 淡い石の約 1 m の欄干）。レンガではなく花崗岩の板のテクスチャ（walk。
+        // 2.4 m で 1 周: 長さ 1.2 m・高さ 0.6 m の石。目地は細い横の線）に暖かい白の色をかける
+        const sq = (p, q, y0, y1, nn) => walk.quad([p[0], y0, p[1]], [q[0], y0, q[1]], [q[0], y1, q[1]], [p[0], y1, p[1]], nn, [0, y0 / 2.4], [l / 2.4, y0 / 2.4], [l / 2.4, y1 / 2.4], [0, y1 / 2.4], PARAPET_STONE);
+        sq(pa, pb, ct, top, n);
         hq(pa, pb, ib, ia, top, up, COL.coping);
-        vq(ia, ib, topY, top, ni, COL.parapet);
+        sq(ia, ib, topY, top, ni);
       }
     }
   }
 }
 
-function writeDeckRibbon(w, pts, half, inner, y, color, sideColor) {
+const PARAPET_STONE = c3('#fbf3e6'); // 欄干・街灯の台座の淡い切り石（花崗岩の板のテクスチャにかける色）
+const GRANITE = c3('#ffffff'), GRANITE_EDGE = c3('#b9b4ab'); // 花崗岩の板（テクスチャの色のまま）と、縁石の濃い帯
+function writeDeckRibbon(w, pts, half, inner, y, color, sideColor, stone = null) {
   const up = [0, 1, 0];
   const uv = (p) => [p[0] / 4, -p[1] / 4];
   const strip = (A, B, col) => {
@@ -452,12 +626,39 @@ function writeDeckRibbon(w, pts, half, inner, y, color, sideColor) {
   if (inner > half - 0.3) return strip(out.L, out.R, color);
   const mid = offsets(pts, inner);
   strip(mid.L, mid.R, color);
-  strip(out.L, mid.L, sideColor);
-  strip(mid.R, out.R, sideColor);
+  if (!stone) {
+    strip(out.L, mid.L, sideColor);
+    strip(mid.R, out.R, sideColor);
+    return;
+  }
+  // 花崗岩の板の歩道: テクスチャの u = 橋の向き（2.4 m で 1 枚）、v = 横。車道の縁から 0.35 m は濃い縁石の帯。
+  // 並んだ橋の内側（外に別の橋面がある辺）は今までどおりの明るいアスファルト
+  const cum = [0];
+  for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+  const band = offsets(pts, inner + 0.35);
+  for (const [k, sgn] of [['L', 1], ['R', -1]]) {
+    for (let i = 0; i + 1 < pts.length; i++) {
+      const a = out[k][i], b = out[k][i + 1];
+      const nx = (a[0] - pts[i][0]) / half, nz = (a[1] - pts[i][1]) / half;
+      if (stone.info.onDeck((a[0] + b[0]) / 2 + nx * 0.8, (a[1] + b[1]) / 2 + nz * 0.8, stone.road)) {
+        const A = [mid[k][i], mid[k][i + 1]], B = [a, b];
+        w.quad([A[0][0], y, A[0][1]], [B[0][0], y, B[0][1]], [B[1][0], y, B[1][1]], [A[1][0], y, A[1][1]], up, uv(A[0]), uv(B[0]), uv(B[1]), uv(A[1]), sideColor);
+        continue;
+      }
+      const u0 = cum[i] / 2.4, u1 = cum[i + 1] / 2.4;
+      const q = (P0, P1, t0, t1, col) => {
+        const [p0, p1, p2, p3] = sgn > 0 ? [P0[i], P1[i], P1[i + 1], P0[i + 1]] : [P1[i], P0[i], P0[i + 1], P1[i + 1]];
+        const [v0, v1] = sgn > 0 ? [t0, t1] : [t1, t0];
+        stone.walk.quad([p0[0], y, p0[1]], [p1[0], y, p1[1]], [p2[0], y, p2[1]], [p3[0], y, p3[1]], up, [u0, v0], [u0, v1], [u1, v1], [u1, v0], col);
+      };
+      q(mid[k], band[k], 0, 0.35 / 2.4, GRANITE_EDGE);
+      q(band[k], out[k], 0.35 / 2.4, (half - inner) / 2.4, GRANITE);
+    }
+  }
 }
 
 // 橋の本体（親の way だけ）: 側面・底・アーチ・橋脚・水切り・街灯
-function writeStructure(w, road, v) {
+function writeStructure(w, road, v, stone = w) {
   const { kind, wet } = v.style;
   const pts = road.pts;
   const fr = polyFrame(pts);
@@ -621,7 +822,7 @@ function writeStructure(w, road, v) {
         const half = sd > 0 ? v.extL : v.extR;
         const c = fr.at(pts, s), n = N(sd, s);
         const x = c[0] + n[0] * (half - 0.15), z = c[1] + n[2] * (half - 0.15);
-        writeLamp(w, x, z, U(s), 0.08);
+        writeLamp(w, x, z, U(s), 0.08, [-n[0], -n[2]], stone);
       }
     }
   }
@@ -818,36 +1019,53 @@ function writePier(w, x, z, ux, uz, halfAcross, nose, thick, top, bottom, color)
   }
 }
 
-// ポン・ヌフの街灯: 欄干の中の石の台座、灰緑の鋳鉄の柱（高さ約 8.5 m）、十字の腕の先と頂上に 5 つの白い球
-function writeLamp(w, x, z, [ux, uz], baseY) {
+// ポン・ヌフの街灯（写真 10・11）: 欄干の中の石の台座、灰緑の鋳鉄の柱（高さ約 6.6 m）、車道の側へ曲がった白鳥の首の
+// 腕（約 1.2 m）の先に吊り下げた灯具 1 つ。[ix, iz]: 車道の側（内向き）
+function writeLamp(w, x, z, [ux, uz], baseY, [ix, iz], stone = w) {
   const vx = -uz, vz = ux;
-  const box = (cx, cz, y0, y1, hu, hv, color) => {
+  const box = (cx, cz, y0, y1, hu, hv, color, out = w, uvk = 0) => {
     const c = (a, b) => [cx + ux * a + vx * b, cz + uz * a + vz * b];
     const P4 = [c(-hu, -hv), c(hu, -hv), c(hu, hv), c(-hu, hv)];
     for (let i = 0; i < 4; i++) {
       const a = P4[i], b = P4[(i + 1) % 4];
       const mx = (a[0] + b[0]) / 2 - cx, mz = (a[1] + b[1]) / 2 - cz, ml = Math.hypot(mx, mz) || 1;
-      w.quad([a[0], y0, a[1]], [b[0], y0, b[1]], [b[0], y1, b[1]], [a[0], y1, a[1]], [mx / ml, 0, mz / ml], [0, 0], [0.2, 0], [0.2, 0.3], [0, 0.3], color);
+      out.quad([a[0], y0, a[1]], [b[0], y0, b[1]], [b[0], y1, b[1]], [a[0], y1, a[1]], [mx / ml, 0, mz / ml], [0, y0 * uvk], [0.2, y0 * uvk], [0.2, y1 * uvk || 0.3], [0, y1 * uvk || 0.3], color);
     }
-    w.quad([P4[0][0], y1, P4[0][1]], [P4[1][0], y1, P4[1][1]], [P4[2][0], y1, P4[2][1]], [P4[3][0], y1, P4[3][1]], [0, 1, 0], [0, 0], [0.2, 0], [0.2, 0.2], [0, 0.2], color);
+    out.quad([P4[0][0], y1, P4[0][1]], [P4[1][0], y1, P4[1][1]], [P4[2][0], y1, P4[2][1]], [P4[3][0], y1, P4[3][1]], [0, 1, 0], [0, 0], [0.2, 0], [0.2, 0.2], [0, 0.2], color);
   };
   const y0 = baseY;
-  box(x, z, y0, y0 + PARAPET + 0.3, 0.38, 0.38, COL.coping); // 台座
+  // 台座: 欄干と同じ淡い切り石（stone: 花崗岩の板のテクスチャ。写真 10・11 の街灯の下の白い石の柱）
+  box(x, z, y0, y0 + PARAPET + 0.3, 0.38, 0.38, stone === w ? COL.coping : PARAPET_STONE, stone, stone === w ? 0 : 1 / 2.4);
   box(x, z, y0 + PARAPET + 0.3, y0 + PARAPET + 0.9, 0.2, 0.2, COL.lamp); // 柱の根元
   // 柱（6 角、上ほど細い）
-  const yb = y0 + PARAPET + 0.9, yt = y0 + 8.1;
+  const yb = y0 + PARAPET + 0.9, yt = y0 + 6.6;
   for (let i = 0; i < 6; i++) {
     const a0 = (i / 6) * Math.PI * 2, a1 = ((i + 1) / 6) * Math.PI * 2, am = (a0 + a1) / 2;
     const p = (a, r, y) => [x + Math.cos(a) * r, y, z + Math.sin(a) * r];
-    w.quad(p(a0, 0.12, yb), p(a1, 0.12, yb), p(a1, 0.07, yt), p(a0, 0.07, yt), [Math.cos(am), 0.05, Math.sin(am)], [0, 0], [0.1, 0], [0.1, 1], [0, 1], COL.lamp);
+    w.quad(p(a0, 0.12, yb), p(a1, 0.12, yb), p(a1, 0.065, yt), p(a0, 0.065, yt), [Math.cos(am), 0.05, Math.sin(am)], [0, 0], [0.1, 0], [0.1, 1], [0, 1], COL.lamp);
   }
-  // 十字の腕と 5 つの球
-  const ya = y0 + 7.5;
-  box(x, z, ya - 0.05, ya + 0.05, 0.62, 0.04, COL.lamp);
-  box(x, z, ya - 0.05, ya + 0.05, 0.04, 0.62, COL.lamp);
-  const globes = [[0.62, 0], [-0.62, 0], [0, 0.62], [0, -0.62]].map(([a, b]) => [x + ux * a + vx * b, ya + 0.3, z + uz * a + vz * b]);
-  globes.push([x, yt + 0.3, z]);
-  for (const [gx, gy, gz] of globes) writeGlobe(w, gx, gy, gz, 0.23, COL.globe);
+  // 白鳥の首の腕: [内への距離, 高さ] の 5 点を 4 本の角棒でつなぐ
+  const arm = [[0, 6.5], [0.12, 6.95], [0.42, 7.22], [0.85, 7.28], [1.22, 7.15]];
+  const r = 0.04;
+  for (let k = 0; k + 1 < arm.length; k++) {
+    const [h0, a0] = arm[k], [h1, a1] = arm[k + 1];
+    const L = Math.hypot(h1 - h0, a1 - a0) || 1;
+    const ph = -(a1 - a0) / L, py = (h1 - h0) / L; // 腕に直角な向き（腕の面の中で上側）
+    const V = (h, a, du, dn) => [x + ix * (h + ph * dn) + ux * du, y0 + a + py * dn, z + iz * (h + ph * dn) + uz * du];
+    // 面の向きは法線で決まる（MeshWriter が巻きの向きを合わせる）
+    const q = ([du0, dn0], [du1, dn1], n) => w.quad(V(h0, a0, du0, dn0), V(h1, a1, du0, dn0), V(h1, a1, du1, dn1), V(h0, a0, du1, dn1), n, [0, 0], [0.1, 0], [0.1, 0.1], [0, 0.1], COL.lamp);
+    q([-r, -r], [-r, r], [-ux, 0, -uz]);
+    q([r, -r], [r, r], [ux, 0, uz]);
+    q([-r, r], [r, r], [ix * ph, py, iz * ph]);
+    q([-r, -r], [r, -r], [-ix * ph, -py, -iz * ph]);
+  }
+  // 吊り下げの灯具（腕の先から下がる。笠・ガラス・下の飾り）
+  const [hl, al] = arm[arm.length - 1];
+  const lx = x + ix * hl, lz = z + iz * hl, ya = y0 + al;
+  box(lx, lz, ya - 0.18, ya, 0.025, 0.025, COL.lamp);
+  box(lx, lz, ya - 0.3, ya - 0.18, 0.2, 0.2, COL.lamp);
+  box(lx, lz, ya - 0.72, ya - 0.3, 0.15, 0.15, COL.globe);
+  box(lx, lz, ya - 0.8, ya - 0.72, 0.09, 0.09, COL.lamp);
 }
 
 function writeGlobe(w, x, y, z, r, color) {

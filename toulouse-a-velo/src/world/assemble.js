@@ -8,6 +8,8 @@ import { CAR_ROADS, parseOsm } from './parse.js';
 import { buildBuildings } from './buildings.js';
 import { buildGround, makeWaterTest } from './ground.js';
 import { makeDeckTest } from './bridges.js';
+import { FLAT_TERRAIN, surfaceFns } from './terrain.js';
+import { buildTerrainTile } from './terrainmesh.js';
 import { buildCoverMesh } from './cover.js';
 import { tileBounds, tileLayout } from '../data/tiles.js';
 import { buildTrees, fillParkTrees, planeTreeTest, streetTrees } from './trees.js';
@@ -34,7 +36,8 @@ export function areaFrame(bbox) {
   return { proj, rect };
 }
 
-export async function assembleWorld(data, bbox, { buildingMats, groundMats, progress = () => {}, pause = defaultPause }) {
+// terrain: 地形（world/terrain.js。なければ平ら）
+export async function assembleWorld(data, bbox, { buildingMats, groundMats, progress = () => {}, pause = defaultPause, terrain = FLAT_TERRAIN }) {
   const { proj, rect } = areaFrame(bbox);
   progress('建物・道路・水辺を解析中…', 0);
   await pause();
@@ -85,11 +88,29 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   const layout = tileLayout(rect);
   const covers = (data.cover || []).map((c) => ({ c, b: tileBounds(layout, c.i, c.j) }));
   const inOldTown = oldTownTest(proj);
-  const ground = buildGround(parsed, rect, groundMats, { buildings: parsed.buildings, walls, inOldTown, covered: covers.map(({ b }) => b) });
-  for (const { c, b } of covers) ground.group.add(buildCoverMesh(c, b, groundMats.cover, inOldTown, parsed));
+  const ground = buildGround(parsed, rect, groundMats, { buildings: parsed.buildings, walls, inOldTown, covered: covers.map(({ b }) => b), terrain, layout, proj });
+  if (terrain.flat) {
+    for (const { c, b } of covers) ground.group.add(buildCoverMesh(c, b, groundMats.cover, inOldTown, parsed));
+  } else {
+    // 地形: 500 m のブロックごとの地面（地面の覆いは同じ三角形に描く）。遠くの地面はブロックの中を描かない
+    const quayCentre = proj.project(43.5994, 1.4364);
+    for (let j = 0; j < layout.rows; j++) {
+      for (let i = 0; i < layout.cols; i++) {
+        const b = tileBounds(layout, i, j);
+        const tile = buildTerrainTile(terrain, b, groundMats, { quayCentre, inWater });
+        ground.group.add(tile.group);
+        const cv = covers.find((cc) => cc.c.i === i && cc.c.j === j);
+        if (cv) ground.group.add(buildCoverMesh(cv.c, b, groundMats.cover, inOldTown, parsed, tile.geometry));
+        ground.far?.setTile(i, j, true);
+      }
+    }
+  }
+  const liftAt = ground.heightAt; // 一段高い歩道の高さ（地面からの相対）
+  const surf = surfaceFns(terrain, liftAt);
   group.add(ground.group);
   for (const [x, z] of ground.posts) collision.addCircle(x, z, POST_HIT); // 横断歩道の脇の車止め
-  group.add(buildEnclosures(walls, buildingMats, collision));
+  for (const q of terrain.quayWalls || []) collision.addSegment(q.ax, q.az, q.bx, q.bz); // 岸壁（垂直のレンガの壁）
+  group.add(buildEnclosures(walls, buildingMats, collision, terrain));
 
   progress('木を植えています…', 0.25);
   await pause();
@@ -113,9 +134,9 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   const clear = monumentClearance(monuments);
   treePts = treePts.filter((p) => !clear(p.x ?? p[0], p.z ?? p[1])); // 像・塔のまわりには植えない
   const skip = new Set(monuments.flatMap((m) => m.replaced));
-  const buildings = await buildBuildings(parsed, buildingMats, (p) => progress(`建物を建てています… ${Math.round(p * 100)}%`, 0.3 + p * 0.6), facade, { towers, groundAt: ground.heightAt, skip });
+  const buildings = await buildBuildings(parsed, buildingMats, (p) => progress(`建物を建てています… ${Math.round(p * 100)}%`, 0.3 + p * 0.6), facade, { towers, groundAt: liftAt, skip, terrain });
   group.add(buildings.group);
-  const mon = buildMonuments(monuments, buildingMats, { groundAt: ground.heightAt, onRoad: onCarRoad });
+  const mon = buildMonuments(monuments, buildingMats, { groundAt: (x, z) => terrain.h(x, z) + liftAt(x, z), onRoad: onCarRoad });
   group.add(mon.group);
   for (const c of mon.colliders) {
     if (c.length === 4) collision.addSegment(...c); // 像の台・塔の鉄柵（円 [x, z, r] か線分 [ax, az, bx, bz]）
@@ -127,6 +148,7 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   const trees = buildTrees(treePts, {
     isPlane: planeTreeTest(roadnet, inWater),
     canPlace: (x, z) => !roadnet.onRoad(x, z, 0.3) && !inWater(x, z) && !insideBuilding(x, z),
+    groundH: (x, z) => terrain.h(x, z),
   });
   group.add(trees);
   // 木の幹は道路の上でなければ当たり判定を付ける（道路に張り出した枝の下は通れる）
@@ -139,7 +161,7 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   const onMonument = monumentSolid(mon.keepOut); // 雄鶏の像の台・シャトー・ドーの柵の内側には置かない
   const furniture = buildFurniture({
     parsed, plan: planStreets(parsed, inOldTown), clip: { minX: rect.minX - pad, minZ: rect.minZ - pad, maxX: rect.maxX + pad, maxZ: rect.maxZ + pad },
-    curbs: ground.curbs, inOldTown: historicCoreTest(proj), heightAt: ground.heightAt, onRoad: (x, z, m) => roadnet.onRoad(x, z, m),
+    curbs: ground.curbs, inOldTown: historicCoreTest(proj), heightAt: liftAt, terrain, onRoad: (x, z, m) => roadnet.onRoad(x, z, m),
     solid: (x, z) => insideBuilding(x, z) || inWater(x, z) || onMonument(x, z), trunks: trees.userData.trunks,
   }, collision);
   group.add(furniture.group);
@@ -149,12 +171,14 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   progress('名所を探しています…', 0.95);
   await pause();
   const landmarks = resolveLandmarks(parsed, proj, rect, roadnet);
-  for (const lm of landmarks) lm.y = 0;
+  for (const lm of landmarks) lm.y = terrain.h(lm.x, lm.z);
+  collision.terrain = terrain;
 
   return {
     proj, rect, parsed, roadnet, ground, collision, trees, landmarks, group, surfaceAt, furniture,
-    // 一段高い歩道の上では自転車も歩道の高さに上がる
-    heightAt: ground.heightAt, groundAt: ground.heightAt,
+    // 一段高い歩道の上では自転車も歩道の高さに上がる。heightAt: 一番上の面（橋の上を含む。ワープ・名所の印）、
+    // groundAt(x, z, y): y から届く面（橋の下を走るとき）、liftAt: 歩道の段の高さ（地面からの相対）
+    heightAt: surf.heightAt, groundAt: surf.groundAt, rideY: surf.rideY, spawnY: (x, z, onBridge = false) => surf.spawnY(x, z, inWater, onBridge), liftAt, terrain,
     stats: {
       buildings: buildingStats,
       roads: parsed.roads.length,

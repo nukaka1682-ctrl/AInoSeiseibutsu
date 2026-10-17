@@ -1,6 +1,7 @@
 // 2D の当たり判定（建物の壁・木の幹・水面・エリア外）。
 // 自転車は半径 r の円として扱い、壁の線分から押し出す。
 import { Grid, closestOnSegment } from '../geo.js';
+import { waterPass } from '../world/terrain.js';
 
 export class CollisionWorld {
   constructor(rect) {
@@ -34,9 +35,11 @@ export class CollisionWorld {
     this.circleGrid.insertBounds(x - r, z - r, x + r, z + r, i);
   }
 
-  // 水の上は橋（道路）の上だけ通れる
-  blockedByWater(x, z) {
-    return this.inWater(x, z) && !this.onRoad(x, z);
+  // 水の上は橋（道路）の上だけ通れる。地形があるときは、橋の面の高さ近くにいるときだけ（橋の下の河岸から川へは出られない）
+  blockedByWater(x, z, y = null) {
+    if (!this.inWater(x, z)) return false;
+    if (y == null || !this.terrain || this.terrain.flat) return !this.onRoad(x, z);
+    return !waterPass(this.terrain, x, z, y, (px, pz) => this.onRoad(px, pz));
   }
 
   outOfBounds(x, z, margin = 15) {

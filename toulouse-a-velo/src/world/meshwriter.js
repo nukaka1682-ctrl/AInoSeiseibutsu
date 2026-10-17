@@ -1,14 +1,29 @@
 // 三角形を溜めて BufferGeometry にするヘルパー。法線を明示して渡し、
 // 巻き順は法線と合うように自動で入れ替える（表面が外側を向くように）。
+// 地形に載せる（world/terrain.js）:
+// - drape: 地形。書いた y は「地面からの高さ」になり、三角形は地面の格子の線と対角線で切り分けて地面の平面に載せる
+//   （長い道路の面も坂に沿う。地面と同じ平面なので地面が突き抜けない）。上向きの面の法線は地面の法線に。lift: さらに浮かせる高さ。
+//   tol: 頂点だけを載せた平面と地面の差がこれ以下の三角形は切らずにそのまま書く（平らな所で三角形を増やさない。
+//   0 なら必ず切る。地面のメッシュは 0、上に重ねる面は terrain.js の DRAPE_TOL で、浮かせる DRAPE_LIFT より小さい）
+// - yOffset: すべての頂点に足す高さ（建物の土台の高さなど、形を変えずに上下に動かす物）
+// - map(x, y, z) → y': 頂点の高さを置き換える（橋・岸）。maxEdge: その前に、辺がこれより長い三角形を辺の中点で分ける
+//   （split(a, b, c) が false を返す三角形は分けない）
 import * as THREE from 'three';
 import { Earcut } from 'three/src/extras/Earcut.js';
 
 export class MeshWriter {
-  constructor() {
+  constructor({ drape = null, lift = 0, map = null, maxEdge = 0, split = null, tol = 0.04 } = {}) {
     this.pos = [];
     this.nor = [];
     this.uv = [];
     this.col = [];
+    this.drape = drape && !drape.flat ? drape : null;
+    this.lift = lift;
+    this.map = map;
+    this.maxEdge = maxEdge;
+    this.split = split;
+    this.yOffset = 0;
+    this.tol = tol;
   }
 
   get empty() {
@@ -27,10 +42,97 @@ export class MeshWriter {
       [tb, tc] = [tc, tb];
       [cb, cc] = [cc, cb];
     }
+    if (this.drape || this.map) {
+      const A = [a[0], a[1], a[2], ta[0], ta[1], ca[0], ca[1], ca[2]];
+      const B = [b[0], b[1], b[2], tb[0], tb[1], cb[0], cb[1], cb[2]];
+      const C = [c[0], c[1], c[2], tc[0], tc[1], cc[0], cc[1], cc[2]];
+      if (this.map) this.bisect(A, B, C, n, 0);
+      else this.drapeTri(A, B, C, n, 0);
+      return;
+    }
+    if (this.yOffset) {
+      const o = this.yOffset;
+      a = [a[0], a[1] + o, a[2]];
+      b = [b[0], b[1] + o, b[2]];
+      c = [c[0], c[1] + o, c[2]];
+    }
     this.pos.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
     this.nor.push(n[0], n[1], n[2], n[0], n[1], n[2], n[0], n[1], n[2]);
     this.uv.push(ta[0], ta[1], tb[0], tb[1], tc[0], tc[1]);
     this.col.push(ca[0], ca[1], ca[2], cb[0], cb[1], cb[2], cc[0], cc[1], cc[2]);
+  }
+
+  // map のとき: 辺が maxEdge より長ければ、いちばん長い辺の中点で 2 つに分ける（同じ辺は隣の三角形でも同じ点で分かれる）
+  bisect(A, B, C, n, depth) {
+    const m = this.maxEdge;
+    if (m > 0 && depth < 14 && (!this.split || this.split(A, B, C))) {
+      const e = (p, q) => (p[0] - q[0]) ** 2 + (p[2] - q[2]) ** 2;
+      const ab = e(A, B), bc = e(B, C), ca = e(C, A), L = Math.max(ab, bc, ca);
+      if (L > m * m) {
+        const mid = (p, q) => p.map((v, k) => (v + q[k]) / 2);
+        if (L === ab) {
+          const M = mid(A, B);
+          this.bisect(A, M, C, n, depth + 1);
+          this.bisect(M, B, C, n, depth + 1);
+        } else if (L === bc) {
+          const M = mid(B, C);
+          this.bisect(A, B, M, n, depth + 1);
+          this.bisect(A, M, C, n, depth + 1);
+        } else {
+          const M = mid(C, A);
+          this.bisect(A, B, M, n, depth + 1);
+          this.bisect(M, B, C, n, depth + 1);
+        }
+        return;
+      }
+    }
+    this.emit(A, B, C, n);
+  }
+
+  // 地形に載せる: 地面とほぼ同じ平面ならそのまま、大きければ辺の中点で分けて調べ直し、小さければ格子で切る
+  drapeTri(A, B, C, n, depth) {
+    const d = this.drape;
+    if (this.tol > 0 && d.flatOver(A, B, C, this.tol)) return this.emit(A, B, C, n);
+    const e = (p, q) => (p[0] - q[0]) ** 2 + (p[2] - q[2]) ** 2;
+    const ab = e(A, B), bc = e(B, C), ca = e(C, A), L = Math.max(ab, bc, ca);
+    if (this.tol > 0 && L > 900 && depth < 12) {
+      const mid = (p, q) => p.map((v, k) => (v + q[k]) / 2);
+      if (L === ab) {
+        const M = mid(A, B);
+        this.drapeTri(A, M, C, n, depth + 1);
+        this.drapeTri(M, B, C, n, depth + 1);
+      } else if (L === bc) {
+        const M = mid(B, C);
+        this.drapeTri(A, B, M, n, depth + 1);
+        this.drapeTri(A, M, C, n, depth + 1);
+      } else {
+        const M = mid(C, A);
+        this.drapeTri(A, B, M, n, depth + 1);
+        this.drapeTri(M, B, C, n, depth + 1);
+      }
+      return;
+    }
+    for (const p of d.split([A, B, C])) for (let k = 1; k + 1 < p.length; k++) this.emit(p[0], p[k], p[k + 1], n);
+  }
+
+  // 地形に載せた（または map した）三角形を書く。頂点は [x, y, z, u, v, r, g, b]
+  emit(A, B, C, n) {
+    const ux = B[0] - A[0], uy = B[1] - A[1], uz = B[2] - A[2];
+    const vx = C[0] - A[0], vy = C[1] - A[1], vz = C[2] - A[2];
+    const cx = uy * vz - uz * vy, cy = uz * vx - ux * vz, cz = ux * vy - uy * vx;
+    if (cx * cx + cy * cy + cz * cz < 1e-14) return; // 切り分けでできたつぶれた三角形
+    const d = this.drape, o = this.yOffset;
+    const up = d && n[1] > 0.95 ? 1 : d && n[1] < -0.95 ? -1 : 0;
+    for (const P of [A, B, C]) {
+      const y = this.map ? this.map(P[0], P[1], P[2]) + o : P[1] + d.h(P[0], P[2]) + this.lift + o;
+      this.pos.push(P[0], y, P[2]);
+      if (up) {
+        const g = d.normal(P[0], P[2]);
+        this.nor.push(g[0] * up, g[1] * up, g[2] * up);
+      } else this.nor.push(n[0], n[1], n[2]);
+      this.uv.push(P[3], P[4]);
+      this.col.push(P[5], P[6], P[7]);
+    }
   }
 
   // 四角形 a-b-c-d（周回順）。color は 1 色か、頂点ごとの [[r,g,b] × 4]

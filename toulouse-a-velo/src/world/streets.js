@@ -7,6 +7,7 @@
 // - 旧市街の交差点と、幹線道路どうしの交差点（信号のある交差点の代わり）には、横断歩道（幅 50 cm の白い帯）と停止線。
 //   横断歩道のところは縁石を下げる。停止線は信号のある交差点の全部の腕と、優先道路に出る格下の腕だけ
 // - 歩道は広場・緑地・駐車場（地面に平らに描く面）と線路の手前で止める（一段高い歩道で隠さない）
+// - 信号のある交差点（の代わり）の停止線の所には信号機。車道の線・車線・バスレーン・自転車レーン・路面の絵は markings.js
 //
 // 通りの種類・交差点・横断歩道の位置はエリアで 1 回だけ決め（planStreets）、形はタイル（範囲 clip）ごとに作る。
 // 断面は道全体で同じ位置に置き（ANCHOR m ごとに必ず残す）、タイルの外へ少し延ばして計算してから範囲で切るので、
@@ -14,6 +15,7 @@
 import { CAR_ROADS } from './parse.js';
 import { bridgeGroups } from './bridges.js';
 import { Grid, clipPolylineToRect, clipRingToRect, closestOnSegment, hash01, pointInPolygon, signedArea } from '../geo.js';
+import { laneLayout, mergeIntervals, writePicture, writeRoadMarkings } from './markings.js';
 
 export const CURB_H = 0.13; // 縁石（一段高い歩道）の高さ
 export const CURB_W = 0.2; // 縁石の幅
@@ -192,9 +194,47 @@ export function planStreets(parsed, inOld = notOld) {
         const hp = strHash(`${Math.round(c.x * 10)},${Math.round(c.z * 10)}`);
         for (let k = 0; k < 4; k++) if (hash01(hp, 40 + k) < 0.6) posts |= 1 << k;
       }
-      crossings.push({ road: a.road, ...c, half: a.road.width / 2, len, stop, posts });
+      crossings.push({ road: a.road, ...c, half: a.road.width / 2, len, stop, posts, lights, s: ia.cum[a.i] + a.dir * d, sNode: ia.cum[a.i], dir: a.dir });
     }
   }
+  // 車道の標示（markings.js）の並び（道ごとに 1 回、使う時に）と、線を止める区間（道の始点からの距離）:
+  // 交差点の中（交差する車道の帯＋2 m）と、横断歩道・停止線の手前（停止線の 2 m 先まで。自転車の待機ボックスの道はさらに 4.5 m）
+  const layout = (road) => {
+    const inf = info.get(road);
+    if (!inf.lay) {
+      const mid = road.pts[road.pts.length >> 1];
+      inf.lay = laneLayout(road, { x: mid[0], z: mid[1], old: inOld(mid[0], mid[1]) });
+    }
+    return inf.lay;
+  };
+  const cutList = new Map();
+  const addCut = (road, a, b) => {
+    let l = cutList.get(road);
+    if (!l) cutList.set(road, (l = []));
+    l.push([a, b]);
+  };
+  for (const n of junctions) {
+    for (const a of n.arms) {
+      const ia = info.get(a.road);
+      let reach = 0;
+      for (const b of n.arms) {
+        if (b.road === a.road || ia.cont.has(b.road) || !(b.road.bridge || (CAR_ROADS.has(b.road.type) && b.road.type !== 'service'))) continue;
+        reach = Math.max(reach, info.get(b.road).band);
+      }
+      if (!reach) continue;
+      const s = ia.cum[a.i], d = reach + 2;
+      addCut(a.road, a.dir > 0 ? s - 0.5 : s - d, a.dir > 0 ? s + d : s + 0.5);
+      // 格上の道から入る所（ゾーン 30 の入口）: 交差点から出ていく車線に「30」（一方通行は出ていく向きの時だけ）
+      if (!(a.road.oneway && a.dir < 0) && n.arms.some((b) => b.road !== a.road && !ia.cont.has(b.road) && CAR_ROADS.has(b.road.type) && rankOf(b.road) > rankOf(a.road))) {
+        (ia.entries || (ia.entries = [])).push({ s: s + a.dir * d, dir: a.dir });
+      }
+    }
+  }
+  for (const c of crossings) {
+    const ext = c.len / 2 + 1.15 + 2 + (c.stop && layout(c.road).bike ? 4.5 : 0);
+    addCut(c.road, c.dir > 0 ? c.sNode - 0.5 : c.s - ext, c.dir > 0 ? c.s + ext : c.sNode + 0.5);
+  }
+  for (const [road, inf] of info) inf.cuts = mergeIntervals(cutList.get(road) || []);
   // 縁石を下げる点（横断歩道の両端の縁石の上）
   const ramps = [];
   const rampGrid = new Grid(16);
@@ -229,7 +269,7 @@ export function planStreets(parsed, inOld = notOld) {
     roadGrid.query(clip.minX - pad, clip.minZ - pad, clip.maxX + pad, clip.maxZ + pad, (k) => set.add(roadList[k]));
     return roadList.filter((r) => set.has(r)); // 元の順番のまま（作る順が変わらないように）
   };
-  plan = { inOld, info, junctions, crossings, ramps, rampGrid, curbHeight, roadsNear };
+  plan = { inOld, info, junctions, crossings, ramps, rampGrid, curbHeight, roadsNear, layout };
   plans.set(parsed, plan);
   return plan;
 }
@@ -643,12 +683,12 @@ export function* streetSteps(parsed, plan, clip, { buildings = [], walls = [], w
   const inClip = (x, z) => x >= clip.minX && x < clip.maxX && z >= clip.minZ && z < clip.maxZ;
   const H = plan.curbHeight;
   // postPts: 車止めの位置（当たり判定用）。curbs: 書いた縁石の区間（街の小物を縁石に沿って置くため。furniture.js）
-  const stats = { stations: 0, crossings: 0, posts: 0, postPts: [], curbs: [] };
+  const stats = { stations: 0, crossings: 0, posts: 0, postPts: [], curbs: [], marks: 0, signals: 0 };
   // 石の色は日陰の青い空の光で冷たく見えるので、頂点カラーで少し暖かく（写真: 小舗石の日陰 #5d5656、Rue du Taur の
   // 石の板はばら色のベージュ）。slabWide: 広い歩行者の通りの石の板は少し暗く灰色寄り（Rue de la Pomme・Alsace-Lorraine）。
   // 側溝の石は日なたで赤く見えないよう、ほぼ無彩色（写真 sidewalk-curb: 灰色の花崗岩）
   const warm = c3n(0xffeee4);
-  const colors = { curb: [1, 1, 1], grey: c3n(0xd2cfca), red: c3n(0xe2b6a0), setts: warm, slab: c3n(0xffe6d2), slabWide: c3n(0xf0e2d8), gutter: c3n(0xe4e4e6), white: c3n(0xf2f2ee), post: c3n(0x2a2d2c) };
+  const colors = { curb: [1, 1, 1], grey: c3n(0xd2cfca), red: c3n(0xe2b6a0), setts: warm, slab: c3n(0xffe6d2), slabWide: c3n(0xf0e2d8), gutter: c3n(0xe4e4e6), white: c3n(0xf2f2ee), post: c3n(0x2a2d2c), green: c3n(0x4f9a52), signal: c3n(0x34383a) };
 
   // 道 road の折れ線 part（clip で切った一部）の、元の道の始点からの距離
   const startS = (road, part) => {
@@ -978,7 +1018,36 @@ export function* streetSteps(parsed, plan, clip, { buildings = [], walls = [], w
       const mid = (o0 + o1) / 2;
       // 交差点へ向かう向き（-u）の右は (uz, -ux) = -n
       rect(mark, sx - nx * mid, sz - nz * mid, nx, nz, (o1 - o0) / 2, 0.15, colors.white);
+      if (plan.layout(c.road).bike) {
+        // 自転車の待機ボックス（sas vélo、ユーザーの写真 12）: 停止線の後ろに 4 m の緑の帯と自転車マーク、その後ろに車の停止線
+        const d0 = c.len / 2 + 1.3;
+        const bx = c.x + c.ux * (d0 + 2) - nx * mid, bz = c.z + c.uz * (d0 + 2) - nz * mid;
+        rect(mark, bx, bz, c.ux, c.uz, 2, (o1 - o0) / 2, colors.green);
+        rect(mark, c.x + c.ux * (d0 + 4.15) - nx * mid, c.z + c.uz * (d0 + 4.15) - nz * mid, nx, nz, (o1 - o0) / 2, 0.15, colors.white);
+        writePicture(out('marks'), bx, bz, -c.ux, -c.uz, 'bike');
+      }
     }
+  }
+  // ---- 車道の標示（中央線・車線・自転車レーン・バスレーン・自転車道のマーク・「30」「20」）。markings.js
+  for (const road of plan.roadsNear(clip, 10)) {
+    const inf = plan.info.get(road);
+    if (road.bridge || (inf.kind !== 'curb' && inf.kind !== 'plain')) continue;
+    const lay = plan.layout(road);
+    if (!lay.lines.length && !lay.pics.length && !lay.speed) continue;
+    stats.marks += writeRoadMarkings(road, inf.cum, lay, inf.cuts, clip, mark, out('marks'), { entries: inf.entries });
+  }
+  // ---- 信号機（信号のある交差点の停止線の所、交差点へ向かう車の右の歩道に、高さ 3 m の灰色の柱と灯器。写真 8・26）
+  for (const c of plan.crossings) {
+    if (!c.lights || !c.stop) continue;
+    const nx = -c.uz, nz = c.ux;
+    const along = c.len / 2 + 1.2, off = c.half + CURB_W + 0.45;
+    const px = c.x + c.ux * along - nx * off, pz = c.z + c.uz * along - nz * off;
+    if (!inClip(px, pz)) continue;
+    const h = raised.heightAt(px, pz);
+    if (h < 0.02) continue;
+    writeSignal(out('post'), px, pz, h, c.ux, c.uz, colors.signal);
+    stats.signals++;
+    stats.postPts.push([px, pz]);
   }
   // 横断歩道の脇の歩道の縁に、黒い細い車止め（potelets、9 cm 角・高さ 1 m）を 2 本ずつ（写真 sidewalk-curb-2・
   // ユーザーの写真 chateau-deau）。中心部の横断歩道の、計画で選んだ角（c.posts のビット）だけ。
@@ -1021,6 +1090,30 @@ export function writePost(w, x, z, y0, color, ux = 1, uz = 0) {
     w.quad([p[0], y0, p[1]], [q[0], y0, q[1]], [q[0], top, q[1]], [p[0], top, p[1]], [mx / L, 0, mz / L], [0, 0], [0, 0], [0, 0], [0, 0], color);
   }
   w.quad([c[0][0], top, c[0][1]], [c[1][0], top, c[1][1]], [c[2][0], top, c[2][1]], [c[3][0], top, c[3][1]], UP, [0, 0], [0, 0], [0, 0], [0, 0], color);
+}
+
+// 縦の角柱（中心 (x, z)、向き (ux, uz) に半長 hu・横に半幅 hv、高さ y0 → y1）。ふたは上だけ
+export function writePrism(w, x, z, ux, uz, hu, hv, y0, y1, color) {
+  const c = [[1, 1], [-1, 1], [-1, -1], [1, -1]].map(([a, b]) => [x + ux * a * hu - uz * b * hv, z + uz * a * hu + ux * b * hv]);
+  for (let i = 0; i < 4; i++) {
+    const p = c[i], q = c[(i + 1) % 4];
+    const mx = (p[0] + q[0]) / 2 - x, mz = (p[1] + q[1]) / 2 - z, L = Math.hypot(mx, mz) || 1;
+    w.quad([p[0], y0, p[1]], [q[0], y0, q[1]], [q[0], y1, q[1]], [p[0], y1, p[1]], [mx / L, 0, mz / L], [0, 0], [0, 0], [0, 0], [0, 0], color);
+  }
+  w.quad([c[0][0], y1, c[0][1]], [c[1][0], y1, c[1][1]], [c[2][0], y1, c[2][1]], [c[3][0], y1, c[3][1]], UP, [0, 0], [0, 0], [0, 0], [0, 0], color);
+}
+
+// 信号機: 灰色の柱（高さ 3 m）と、上に 3 灯の灯器（赤・黄・緑のレンズは来る車の向き +u を向く）。y0: 足元の高さ
+const LENS = [[0.62, 0.1, 0.08], [0.6, 0.38, 0.05], [0.06, 0.42, 0.18]];
+export function writeSignal(w, x, z, y0, ux, uz, color) {
+  writePrism(w, x, z, ux, uz, 0.06, 0.06, y0, y0 + 3.0, color);
+  const bx = x + ux * 0.12, bz = z + uz * 0.12;
+  writePrism(w, bx, bz, ux, uz, 0.13, 0.17, y0 + 2.0, y0 + 2.95, color);
+  const nx = -uz, nz = ux, fx = bx + ux * 0.135, fz = bz + uz * 0.135, r = 0.09;
+  LENS.forEach((col, k) => {
+    const yc = y0 + 2.78 - k * 0.3;
+    w.quad([fx - nx * r, yc - r, fz - nz * r], [fx + nx * r, yc - r, fz + nz * r], [fx + nx * r, yc + r, fz + nz * r], [fx - nx * r, yc + r, fz - nz * r], [ux, 0, uz], [0, 0], [0, 0], [0, 0], [0, 0], col);
+  });
 }
 
 // 中心 (x, z)、長い向き (ux, uz) に半長 a・半幅 b の長方形（路面標示）

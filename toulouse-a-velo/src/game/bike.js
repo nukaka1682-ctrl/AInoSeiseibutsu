@@ -1,6 +1,7 @@
 // 自転車とライダーの 3D モデル、そして物理（ペダル・ブレーキ・ハンドル・空気抵抗・衝突）。
 // 向き heading はコンパス方位（0 = 北 = -z、時計回りが正）。
 import * as THREE from 'three';
+import { deckEdgeBlocked } from '../world/terrain.js';
 
 const WHEEL_R = 0.34;
 const WHEELBASE = 1.05;
@@ -49,7 +50,7 @@ function makeWheel(mats) {
 export class Bike {
   constructor() {
     this.x = 0;
-    this.y = 0; // 地面の高さ（実写 3D のときだけ変わる）
+    this.y = 0; // 走っている面の高さ（地形・歩道の段・橋の上）
     this.grade = 0; // 坂の勾配（上りが正）
     this.z = 0;
     this.heading = 0;
@@ -247,7 +248,8 @@ export class Bike {
     }
   }
 
-  place(x, z, heading, y = this.y) {
+  // y を省くと、次の update で world.spawnY（陸の上は地面、水の上は橋の面）から決める（ワープ先の古い高さを使わない）
+  place(x, z, heading, y = NaN) {
     this.x = x;
     this.z = z;
     this.y = y;
@@ -265,6 +267,7 @@ export class Bike {
 
   // 固定ステップ（1/120 秒）で物理を進める
   update(dt, input, world) {
+    if (Number.isNaN(this.y)) this.y = world.spawnY ? world.spawnY(this.x, this.z) : world.heightAt ? world.heightAt(this.x, this.z) : 0;
     this.acc += Math.min(dt, 0.1);
     const step = 1 / 120;
     const px = this.x, pz = this.z;
@@ -272,14 +275,21 @@ export class Bike {
       this.step(step, input, world);
       this.acc -= step;
     }
-    // 実写 3D の地面に沿って高さを変え、坂の勾配を求める
+    // 地面（地形・歩道の段・橋の上）に沿って高さを変え、坂の勾配を求める。
+    // 地形があるときの勾配は、歩道の段を除いた面の、進む向きの前後 1.5 m の差（縁石で勾配が跳ねないように）
     if (world.groundAt) {
       const g = world.groundAt(this.x, this.z, this.y);
       if (g !== null) {
         const moved = Math.hypot(this.x - px, this.z - pz);
         const prev = this.y;
-        this.y += (g - this.y) * Math.min(1, dt * 14);
-        if (moved > 0.02) {
+        // 縁石の段（0.15 m まで）はなめらかに上り下りし、それより離れないようにする（橋の端・坂で面に沈んだり浮いたりしない）
+        this.y += (g - this.y) * Math.min(1, dt * 20);
+        this.y = Math.min(g + 0.15, Math.max(g - 0.15, this.y));
+        if (world.rideY) {
+          const [fx, fz] = this.forward, dir = Math.sign(this.speed) || 1;
+          const grade = ((world.rideY(this.x + fx * 1.5, this.z + fz * 1.5, this.y) - world.rideY(this.x - fx * 1.5, this.z - fz * 1.5, this.y)) / 3) * dir;
+          this.grade += (Math.max(-0.3, Math.min(0.3, grade)) - this.grade) * Math.min(1, dt * 4);
+        } else if (moved > 0.02) {
           const dir = Math.sign(this.speed) || 1;
           const grade = Math.max(-0.3, Math.min(0.3, ((this.y - prev) / moved) * dir));
           this.grade += (grade - this.grade) * Math.min(1, dt * 4);
@@ -296,14 +306,15 @@ export class Bike {
 
   step(dt, input, world) {
     const v = this.speed;
-    // ペダルの力は速度が上がるほど弱くなる（通常 ≈ 30 km/h、立ちこぎ ≈ 40 km/h で頭打ち）
-    const [fMax, vMax] = input.sprint ? [300, 12.5] : [230, 9.5];
+    // ペダルの力は速度が上がるほど弱くなる（通常 ≈ 30 km/h、立ちこぎ ≈ 40 km/h で頭打ち）。さらに脚の力（仕事率 P）で頭打ち:
+    // 平らな道では効かないが、上り坂では遅くなる（5 % の坂で通常 ≈ 20 km/h、立ちこぎ ≈ 26 km/h）
+    const [fMax, vMax, P] = input.sprint ? [300, 12.5, 520] : [230, 9.5, 320];
     let F = 0;
-    if (input.throttle > 0 && v > -0.5) F += input.throttle * fMax * Math.max(0, 1 - v / vMax);
+    if (input.throttle > 0 && v > -0.5) F += input.throttle * Math.min(fMax * Math.max(0, 1 - v / vMax), P / Math.max(v, 1));
     else if (input.throttle > 0) F += input.throttle * fMax;
     const crr = this.surface === 'grass' ? 0.035 : this.surface === 'gravel' ? 0.018 : this.surface === 'paving' ? 0.009 : 0.006;
     F -= 0.5 * 1.2 * 0.55 * v * Math.abs(v);
-    if (Math.abs(v) > 0.05 || input.throttle > 0) F -= MASS * G * this.grade; // 坂（grade は前向きの勾配）
+    if (Math.abs(v) > 0.05 || input.throttle > 0) F -= MASS * G * Math.max(-0.15, Math.min(0.15, this.grade)); // 坂（grade は前向きの勾配）
     F -= crr * MASS * G * Math.sign(v);
     let a = F / MASS;
     if (input.brake > 0) {
@@ -351,7 +362,25 @@ export class Bike {
       }
     }
     this.contact = res.hit;
-    if (world.collision.blockedByWater(nx, nz)) {
+    // 崖（岸壁の縁・急な土手）: 進む先 1 m の面が 0.5 m 以上違えば壁と同じに止まる（道路の上と橋の上は止めない）
+    if (world.rideY && !res.hit) {
+      const mv = Math.hypot(nx - this.x, nz - this.z);
+      if (mv > 1e-5) {
+        const ux = (nx - this.x) / mv, uz = (nz - this.z) / mv;
+        const S = world.rideY(this.x, this.z, this.y), Sa = world.rideY(this.x + ux, this.z + uz, this.y);
+        // 橋の上から橋の外へ、または高さの違う隣の橋の面へ 0.5 m 以上落ちる（上がる）所は、下に道路があっても止める（欄干）
+        const T = world.terrain;
+        const offDeck = T && !T.flat && deckEdgeBlocked(T.deck(this.x, this.z, this.y), T.deck(this.x + ux, this.z + uz, this.y), S, Sa);
+        if (offDeck || (Math.abs(Sa - S) > 0.5 && !(world.roadnet?.onRoad(nx, nz, 0.5)))) {
+          if (!this.contact && sp > 3.5) this.events.push({ type: 'bump', strength: Math.min(1, sp / 8) });
+          nx = this.x;
+          nz = this.z;
+          this.speed *= 0.2;
+          this.contact = true;
+        }
+      }
+    }
+    if (world.collision.blockedByWater(nx, nz, this.y)) {
       if (sp > 1) this.events.push({ type: 'water' });
       nx = this.x;
       nz = this.z;

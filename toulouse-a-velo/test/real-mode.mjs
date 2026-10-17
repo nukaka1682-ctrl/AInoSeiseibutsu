@@ -84,23 +84,24 @@ for (const v of views) {
       const a = lm.approach;
       const h = Math.atan2(lm.x - a.x, -(lm.z - a.z) || 1e-9) + (v.turn || 0);
       const x = a.x - Math.sin(h) * (v.back || 0), z = a.z + Math.cos(h) * (v.back || 0);
-      s.bike.place(x, z, h, s.world.heightAt(x, z));
+      s.bike.place(x, z, h, (s.world.spawnY || s.world.heightAt)(x, z));
     } else if (v.street) {
       // 通りの名前で: その通りの途中に、通りに沿って置く
       const road = s.world.parsed.roads.filter((r) => r.name === v.street).sort((a, b) => b.pts.length - a.pts.length)[0];
       const i = Math.min(road.pts.length - 2, Math.floor(road.pts.length * (v.at ?? 0.5)));
       const [x, z] = road.pts[i], [x2, z2] = road.pts[i + 1];
-      s.bike.place(x, z, Math.atan2(x2 - x, -(z2 - z)) + (v.turn || 0), s.world.heightAt(x, z));
+      s.bike.place(x, z, Math.atan2(x2 - x, -(z2 - z)) + (v.turn || 0), (s.world.spawnY || s.world.heightAt)(x, z));
     } else if (v.x != null) {
       // snap: 近くの走れる道に移す
       const p = v.snap ? s.world.roadnet.nearestRideablePoint(v.x, v.z) : v;
-      s.bike.place(p.x, p.z, v.heading || 0, s.world.heightAt(p.x, p.z));
+      s.bike.place(p.x, p.z, v.heading || 0, (s.world.spawnY || s.world.heightAt)(p.x, p.z));
     }
     if (v.look) {
       // 指定した点の方を向く
       const b = s.bike;
       b.place(b.x, b.z, Math.atan2(v.look[0] - b.x, -(v.look[1] - b.z)), b.y);
     }
+    for (const id of ['hud', 'labels']) document.getElementById(id)?.style.removeProperty('visibility');
     s.rig.mode = v.camera || 'chase';
     s.rig.initialized = false;
     window.__tavSimulate(v.sim || 0.3, v.ctl || {});
@@ -122,6 +123,8 @@ for (const v of views) {
     await page.evaluate((cam) => {
       const s = window.__tav;
       s.phase = 'shot';
+      // ゲームの更新を止めると HUD（地図・名所の札）が前の場所のまま残るので隠す
+      for (const id of ['hud', 'labels']) document.getElementById(id)?.style.setProperty('visibility', 'hidden');
       const c = window.__tavDebug.camera;
       if (cam.rel) {
         // rel: 自転車から見た [右, 上, 前]（m）で指定する（通りの名前で置いたとき、軒を見上げるなど）
@@ -146,8 +149,15 @@ for (const v of views) {
     const lv = [0, 0, 0, 0];
     for (const c of o?.chunks || []) lv[c.level]++;
     const st = window.__tav.world.stream;
-    const tiles = st ? `、タイル ${st.readyCount} 枚（建物 ${st.totals.buildings}・三角形 ${st.totals.triangles}）` : '';
-    const ri = window.__tavDebug.renderer.info.render; // 直前の 1 フレーム（影の地図の描画を含む）
+    const tiles = st ? `、タイル ${st.readyCount} 枚（建物 ${st.totals.buildings}・三角形 ${st.totals.triangles}・組み立て平均 ${Math.round(st.totals.buildMs / Math.max(1, st.totals.built))} ms）` : '';
+    // この視点で 1 回描き直して数える（ゲームの描画は止まっていることがあり、前の視点の数が残るため）
+    const { renderer, scene, camera } = window.__tavDebug;
+    const auto = renderer.info.autoReset;
+    renderer.info.autoReset = false;
+    renderer.info.reset();
+    renderer.render(scene, camera);
+    const ri = { ...renderer.info.render }; // 影の地図の描画を含む
+    renderer.info.autoReset = auto;
     return `y=${window.__tav.bike.y.toFixed(1)}、航空写真の解像度別の区画数 ${lv.join('/')}・失敗 ${o?.failures}${tiles}、描画コール ${ri.calls}・三角形 ${ri.triangles}`;
   });
   await page.screenshot({ path: join(out, `${v.name}.jpg`), type: 'jpeg', quality: 85, timeout: 240000 });
