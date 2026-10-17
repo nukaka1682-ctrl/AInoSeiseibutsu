@@ -150,7 +150,14 @@ for (const v of views) {
     for (const c of o?.chunks || []) lv[c.level]++;
     const st = window.__tav.world.stream;
     const tiles = st ? `、タイル ${st.readyCount} 枚（建物 ${st.totals.buildings}・三角形 ${st.totals.triangles}・組み立て平均 ${Math.round(st.totals.buildMs / Math.max(1, st.totals.built))} ms）` : '';
-    const ri = window.__tavDebug.renderer.info.render; // 直前の 1 フレーム（影の地図の描画を含む）
+    // この視点で 1 回描き直して数える（ゲームの描画は止まっていることがあり、前の視点の数が残るため）
+    const { renderer, scene, camera } = window.__tavDebug;
+    const auto = renderer.info.autoReset;
+    renderer.info.autoReset = false;
+    renderer.info.reset();
+    renderer.render(scene, camera);
+    const ri = { ...renderer.info.render }; // 影の地図の描画を含む
+    renderer.info.autoReset = auto;
     return `y=${window.__tav.bike.y.toFixed(1)}、航空写真の解像度別の区画数 ${lv.join('/')}・失敗 ${o?.failures}${tiles}、描画コール ${ri.calls}・三角形 ${ri.triangles}`;
   });
   await page.screenshot({ path: join(out, `${v.name}.jpg`), type: 'jpeg', quality: 85, timeout: 240000 });

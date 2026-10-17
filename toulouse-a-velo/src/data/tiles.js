@@ -8,6 +8,7 @@
 import { fetchWfsLayer, normalizeCoords } from './bdtopo.js';
 import { IGN_LAYERS, fetchIgnArea, ignToOsm } from './ign.js';
 import { fetchSiteFeatures, grow } from './walls.js';
+import { fixReverseOneway } from './oneway.js';
 import { cacheGet, cachePut } from './cache.js';
 import { DATA_VERSION } from '../config.js';
 
@@ -68,10 +69,10 @@ export async function loadBaseData({ bbox, presetId, onStatus, forceNetwork = fa
     const baked = await loadBakedJson(`${presetId}.json`);
     const b = baked?.bbox;
     if (baked?.version === DATA_VERSION && b && b.s === bbox.s && b.w === bbox.w && b.n === bbox.n && b.e === bbox.e) {
-      return { ...baked, source: '同梱データ' };
+      return { ...(await fixReverseOneway(baked, presetId)), source: '同梱データ' };
     }
     const cached = await cacheGet(key);
-    if (cached) return { ...cached, source: 'キャッシュ' };
+    if (cached) return { ...(await fixReverseOneway(cached, presetId)), source: 'キャッシュ' };
   }
   const data = await fetchBaseData(bbox, {
     onStatus: ({ count }) => onStatus?.(`IGN BD TOPO から道路・川・公園を取得中… ${count.toLocaleString()} 件`),

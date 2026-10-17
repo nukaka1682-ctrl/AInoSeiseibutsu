@@ -460,6 +460,26 @@ export function makeSlabTexture() {
   return toTexture(c);
 }
 
+// ポン・ヌフの歩道の淡い花崗岩の板（写真 10・11）: 1.2 × 0.6 m の板（u = 橋の向き、1 枚 2.4 m 四方）、細い目地
+export function makeGraniteSlabTexture() {
+  const S = 512, ppm = S / 2.4;
+  const [c, ctx] = canvas(S, S);
+  const rnd = mulberry32(29);
+  ctx.fillStyle = '#a8a39a';
+  ctx.fillRect(0, 0, S, S);
+  const stones = ['#d8d2c6', '#d3cdc1', '#dcd6cb', '#cfc9bd', '#d6d0c3'];
+  const sw = 1.2 * ppm, sh = 0.6 * ppm;
+  for (let r = 0; r < S / sh; r++) {
+    for (let k = -1; k < S / sw + 1; k++) {
+      const x = k * sw + (r % 2) * sw / 2, y = r * sh;
+      ctx.fillStyle = shadeSrgb(stones[Math.floor(rnd() * stones.length)], 0.97 + rnd() * 0.05);
+      ctx.fillRect(x + 1.5, y + 1.5, sw - 3, sh - 3);
+      stoneGrain(ctx, rnd, x + 1.5, y + 1.5, sw - 3, sh - 3, 220, 0.12, false);
+    }
+  }
+  return toTexture(c);
+}
+
 // 縁石の花崗岩: 明るい灰色（写真 #8d817d〜#9c9a94）の長さ 0.8〜1.2 m の石を継ぎ目でつないだもの。
 // u = 通りの向き（4 m で 1 周）、v = 縁石の天端と立ち上がり（0.5 m）
 export function makeCurbTexture() {
@@ -668,6 +688,84 @@ export function makeGenoiseTexture() {
   return toTexture(c);
 }
 
+// 路面の標示のアトラス（白、透明の地）: 横に 8 つの升（各 128×256 px、下 = 手前、上 = 進む向き）。
+// 0 自転車（人の乗った自転車を横から）、1 直進の矢印、2「BUS」、3「30」、4「20」、5 白（線）。markings.js の CELL と同じ順
+export function makeMarkingTexture() {
+  const CW = 128, H = 256;
+  const [c, ctx] = canvas(CW * 8, H);
+  ctx.fillStyle = '#ffffff';
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  // 0: 自転車（前輪が上。車輪 2 つ・三角の車体・ハンドル・サドル・乗る人）
+  {
+    const x0 = 0, cx = x0 + CW / 2;
+    ctx.lineWidth = 9;
+    for (const y of [52, 204]) {
+      ctx.beginPath();
+      ctx.ellipse(cx, y, 34, 40, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.lineWidth = 8;
+    ctx.beginPath();
+    ctx.moveTo(cx, 204); // 後輪の軸
+    ctx.lineTo(cx - 6, 132); // ペダル
+    ctx.lineTo(cx + 4, 92); // ハンドルの下
+    ctx.lineTo(cx, 52); // 前輪の軸
+    ctx.moveTo(cx - 6, 132);
+    ctx.lineTo(cx + 10, 168); // サドルの下
+    ctx.lineTo(cx, 204);
+    ctx.moveTo(cx + 10, 168);
+    ctx.lineTo(cx + 4, 92);
+    ctx.stroke();
+    // 乗る人（頭・胴・腕）
+    ctx.beginPath();
+    ctx.arc(cx + 30, 104, 13, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.lineWidth = 11;
+    ctx.beginPath();
+    ctx.moveTo(cx + 14, 168);
+    ctx.lineTo(cx + 26, 122);
+    ctx.lineTo(cx + 8, 92);
+    ctx.moveTo(cx + 14, 168);
+    ctx.lineTo(cx - 4, 136);
+    ctx.stroke();
+  }
+  // 1: 直進の矢印
+  {
+    const cx = CW + CW / 2;
+    ctx.beginPath();
+    ctx.moveTo(cx, 6);
+    ctx.lineTo(cx + 50, 92);
+    ctx.lineTo(cx + 16, 92);
+    ctx.lineTo(cx + 16, 250);
+    ctx.lineTo(cx - 16, 250);
+    ctx.lineTo(cx - 16, 92);
+    ctx.lineTo(cx - 50, 92);
+    ctx.closePath();
+    ctx.fill();
+  }
+  // 2〜4: 文字（道の向きに引き伸ばした太い字）
+  const text = (k, str, size, sy) => {
+    ctx.save();
+    ctx.translate(k * CW + CW / 2, H / 2);
+    ctx.scale(1, sy);
+    ctx.font = `bold ${size}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(str, 0, 2);
+    ctx.restore();
+  };
+  text(2, 'BUS', 44, 4);
+  text(3, '30', 66, 2.8);
+  text(4, '20', 66, 2.8);
+  // 5: 白（線）
+  ctx.fillRect(5 * CW, 0, CW, H);
+  const t = toTexture(c, { repeat: false, anisotropy: 4 });
+  t.generateMipmaps = true;
+  return t;
+}
+
 export function makeTextures() {
   const facades = makeFacadeAtlases();
   return {
@@ -695,5 +793,7 @@ export function makeTextures() {
     gravel: makeNoiseTexture({ base: '#c9b999', spots: ['#b5a585', '#ddd0b2', '#a39373'], seed: 16, count: 9000, spotSize: 2, alpha: 0.6 }),
     waterNormal: makeWaterNormalTexture(),
     contact: makeContactTexture(),
+    marks: makeMarkingTexture(),
+    granite: makeGraniteSlabTexture(),
   };
 }

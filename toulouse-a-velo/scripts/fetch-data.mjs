@@ -8,6 +8,7 @@
 //   npm run fetch-data -- centre --ign    # IGN BD TOPO だけで作る
 //   npm run fetch-data -- toulouse        # トゥールーズ全体（半径 5 km）: 道路などの基本データ（toulouse.json）と、
 //                                         # 建物・塀・木・地面の覆いを 500 m のタイルに分けたファイル（toulouse-tiles/<i>_<j>.json）
+//   npm run fetch-data -- all --oneway    # 逆向きの一方通行の一覧（<preset>-oneway.json）だけ作る
 //   npm run fetch-data -- toulouse --resume  # 途中で止まった取得の続き（今の形式で保存済みのタイルは取得し直さない）
 //   npm run fetch-data -- all --terrain   # 地形（<preset>-terrain.bin）だけ作り直す（保存済みの <preset>.json を使う）
 //
@@ -32,12 +33,14 @@ import { DATA_VERSION } from '../src/config.js';
 import { parseOsm } from '../src/world/parse.js';
 import { bakeTerrain } from '../src/data/terrainbake.js';
 import { DATUM, Terrain, encodeTerrain } from '../src/world/terrain.js';
+import { fetchReverseKeys } from '../src/data/oneway.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
 const provider = args.includes('--ign') ? 'ign' : 'auto';
 const resume = args.includes('--resume');
 const terrainOnly = args.includes('--terrain');
+const onewayOnly = args.includes('--oneway');
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const arg = args.find((a) => !a.startsWith('--')) || DEFAULT_AREA;
 const ids = arg === 'all' ? Object.keys(AREA_PRESETS) : [arg];
@@ -54,6 +57,9 @@ for (const id of ids) {
     await bakeTerrainFile(id, bbox);
     continue;
   }
+  // 逆向きの一方通行の一覧（IGN の 'Sens inverse'。src/data/oneway.js）。古い形式の地図データを直すのに使う
+  await bakeOneway(id, bbox);
+  if (onewayOnly) continue;
   if (preset.stream) {
     await bakeStream(id, bbox);
     await bakeTerrainFile(id, bbox);
@@ -130,6 +136,18 @@ async function bakeTerrainFile(id, bbox) {
   }
   const pn = data.bridges.find((b) => b.name === 'Pont Neuf');
   if (pn) console.log(`    ポン・ヌフの橋面（5 m ごと）: ${pn.y.filter((_, i) => i % 4 === 0).map((v) => v.toFixed(1)).join(' ')}`);
+}
+
+async function bakeOneway(id, bbox) {
+  try {
+    const keys = await fetchReverseKeys(bbox, { onPage: (n) => process.stdout.write(`\r  道路（一方通行の向き）: ${n.toLocaleString()} 件`.padEnd(60)) });
+    const out = join(root, 'public', 'data', `${id}-oneway.json`);
+    await mkdir(dirname(out), { recursive: true });
+    await writeFile(out, JSON.stringify({ keys }));
+    console.log(`\n  保存: ${out}（逆向きの一方通行 ${keys.length.toLocaleString()} 本）`);
+  } catch (err) {
+    console.log(`\n  逆向きの一方通行の一覧を作れませんでした: ${err.message}`);
+  }
 }
 
 // 広いエリア: 基本データ（建物以外）と、建物をタイルに分けたファイル

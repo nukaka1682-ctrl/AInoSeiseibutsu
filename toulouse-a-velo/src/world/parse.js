@@ -315,6 +315,12 @@ export function parseOsm(osm, proj, rect, bdtopo = []) {
         if (p) { ids.push(id); pts.push(p); }
       }
       if (pts.length < 2) continue;
+      // 逆向きの一方通行（oneway=-1）は頂点の順を逆にして、車の進む向き＝頂点の順にそろえる（路面の矢印・車線・駐車の向き）
+      const reverse = t.oneway === '-1' || t.oneway === 'reverse';
+      if (reverse) {
+        pts.reverse();
+        ids.reverse();
+      }
       const tunnel = t.tunnel && t.tunnel !== 'no' && t.tunnel !== 'building_passage';
       const layer = parseLength(t.layer) || 0;
       roads.push({
@@ -327,9 +333,11 @@ export function parseOsm(osm, proj, rect, bdtopo = []) {
         bridge: !!(t.bridge && t.bridge !== 'no'),
         tunnel: !!tunnel,
         layer,
-        oneway: t.oneway === 'yes' || t.oneway === '1',
+        oneway: t.oneway === 'yes' || t.oneway === '1' || reverse,
         surface: t.surface || '',
         sidewalk: t.sidewalk || '',
+        lanes: Math.round(parseLength(t.lanes)) || 0, // 車線の数（IGN の nombre_de_voies・OSM の lanes。路面の車線の破線）
+        cycleway: t.cycleway || '', // OSM の自転車レーン（lane など）
       });
       if (t.name) named.push({ name: t.name, tags: t, x: pts[0][0], z: pts[0][1], pts, line: true });
     } else if (t.railway && !(t.tunnel && t.tunnel !== 'no')) {

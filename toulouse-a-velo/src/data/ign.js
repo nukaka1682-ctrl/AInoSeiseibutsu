@@ -117,7 +117,9 @@ function roadTags(p) {
     tags.tunnel = 'yes';
     tags.layer = String(pos);
   }
-  if (p.sens_de_circulation === 'Sens direct' || p.sens_de_circulation === 'Sens inverse') tags.oneway = 'yes';
+  // 一方通行。'Sens inverse' は頂点の順と逆に進む（OSM の oneway=-1。parse.js が頂点の順を逆にする）
+  if (p.sens_de_circulation === 'Sens direct') tags.oneway = 'yes';
+  else if (p.sens_de_circulation === 'Sens inverse') tags.oneway = '-1';
   return tags;
 }
 

@@ -9,6 +9,12 @@
 // - 路上駐車の車: 旧市街の外の住宅街・二次的な通りの、車道が広い所（自転車のために 3 m 以上あける）に縁石に沿って
 //   縦列に。車道が 4〜5 m の住宅街の通りは、歩道が広ければ片側に歩道へ半分乗り上げて（少し傾けて）。交差点・
 //   横断歩道・橋・トラムの近くはあける。駐車場（amenity=parking）には列に並べる
+// - 街灯の種類（ユーザーの写真 4・8・10・26）: 中心部（Saint-Cyprien を含む）は灰緑の柱に白鳥の首の腕と吊り下げの灯具、
+//   広い大通りは細い鋼の高い柱に斜めの腕（Jean Jaurès・Grande-Bretagne）、幹線の環状道路とスタジアムの近くは円盤形
+// - 車止めは歩道では黒い細い柱（potelets、写真 7・8・17・21・23・27）、広場と Rue de Metz（写真 13）は花崗岩の円柱
+// - バス・自転車レーンが縁石に沿う側（markings.js の laneLayout）には路上駐車しない
+// - Place du Capitole: 灰色の高い 5 灯の燭台形の街灯を広場の縁に約 12 本（キャピトルの正面の側はあける）、
+//   西と南のアーケードの前にカフェのテラス（白い四角のパラソル・テーブル 2 つ・椅子 4 つ）。Place Wilson も縁にテラス
 // 「旧市街」は右岸の歴史的な中心だけ（config.js の historicCoreTest）。左岸のサン・シプリアン（Place Olivier・
 // Château d'eau の角）は外と同じ（ユーザーの写真のメモ 1・5・7）
 // - ごみ箱（黒い輪の形）: 横断歩道の近く・広場・ときどき歩道。大きなごみ収集容器（緑・青）: 広い歩道にときどき
@@ -19,6 +25,7 @@ import { Grid, hash01, pointInPolygon, pointInRing, polylineLength } from '../ge
 import { MeshWriter } from './meshwriter.js';
 import { CURB_W } from './streets.js';
 import { CAR_ROADS } from './parse.js';
+import { inLaneBand } from './markings.js';
 
 export const FURNITURE_FAR = 280; // これより遠い小物は描かない（m、自転車から）
 const REFILL = 12; // 自転車がこれだけ動いたら、描く小物を選び直す（m）
@@ -38,10 +45,15 @@ const BOLLARD_STEP = 1.4;
 const CENTRE_R = 1500; // 広い歩道に車止めを並べる中心部（原点＝Pont Neuf からの距離）
 
 // 車の色（写真の路上駐車: 白・銀・灰・黒・紺が大半、赤やほかの色は少し）。[sRGB, 割合]
+// （ユーザーのストリートビュー: 白・銀・灰が多く、黒は少ない）
 const CAR_PALETTE = [
-  ['#e6e6e3', 0.24], ['#b3b7ba', 0.16], ['#6c7074', 0.14], ['#3b3e41', 0.1], ['#151618', 0.14],
-  ['#1e2a45', 0.08], ['#3d5c8a', 0.03], ['#8c1c1c', 0.05], ['#b7ab93', 0.02], ['#2e4838', 0.02], ['#5a3b2c', 0.02],
+  ['#e6e6e3', 0.3], ['#b3b7ba', 0.2], ['#6c7074', 0.16], ['#3b3e41', 0.08], ['#151618', 0.07],
+  ['#1e2a45', 0.07], ['#3d5c8a', 0.03], ['#8c1c1c', 0.05], ['#b7ab93', 0.02], ['#2e4838', 0.01], ['#5a3b2c', 0.01],
 ];
+const SWAN_R = 1300; // 白鳥の首の街灯にする中心部（原点＝Pont Neuf からの距離。Saint-Cyprien を含む）
+const STADIUM = [-440, 1820], STADIUM_R = 650; // スタジアムの近くは円盤形の街灯のまま
+const DISC_TYPES = new Set(['trunk', 'trunk_link']);
+const MAST_NAME = /^(All[ée]es |Boulevard |Avenue de (la )?Grande[- ]Bretagne$|Route de Bayonne$)/i;
 const BIN_COLORS = ['#2f6a3c', '#2c5a94']; // ごみ収集容器（緑・青）
 
 // ---------------------------------------------------------------- 位置の計算（純粋な関数）
@@ -67,6 +79,9 @@ export function curbAt(rows, s) {
   else [ux, uz] = [A.nz, -A.nx];
   return { s, ax: mix(A.ax, B.ax), az: mix(A.az, B.az), cx: mix(A.cx, B.cx), cz: mix(A.cz, B.cz), nx: A.nx, nz: A.nz, ux, uz, e: Math.min(A.e, B.e), facade: A.facade && B.facade };
 }
+
+// 花崗岩の円柱の車止めを歩道に並べる通り（ほかの歩道は黒い potelets）
+const GRANITE_STREETS = /^Rue de Metz$/i;
 
 // 縁石が道の進む向き（u）の右側か（右側通行: 右側の駐車の車は進む向きを向く）。x = 東・z = 南なので右は (-uz, ux)
 export const rightSide = (p) => p.nx * -p.uz + p.nz * p.ux > 0;
@@ -246,8 +261,12 @@ function contextOf(parsed, plan) {
 // 戻り値: 種類ごとの { x, y, z, a（向き）, sx, sy（大きさ）, color } の列と、当たり判定（colliders）
 export function planFurniture({ parsed, plan, clip, curbs = [], inOldTown = () => false, heightAt = () => 0, onRoad = () => false, solid = () => false, trunks = [] }) {
   const ctx = contextOf(parsed, plan);
-  const out = { lights: [], discs: [], candelabra: [], bollards: [], cars: [], bins: [], containers: [], colliders: [] };
+  const out = { lights: [], discs: [], candelabra: [], bollards: [], cars: [], bins: [], containers: [], terraces: [], colliders: [] };
   const inClip = (x, z) => x >= clip.minX && x < clip.maxX && z >= clip.minZ && z < clip.maxZ;
+  // バス・自転車レーンの帯（markings.js の断面）にかかる車は、どこから置いた車でも置かない（縁石の列は隣の区間の車道・
+  // 駐車場の区画が車道にかかる所も。Avenue de Grande-Bretagne の自転車レーン）
+  const laneRoads = plan?.layout && plan.roadsNear ? plan.roadsNear(clip, 20).filter((r) => { const l = plan.layout(r); return l.right || l.left; }) : [];
+  const onLane = (x, z) => laneRoads.length > 0 && inLaneBand(x, z, laneRoads, plan.layout, CAR_W / 2 - 0.3);
   const tGrid = new Grid(10);
   trunks.forEach(([x, z], i) => tGrid.insertPoint(x, z, i));
   const used = []; // 置いた小物（重ならないように）: [x, z, r]
@@ -285,7 +304,8 @@ export function planFurniture({ parsed, plan, clip, curbs = [], inOldTown = () =
     const range = (m) => [open0 ? s0 : s0 + m, open1 ? s1 - 1e-6 : s1 - m];
 
     // ---- 街灯（旧市街の外）
-    const boulevard = BOULEVARD.has(road.type) && road.width >= 9;
+    // 大通り: 広い幹線道路と、名前の分かる並木の大通り（Jean Jaurès・Grande-Bretagne・Route de Bayonne。IGN の車道は片側ずつ）
+    const boulevard = BOULEVARD.has(road.type) && (road.width >= 9 || MAST_NAME.test(road.name || ''));
     let step = LIGHT_STEP, phase = hash01(id, 50) * LIGHT_STEP;
     if (boulevard) [step, phase] = [DISC_STEP, hash01(id, 50) * DISC_STEP];
     else if (road.width >= 6 || BOULEVARD.has(road.type)) [step, phase] = [2 * LIGHT_STEP, hash01(id, 50) * 2 * LIGHT_STEP + (right ? 0 : LIGHT_STEP)];
@@ -297,7 +317,11 @@ export function planFurniture({ parsed, plan, clip, curbs = [], inOldTown = () =
         const off = Math.min(0.55, p.e * 0.5);
         const x = p.cx + p.nx * off, z = p.cz + p.nz * off;
         if (inOldTown(x, z) || ctx.crossingZone(road, x, z, 1.5) || ctx.nearJunction(x, z, 3) || !clear(x, z, 0.6)) continue;
-        out[boulevard ? 'discs' : 'lights'].push({ x, z, y: heightAt(x, z), a: yaw(-p.nx, -p.nz) });
+        // 種類: 大通りは鋼の高い柱（mast）か円盤形（disc: 環状道路・スタジアムの近く）、ほかは中心部が白鳥の首（swan）
+        const type = boulevard
+          ? (DISC_TYPES.has(road.type) || Math.hypot(x - STADIUM[0], z - STADIUM[1]) < STADIUM_R ? 'disc' : 'mast')
+          : Math.hypot(x, z) < SWAN_R ? 'swan' : 'arm';
+        out[boulevard ? 'discs' : 'lights'].push({ x, z, y: heightAt(x, z), a: yaw(-p.nx, -p.nz), type });
         take(x, z, 0.4);
         circle(x, z, boulevard ? 0.16 : 0.12);
       }
@@ -310,7 +334,12 @@ export function planFurniture({ parsed, plan, clip, curbs = [], inOldTown = () =
         const x = p.cx + p.nx * 0.3, z = p.cz + p.nz * 0.3;
         if (p.e < 6.5 || Math.hypot(x, z) > CENTRE_R || ctx.plazaAt(x, z)) continue;
         if (ctx.crossingZone(road, x, z, 2.3) || ctx.nearJunction(x, z, road.width / 2 + 1) || !clear(x, z, 0.14)) continue;
-        out.bollards.push({ x, z, y: heightAt(x, z) });
+        const granite = GRANITE_STREETS.test(road.name || '');
+        // 黒い細い車止めは一続きにせず、約 7 m の組ごとに 3 割ほど抜く（写真: 横断歩道の近く・切れ目ごとの組）
+        if (!granite && hash01((id * 2 + side) ^ Math.imul(Math.floor(s / 7) + 1, 0x2c1b3c6d), 53) < 0.3) continue;
+        // 歩道は黒い細い車止め（potelets。ユーザーの写真 7・8・17・21・23: 旧市街の Alsace-Lorraine・Lafayette も）。
+        // 灰色の花崗岩の円柱は広場（下の広場の外周）と、石の柱の並ぶ通り（Rue de Metz、写真 13）だけ
+        out.bollards.push({ x, z, y: heightAt(x, z), type: granite ? 'granite' : 'potelet', a: yaw(p.ux, p.uz) });
         take(x, z, 0.16);
         circle(x, z, 0.15);
       }
@@ -318,7 +347,10 @@ export function planFurniture({ parsed, plan, clip, curbs = [], inOldTown = () =
 
     // ---- 路上駐車の車（旧市街の外、車道が広い通り。自転車のために BIKE_LANE m 以上あける）。
     // 車道が狭い住宅街の通り（IGN の幅 4〜5 m が多い）は、歩道が広ければ片側に歩道へ半分乗り上げて（フォーブールの通りの写真）
-    const mode = parkMode(road, curbAt(rows, (s0 + s1) / 2).e);
+    // バス・自転車レーンが縁石に沿う側（markings.js の laneLayout と同じ断面）には止めない
+    const lay = plan?.layout ? plan.layout(road) : null;
+    const lane = lay && (right ? lay.right : lay.left);
+    const mode = lane ? null : parkMode(road, curbAt(rows, (s0 + s1) / 2).e);
     if (mode && !road.bridge) {
       if (mode === 'both' || (hash01(id, 60) < 0.5) === right) {
         const kerb = mode === 'kerb';
@@ -333,7 +365,7 @@ export function planFurniture({ parsed, plan, clip, curbs = [], inOldTown = () =
           const p = curbAt(rows, s);
           if (kerb && p.e < KERB_MIN_E) continue;
           const x = p.ax - p.nx * off, z = p.az - p.nz * off;
-          if (inOldTown(x, z) || ctx.nearJunction(x, z, 11) || ctx.crossingZone(road, x, z, 4.5) || ctx.nearBridgeEnd(x, z, 14) || ctx.nearRail(x, z, 4.5)) continue;
+          if (inOldTown(x, z) || onLane(x, z) || ctx.nearJunction(x, z, 11) || ctx.crossingZone(road, x, z, 4.5) || ctx.nearBridgeEnd(x, z, 14) || ctx.nearRail(x, z, 4.5)) continue;
           // ほかの通りの歩道にかかる所（交差点の角）は置かない。車道側の車輪の下は車道（高さ 0）
           const hx = p.ux * (CAR_L / 2) * sl, hz = p.uz * (CAR_L / 2) * sl;
           const ox = kerb ? -p.nx * (CAR_W / 2 - 0.2) : 0, oz = kerb ? -p.nz * (CAR_W / 2 - 0.2) : 0;
@@ -401,12 +433,34 @@ export function planFurniture({ parsed, plan, clip, curbs = [], inOldTown = () =
     }
   }
 
-  // ---- 広場: 旧市街の広場の縁に黒い燭台形の街灯（Capitole の広場は除く）、ごみ箱を 2〜4 個
+  // ---- 広場: 旧市街の広場の縁に黒い燭台形の街灯（Capitole の広場は別）、ごみ箱を 2〜4 個
+  const terrace = (p, ok) => {
+    if (!ok(p.x, p.z, 2.1)) return;
+    out.terraces.push({ x: p.x, z: p.z, y: heightAt(p.x, p.z), a: yaw(p.ux, p.uz) });
+    take(p.x, p.z, 2.1);
+    boxC(p.x, p.z, p.ux, p.uz, 1.45, 1.45);
+  };
   for (const a of ctx.plazas) {
     const b = a.bounds;
-    if (b.maxX < clip.minX || b.minX > clip.maxX || b.maxZ < clip.minZ || b.minZ > clip.maxZ || /Capitole/i.test(a.name)) continue;
+    if (b.maxX < clip.minX || b.minX > clip.maxX || b.maxZ < clip.minZ || b.minZ > clip.maxZ) continue;
     const hid = a.id | 0;
     const ok = (x, z, r) => inClip(x, z) && pointInPolygon(x, z, a) && !onRoad(x, z, 0.8) && clear(x, z, r);
+    if (/Capitole/i.test(a.name)) {
+      // 広場の中を通る歩行者の道（データの道）は走れる道でも小物を置いてよい。車道（と縁から 1 m）だけ避ける
+      const okC = (x, z, r) => inClip(x, z) && pointInPolygon(x, z, a) && !(ctx.nearestCar(x, z, 12)?.edge < r + 1) && clear(x, z, r);
+      // Place du Capitole（ユーザーの写真 19）: 灰色の高い 5 灯の街灯を縁から 6 m 内側に 12 本。東（キャピトルの正面）の縁はあける
+      const per = polylineLength([...a.outer, a.outer[0]]);
+      for (const p of ringSamples(a.outer, per / 12, 6, hash01(hid, 93) * per / 12)) {
+        if (p.nx < -0.7 || !okC(p.x, p.z, 0.8)) continue;
+        out.candelabra.push({ x: p.x, z: p.z, y: heightAt(p.x, p.z), a: yaw(p.ux, p.uz), type: 'capitole' });
+        take(p.x, p.z, 0.6);
+        circle(p.x, p.z, 0.2);
+      }
+      // カフェのテラス: 西と南の縁（アーケードの前。縁の車道の外）から 7.5 m 内側に 9 m おき
+      for (const p of ringSamples(a.outer, 9, 7.5, 3)) if (p.nx > 0.7 || p.nz < -0.7) terrace(p, okC);
+      continue;
+    }
+    if (/Wilson/i.test(a.name)) for (const p of ringSamples(a.outer, 13, 3.5, 4)) if (hash01(hid + p.i, 94) < 0.6) terrace(p, ok);
     // 花崗岩の車止め: 広場の縁が車道に沿って接する所に 1.4 m おき。車道の縁石のすぐ後ろ（縁から 0.5 m）に立てる。
     // 広場の下を通る道（広場の舗装に隠れる）は使わない。広場の縁より 1 m 以上内側には立てない
     const outside = (qx, qz) => !pointInPolygon(qx, qz, a);
@@ -452,7 +506,7 @@ export function planFurniture({ parsed, plan, clip, curbs = [], inOldTown = () =
       if (hash01(h, 81) > 0.68) continue;
       const hx = st.ux * CAR_L / 2, hz = st.uz * CAR_L / 2;
       const ends = [[st.x + hx, st.z + hz], [st.x - hx, st.z - hz], [st.x, st.z]];
-      if (ends.some(([x, z]) => onRoad(x, z, 0.3) || solid(x, z)) || near(st.x, st.z, 1.4)) continue;
+      if (ends.some(([x, z]) => onRoad(x, z, 0.3) || solid(x, z)) || near(st.x, st.z, 1.4) || onLane(st.x, st.z)) continue;
       const nx = -st.uz * CAR_W / 2, nz = st.ux * CAR_W / 2;
       if ([[1, 1], [1, -1], [-1, 1], [-1, -1]].some(([u, v]) => heightAt(st.x + hx * u + nx * v, st.z + hz * u + nz * v) > 0.02)) continue;
       const sl = 0.93 + hash01(h, 82) * 0.12;
@@ -527,24 +581,138 @@ function wheel(w, x, zIn, zOut, r, color, cap) {
   face(w, Array.from({ length: n }, (_, i) => P(i, zOut)), [0, 0, Math.sign(zOut)], cap);
 }
 
-// 乗用車（長さ 4.2・幅 1.8・高さ 1.45 m、前が +x）: 車体・窓の暗い客室・屋根・柱・車輪・前照灯と尾灯（約 120 三角形）
+// 法線を形から求める凸多角形の面（hint の向きの側を表に）
+function faceAuto(w, pts, hint, color, paint = 0) {
+  let nx = 0, ny = 0, nz = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i], b = pts[(i + 1) % pts.length];
+    nx += (a[1] - b[1]) * (a[2] + b[2]);
+    ny += (a[2] - b[2]) * (a[0] + b[0]);
+    nz += (a[0] - b[0]) * (a[1] + b[1]);
+  }
+  const L = Math.hypot(nx, ny, nz) || 1;
+  const sg = nx * hint[0] + ny * hint[1] + nz * hint[2] < 0 ? -1 : 1;
+  face(w, pts, [(sg * nx) / L, (sg * ny) / L, (sg * nz) / L], color, paint);
+}
+
+// 乗用車（長さ 4.2・幅 1.8・高さ 1.45 m、前が +x）: 車体・上ほど細い客室（傾いた前後の窓、紺がかった暗いガラス、
+// 車体の色の柱と屋根）・少し暗いバンパー・車輪・前照灯と尾灯（約 150 三角形）。ユーザーの写真 1〜3・27
 export function carGeometry() {
   const w = new MeshWriter();
-  const paint = [1, 1, 1], glass = rgb('#1b2126'), tyre = rgb('#181818'), hub = rgb('#3a3c3e');
-  const body = [[-2.1, 0.24], [2.1, 0.24], [2.12, 0.6], [2.02, 0.8], [0.95, 0.97], [-1.85, 1.0], [-2.08, 0.86]];
+  const paint = [1, 1, 1], dark = [0.72, 0.72, 0.72], glass = rgb('#2b3640'), tyre = rgb('#181818'), hub = rgb('#3a3c3e');
+  const body = [[-2.1, 0.26], [2.1, 0.26], [2.12, 0.6], [2.02, 0.8], [0.95, 0.93], [-1.85, 0.96], [-2.08, 0.86]];
   extrude(w, body, 0.89, paint, 1, (i) => (i === 0 ? null : { color: paint, paint: 1 }));
-  const cabin = [[-1.82, 0.99], [0.85, 0.96], [0.12, 1.4], [-1.3, 1.42]];
-  extrude(w, cabin, 0.76, glass, 0, (i) => (i === 1 || i === 3 ? { color: glass, paint: 0 } : null));
-  box(w, -1.34, 1.39, -0.775, 0.16, 1.46, 0.775, paint, { paint: 1 }); // 屋根
+  box(w, 2.02, 0.24, -0.86, 2.13, 0.5, 0.86, dark, { paint: 1 }); // 前のバンパー
+  box(w, -2.13, 0.24, -0.86, -2.02, 0.52, 0.86, dark, { paint: 1 }); // 後ろのバンパー
+  // 客室: 下（窓の下の線、y 0.94）は x -1.8〜0.9・幅 ±0.84、上（屋根、y 1.42）は x -1.25〜0.05・幅 ±0.68
+  const yb = 0.94, yt = 1.42;
+  const S = (t, v, s) => [-1.8 + 2.7 * t + (0.55 - 1.4 * t) * v, yb + (yt - yb) * v, s * (0.84 - 0.16 * v)];
   for (const s of [1, -1]) {
-    const z = s * 0.765;
-    face(w, [[-0.5, 0.99, z], [-0.34, 0.99, z], [-0.34, 1.41, z], [-0.5, 1.41, z]], [0, 0, s], paint, 1); // 中の柱
+    // 横の窓: 後ろの柱（C）・窓・中の柱（B）・窓・前の柱（A）
+    const cuts = [[0, 0.12, 1], [0.12, 0.47, 0], [0.47, 0.53, 1], [0.53, 0.93, 0], [0.93, 1, 1]];
+    for (const [t0, t1, pt] of cuts) faceAuto(w, [S(t0, 0, s), S(t1, 0, s), S(t1, 1, s), S(t0, 1, s)], [0, 0, s], pt ? paint : glass, pt);
   }
+  faceAuto(w, [S(1, 0, 1), S(1, 0, -1), S(1, 1, -1), S(1, 1, 1)], [1, 0.5, 0], glass); // 前の窓
+  faceAuto(w, [S(0, 0, 1), S(0, 0, -1), S(0, 1, -1), S(0, 1, 1)], [-1, 0.5, 0], glass); // 後ろの窓
+  faceAuto(w, [S(0, 1, 1), S(1, 1, 1), S(1, 1, -1), S(0, 1, -1)], [0, 1, 0], paint, 1); // 屋根
   for (const x of [-1.38, 1.38]) for (const s of [1, -1]) wheel(w, x, s * 0.66, s * 0.92, 0.31, tyre, hub);
   const lamp = rgb('#e8e6dc'), tail = rgb('#8a1414');
   for (const s of [1, -1]) {
-    face(w, [[2.13, 0.5, s * 0.5], [2.13, 0.5, s * 0.82], [2.13, 0.63, s * 0.82], [2.13, 0.63, s * 0.5]], [1, 0, 0], lamp);
+    face(w, [[2.13, 0.52, s * 0.5], [2.13, 0.52, s * 0.82], [2.13, 0.64, s * 0.82], [2.13, 0.64, s * 0.5]], [1, 0, 0], lamp);
     face(w, [[-2.1, 0.66, s * 0.55], [-2.1, 0.66, s * 0.85], [-2.1, 0.79, s * 0.85], [-2.1, 0.79, s * 0.55]], [-1, 0, 0], tail);
+  }
+  return toGeometry(w);
+}
+
+// 2 点を結ぶ角棒（半幅 r）
+function bar(w, p, q, r, color) {
+  const d = [q[0] - p[0], q[1] - p[1], q[2] - p[2]], L = Math.hypot(...d) || 1;
+  const t = d.map((v) => v / L);
+  let a = [t[2], 0, -t[0]];
+  if (Math.hypot(a[0], a[2]) < 1e-3) a = [1, 0, 0];
+  const al = Math.hypot(...a);
+  a = a.map((v) => v / al);
+  const b = [t[1] * a[2] - t[2] * a[1], t[2] * a[0] - t[0] * a[2], t[0] * a[1] - t[1] * a[0]];
+  const V = (o, i, j) => [o[0] + (a[0] * i + b[0] * j) * r, o[1] + (a[1] * i + b[1] * j) * r, o[2] + (a[2] * i + b[2] * j) * r];
+  for (const [i0, j0, i1, j1, n] of [[1, -1, 1, 1, a], [-1, 1, -1, -1, a.map((v) => -v)], [1, 1, -1, 1, b], [-1, -1, 1, -1, b.map((v) => -v)]]) {
+    w.quad(V(p, i0, j0), V(q, i0, j0), V(q, i1, j1), V(p, i1, j1), n, [0, 0], [0, 0], [0, 0], [0, 0], color);
+  }
+}
+
+// 白鳥の首の街灯（高さ約 6.5 m、灰緑の柱、+x の車道の方へ曲がった腕の先に吊り下げの灯具）。写真 8・10、ポン・ヌフ（bridges.js）と同じ形
+export function swanLampGeometry() {
+  const w = new MeshWriter();
+  const green = rgb('#55625c'), glass = rgb('#e8e4d6');
+  column(w, 0, 0, 0.13, 0.11, 0, 0.7, 8, green, { top: green });
+  column(w, 0, 0, 0.08, 0.055, 0.7, 6.3, 6, green);
+  const arm = [[0, 6.2], [0.12, 6.65], [0.42, 6.92], [0.85, 6.98], [1.22, 6.85]];
+  for (let k = 0; k + 1 < arm.length; k++) bar(w, [arm[k][0], arm[k][1], 0], [arm[k + 1][0], arm[k + 1][1], 0], 0.035, green);
+  const [hx, hy] = arm[arm.length - 1];
+  box(w, hx - 0.02, hy - 0.18, -0.02, hx + 0.02, hy, 0.02, green);
+  box(w, hx - 0.19, hy - 0.3, -0.19, hx + 0.19, hy - 0.18, 0.19, green);
+  box(w, hx - 0.14, hy - 0.72, -0.14, hx + 0.14, hy - 0.3, 0.14, glass, { bottom: glass });
+  return toGeometry(w);
+}
+
+// 大通りの細い鋼の高い街灯（約 9 m、+x の車道の方へ上向きに傾いた腕 1.5 m と平たい灯具）。写真 26（Jean Jaurès）
+export function mastLampGeometry() {
+  const w = new MeshWriter();
+  const steel = rgb('#9aa0a4'), head = rgb('#6d7377'), lens = rgb('#e6e3da');
+  column(w, 0, 0, 0.12, 0.1, 0, 0.5, 8, steel, { top: steel });
+  column(w, 0, 0, 0.09, 0.05, 0.5, 9.0, 6, steel);
+  bar(w, [0, 8.9, 0], [1.45, 9.3, 0], 0.035, steel);
+  box(w, 1.2, 9.22, -0.13, 1.95, 9.34, 0.13, head, { bottom: lens });
+  return toGeometry(w);
+}
+
+// 黒い細い車止め（potelet、9 cm 角・高さ 1 m、頭に白い帯）。写真 7・8・27
+export function poteletGeometry() {
+  const w = new MeshWriter();
+  const black = rgb('#262928'), band = rgb('#d8d8d2');
+  box(w, -0.045, 0, -0.045, 0.045, 0.86, 0.045, black);
+  box(w, -0.046, 0.86, -0.046, 0.046, 0.92, 0.046, band);
+  box(w, -0.045, 0.92, -0.045, 0.045, 1.0, 0.045, black);
+  return toGeometry(w);
+}
+
+// Place du Capitole の灰色の高い燭台形の街灯（約 6 m、十字の 4 本の腕と頂上に白い球 5 つ）。ユーザーの写真 19
+export function capitoleLampGeometry() {
+  const w = new MeshWriter();
+  const grey = rgb('#80868a'), globe = rgb('#efebe1');
+  column(w, 0, 0, 0.22, 0.16, 0, 1.0, 8, grey, { top: grey });
+  column(w, 0, 0, 0.1, 0.07, 1.0, 5.6, 8, grey);
+  box(w, -0.75, 4.86, -0.035, 0.75, 4.94, 0.035, grey);
+  box(w, -0.035, 4.86, -0.75, 0.035, 4.94, 0.75, grey);
+  for (const [x, y, z] of [[0.72, 4.94, 0], [-0.72, 4.94, 0], [0, 4.94, 0.72], [0, 4.94, -0.72], [0, 5.6, 0]]) {
+    // 丸い球（10 角・横の輪 3 つ。インスタンスなので安い）と下の細い首
+    const prof = [[0.05, 0], [0.15, 0.06], [0.2, 0.18], [0.16, 0.32], [0, 0.42]];
+    for (let k = 0; k + 1 < prof.length; k++) column(w, x, z, prof[k][0], prof[k + 1][0], y + prof[k][1], y + prof[k + 1][1], 10, globe);
+  }
+  return toGeometry(w);
+}
+
+// カフェのテラス（3 × 3 m）: 真ん中に白い四角のパラソル（高さ 2.4 m）、テーブル 2 つ、椅子 4 つ。写真 13・19・22
+export function terraceGeometry() {
+  const w = new MeshWriter();
+  const white = rgb('#f2f0ea'), pole = rgb('#8c8c88'), table = rgb('#3a3b3c'), chair = rgb('#8a6b4c');
+  column(w, 0, 0, 0.035, 0.035, 0, 2.75, 4, pole);
+  const H = 2.35, A = 2.72, R = 1.5;
+  const c = [[R, H, R], [-R, H, R], [-R, H, -R], [R, H, -R]];
+  for (let i = 0; i < 4; i++) {
+    const p = c[i], q = c[(i + 1) % 4];
+    faceAuto(w, [p, q, [0, A, 0]], [p[0] + q[0], 1, p[2] + q[2]], white);
+    faceAuto(w, [p, q, [0, A, 0]], [-(p[0] + q[0]), -1, -(p[2] + q[2])], white); // 下から見た面
+    faceAuto(w, [p, q, [q[0], H - 0.2, q[2]], [p[0], H - 0.2, p[2]]], [p[0] + q[0], 0, p[2] + q[2]], white); // 垂れ
+  }
+  for (const tx of [-0.75, 0.75]) {
+    column(w, tx, 0, 0.03, 0.03, 0, 0.72, 4, table);
+    box(w, tx - 0.33, 0.72, -0.33, tx + 0.33, 0.76, 0.33, table);
+    for (const s of [1, -1]) {
+      const cz = s * 0.62;
+      box(w, tx - 0.21, 0.42, cz - 0.21, tx + 0.21, 0.46, cz + 0.21, chair);
+      box(w, tx - 0.21, 0, cz + s * 0.17, tx + 0.21, 0.42, cz + s * 0.21, chair); // 脚の板
+      box(w, tx - 0.21, 0.46, cz + s * 0.17, tx + 0.21, 0.86, cz + s * 0.21, chair); // 背もたれ
+    }
   }
   return toGeometry(w);
 }
@@ -737,10 +905,17 @@ export function buildFurniture(opts, cw = null) {
   const set = new FurnitureSet();
   const mat = furnitureMaterial();
   set.add('cars', carGeometry(), mat, items.cars, { shadow: true });
-  set.add('lights', lampGeometry(), mat, items.lights, { shadow: true });
-  set.add('disc-lights', discLampGeometry(), mat, items.discs, { shadow: true });
-  set.add('candelabra', candelabraGeometry(), mat, items.candelabra);
-  set.add('bollards', bollardGeometry(), mat, items.bollards);
+  const of = (list, type, dflt) => list.filter((it) => (it.type || dflt) === type);
+  set.add('lights', lampGeometry(), mat, of(items.lights, 'arm', 'arm'), { shadow: true });
+  // 細い街灯（白鳥の首・鋼の柱）とテラスは影を落とさない（影の描画コールを減らす。細くて影はほとんど見えない）
+  set.add('swan-lights', swanLampGeometry(), mat, of(items.lights, 'swan', 'arm'));
+  set.add('disc-lights', discLampGeometry(), mat, of(items.discs, 'disc', 'disc'), { shadow: true });
+  set.add('mast-lights', mastLampGeometry(), mat, of(items.discs, 'mast', 'disc'));
+  set.add('candelabra', candelabraGeometry(), mat, of(items.candelabra, 'black', 'black'));
+  set.add('capitole-lights', capitoleLampGeometry(), mat, of(items.candelabra, 'capitole', 'black'), { shadow: true });
+  set.add('bollards', bollardGeometry(), mat, of(items.bollards, 'granite', 'granite'));
+  set.add('potelets', poteletGeometry(), mat, of(items.bollards, 'potelet', 'granite'));
+  set.add('terraces', terraceGeometry(), mat, items.terraces);
   set.add('bins', binGeometry(), mat, items.bins);
   set.add('containers', containerGeometry(), mat, items.containers, { shadow: true });
   if (cw) {
