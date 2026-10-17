@@ -408,6 +408,7 @@ function bankSection(kind, d, W = 16) {
 
 // 旧市街のまわりの岸壁（terraincond.js の sharpenQuays の線）: 上の河岸から下の遊歩道まで垂直のレンガの壁と、
 // 壁の上から上の段へ 5 m の笠石（地面の段差の斜面を隠す。上の段の地面より 2 cm 下なので、平らな所では地面の下に隠れる）
+const QUAY_PARAPET = 1.0; // 岸壁の上のレンガの手すり壁の高さ（m）
 function buildQuayWalls(list, mats) {
   const w = new MeshWriter();
   for (const q of list) {
@@ -418,12 +419,21 @@ function buildQuayWalls(list, mats) {
     const L = Math.hypot(bx - ax, bz - az), h0 = ab - 0.4, ha = at - h0, hb = bt - h0;
     const t = hash01(Math.round(ax * 7 + az * 13), 3);
     const brick = BANK.brickA.map((c, j) => c * (1 - t) + BANK.brickB[j] * t);
-    w.quad([ax, h0, az], [bx, h0, bz], [bx, bt, bz], [ax, at, az], [nx, 0, nz], [0, 0], [L / 4, 0], [L / 4, hb / 4], [0, ha / 4], brick);
+    // 壁の面は上の河岸の高さ + 胸壁（QUAY_PARAPET m）まで（写真: ドラード河岸・トゥニ河岸は上の歩道の縁にレンガの手すり壁）
+    const P = QUAY_PARAPET, ta = at + P, tb = bt + P;
+    w.quad([ax, h0, az], [bx, h0, bz], [bx, tb, bz], [ax, ta, az], [nx, 0, nz], [0, 0], [L / 4, 0], [L / 4, (hb + P) / 4], [0, (ha + P) / 4], brick);
+    // 手すり壁の内側の面と上面（厚さ 0.45 m、レンガの笠）
+    const T = 0.45, px = -nx * T, pz = -nz * T;
+    w.quad([bx + px, bt, bz + pz], [ax + px, at, az + pz], [ax + px, ta, az + pz], [bx + px, tb, bz + pz], [-nx, 0, -nz], [0, 0], [L / 4, 0], [L / 4, P / 4], [0, P / 4], brick);
+    w.quad([ax, ta, az], [ax + px, ta, az + pz], [bx + px, tb, bz + pz], [bx, tb, bz], [0, 1, 0], [0, 0], [0, T / 4], [L / 4, T / 4], [L / 4, 0], brick.map((c) => c * 0.85));
     // 足元の石積みの帯（遊歩道から 1.3 m。写真では淡い石の切石の土台の上にレンガが積まれている）。壁の面より 3 cm 手前
     const sa = Math.min(at, ab + 1.3), sb = Math.min(bt, bb + 1.3), ox = nx * 0.03, oz = nz * 0.03;
     if (sa > h0 + 0.5 && sb > h0 + 0.5) w.quad([ax + ox, h0, az + oz], [bx + ox, h0, bz + oz], [bx + ox, sb, bz + oz], [ax + ox, sa, az + oz], [nx, 0, nz], [0, 0], [L / 2, 0], [L / 2, (sb - h0) / 2], [0, (sa - h0) / 2], BANK.quayBase);
-    const k = 5, ux = -nx * k, uz = -nz * k, cy = (y) => y - 0.02;
-    w.quad([ax, cy(at), az], [ax + ux, cy(at), az + uz], [bx + ux, cy(bt), bz + uz], [bx, cy(bt), bz], [0, 1, 0], [0, 0], [0, k / 4], [L / 4, k / 4], [L / 4, 0], BANK.quayCoping);
+    // 手すり壁の内側から上の段へ 7.5 m（格子の 1.5 マス。壁の線から上の段の格子点まで届く）の歩道の板（地面の段差の斜面を隠す。
+    // 上の段の地面より 2 cm 下なので、平らな所では地面の下に隠れる）。板の先の縁は 3 m 下まで垂らす（板が浮いて見えないように）
+    const k = 7.5, ux = -nx * k, uz = -nz * k, cy = (y) => y - 0.02;
+    w.quad([ax + px, cy(at), az + pz], [ax + ux, cy(at), az + uz], [bx + ux, cy(bt), bz + uz], [bx + px, cy(bt), bz + pz], [0, 1, 0], [0, 0], [0, k / 4], [L / 4, k / 4], [L / 4, 0], BANK.quayCoping);
+    w.quad([bx + ux, cy(bt) - 3, bz + uz], [ax + ux, cy(at) - 3, az + uz], [ax + ux, cy(at), az + uz], [bx + ux, cy(bt), bz + uz], [-nx, 0, -nz], [0, 0], [L / 4, 0], [L / 4, 0.75], [0, 0.75], BANK.quayCoping);
   }
   const m = new THREE.Mesh(w.toGeometry(), mats.quai);
   m.castShadow = true;

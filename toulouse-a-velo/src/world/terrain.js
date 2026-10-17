@@ -128,6 +128,28 @@ export class Terrain {
     this.cellZ = 1 / g.az;
   }
 
+  // 木の根元の高さ: 岸壁（quayWalls）の低い側 reach m 以内は岸壁の上の高さ（上の河岸の歩道の並木が、5 m の格子の段差で
+  // 下の段に落ちて樹冠が歩道の高さまで沈まないように。ドラード河岸のプラタナス）
+  treeGround(x, z, reach = 4) {
+    const h = this.h(x, z);
+    if (!this.quayWalls.length) return h;
+    if (!this.quayGrid || this.quayGridN !== this.quayWalls.length) {
+      this.quayGrid = new Grid(40);
+      this.quayGridN = this.quayWalls.length;
+      this.quayWalls.forEach((q, i) => this.quayGrid.insertBounds(Math.min(q.ax, q.bx) - reach, Math.min(q.az, q.bz) - reach, Math.max(q.ax, q.bx) + reach, Math.max(q.az, q.bz) + reach, i));
+    }
+    let best = h;
+    this.quayGrid.queryPoint(x, z, 0, (i) => {
+      const q = this.quayWalls[i];
+      const c = closestOnSegment(x, z, q.ax, q.az, q.bx, q.bz);
+      if (c.d2 > reach * reach) return;
+      const mx = q.ax + (q.bx - q.ax) * c.t, mz = q.az + (q.bz - q.az) * c.t;
+      if ((x - mx) * q.nx + (z - mz) * q.nz < 0) return; // 上の段の側
+      best = Math.max(best, q.at + (q.bt - q.at) * c.t);
+    });
+    return best;
+  }
+
   // 地面の高さ（y）。5 m の格子の平面。格子の外は遠くの格子
   h(x, z) {
     const g = this.near, u = g.ax * x + g.bx, v = g.az * z + g.bz;

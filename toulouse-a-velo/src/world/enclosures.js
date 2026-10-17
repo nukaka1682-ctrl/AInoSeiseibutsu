@@ -7,7 +7,7 @@ import { Grid, closestOnSegment, hash01 } from '../geo.js';
 
 const THICK = 0.4;
 const CAP = [0.78, 0.45, 0.32]; // 笠木の瓦（瓦のテクスチャに掛ける色）
-const FILL = [0.66, 0.62, 0.56]; // 土留めの上の平らな面（漆喰のテクスチャに掛ける、砂利敷きのような色）
+const FILL = [0.8, 0.78, 0.74]; // 土留めの上の平らな面（漆喰のテクスチャに掛ける、歩道の淡い花崗岩の板のような色。写真の D124 の歩道）
 
 // walls: [経度 1, 緯度 1, 経度 2, 緯度 2, 高さ] の配列 → [[x1, z1, x2, z2, 高さ], ...]
 export function projectWalls(walls, proj) {
@@ -174,9 +174,9 @@ export function buildEnclosures(segs, materials, collision = null, terrain = nul
 // 地形の上の塀の縦断面。step m ごとの点 { x, z, base, top }（y。base: 塀の足＝両側の地面の低い方より bury m 下、
 // top: 笠木の上端）。上端は「低い側の地面 + h」と「高い側の地面 + 胸壁 min(h, rail) m」の大きい方を、±win m の最大で包んでから
 // ±win m で平均する（包んだ線の平均なので、どの点でも元の高さより下がらない）。段差を斜めに横切る塀ものこぎりの歯にならない
-// 土留め: 塀から reach m 先の地面が塀の足より retain m 以上高い側があれば（盛り土の道の脇の塀など。5 m の格子では塀と道の間が
-// 土の斜面になる）、塀はその高さを支える土留めの壁: 上端は少なくともその高さ + 胸壁、点に fill: { s: 側（+1: 法線の側）, y } を付ける
-// （writeSlopedWall が塀からその側へ reach m の平らな面で斜面を隠す）
+// 土留め: 塀から両側へ reach m 先の地面（と塀の足）の高さが retain m 以上違えば（盛り土の道の脇の塀など）、塀は高い側を支える
+// 土留めの壁: 上端は高い側 + 胸壁。高い側が塀の足より高ければ点に fill: { s: 側（+1: 法線の側）, y } を付ける
+// （writeSlopedWall が塀からその側へ reach m の平らな面で、5 m の格子の土の斜面を隠す）
 export function wallProfile(terrain, ax, az, bx, bz, h, { step = 2, win = 4, rail = 1, bury = 0.3, half = THICK / 2, reach = 5.5, retain = 1.2 } = {}) {
   const L = Math.hypot(bx - ax, bz - az), n = Math.max(1, Math.ceil(L / step));
   const ux = (bx - ax) / (L || 1), uz = (bz - az) / (L || 1), nx = -uz * half, nz = ux * half;
@@ -186,10 +186,13 @@ export function wallProfile(terrain, ax, az, bx, bz, h, { step = 2, win = 4, rai
     const g1 = terrain.h(x + nx, z + nz), g2 = terrain.h(x - nx, z - nz), g0 = terrain.h(x, z);
     const l = Math.min(g0, g1, g2), u = Math.max(g0, g1, g2);
     const k = reach / half, f1 = terrain.h(x + nx * k, z + nz * k), f2 = terrain.h(x - nx * k, z - nz * k);
-    const fy = Math.max(f1, f2), fill = fy - l > retain && fy > u + 0.3 ? { s: f1 >= f2 ? 1 : -1, y: fy } : null;
+    // 両側の地面の高さが retain m 以上違えば土留めの壁: 上端は高い側 + 胸壁（LiDAR の塀の高さは低い側の本当の地面から測った値で、
+    // 5 m の格子と道路のならしで塀の足元が高い側の高さまで上がると、高すぎる塀になる。ポン・ヌフ左岸の取り付け道路の脇は道から 1 m）
+    const fy = Math.max(f1, f2), retaining = fy - Math.min(f1, f2, l) > retain;
+    const fill = retaining && fy > u + 0.3 ? { s: f1 >= f2 ? 1 : -1, y: fy } : null;
     pts.push({ x, z, base: 0, top: 0, fill });
     lo.push(l);
-    raw.push(Math.max(l + h, u + Math.min(h, rail), fill ? fy + rail : -Infinity));
+    raw.push(retaining ? Math.max(fy + rail, u + 0.3) : Math.max(l + h, u + Math.min(h, rail)));
   }
   const w = Math.max(1, Math.round(win / (L / n)));
   const env = raw.map((_, i) => Math.max(...raw.slice(Math.max(0, i - w), i + w + 1)));

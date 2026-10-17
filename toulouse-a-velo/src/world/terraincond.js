@@ -245,7 +245,10 @@ export function sharpenQuays(terrain, centre, radius, { win = 15, drop = 3, lowA
             const rr = r + dr, cc = c + dc;
             if (rr < 0 || cc < 0 || rr >= Hn || cc >= W) continue;
             const j = rr * W + cc;
-            if (cls[j] !== cl || Number.isNaN(prev[j])) continue;
+            if (Number.isNaN(prev[j])) continue;
+            // 上の段は、隣の車道の上（触らない点）の高さにもそろえる（岸壁の上の歩道を河岸の道と同じ高さに。
+            // ドラード河岸: 道路のならしで道の脇が低く残り、手すり壁が道より 1〜2 m 下に立っていた）
+            if (cls[j] !== cl && !(cl === 1 && cls[j] < 0 && roadW && roadW[(rr + r0) * cols + cc + c0] > roadMax)) continue;
             v = cl ? Math.max(v, prev[j]) : Math.min(v, prev[j]);
           }
         }

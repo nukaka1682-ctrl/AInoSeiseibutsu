@@ -60,6 +60,7 @@ const COL = {
   flat: T('#c58a6e'),
   concrete: T('#b7b3ab'),
   concreteDark: T('#9a978f'),
+  railing: T('#56697c'), // 高架の鉄の手すり（青灰色）
   lamp: T('#5b6a63'), // 灰緑の鋳鉄
   globe: T('#f1eee4'),
 };
@@ -521,9 +522,10 @@ export function bridgeStyle(road, v, waterDepthAt, levelAt = null, deckAt = null
       if (hs.length) w.depth = Math.max(w.depth, Math.min(18, hs[hs.length >> 1]));
     }
   }
-  if (!wet.length) return { kind: 'flat', wet };
-  // 石の橋の一覧にない橋と、高速道路・幹線道路を含むまとまりは近代の橋
   const members = v.members || [road];
+  // 陸の上の高速道路・幹線道路の高架（A620 の Grande-Bretagne 通りの上など。写真: 淡いコンクリートの桁と青灰色の鉄の手すり）
+  if (!wet.length) return { kind: members.some((m) => MOTOR_TYPES.has(m.type)) ? 'overpass' : 'flat', wet };
+  // 石の橋の一覧にない橋と、高速道路・幹線道路を含むまとまりは近代の橋
   if (!MASONRY_NAME.test(road.name || '') || members.some((m) => MOTOR_TYPES.has(m.type))) return { kind: 'modern', wet };
   const pontNeuf = road.name === 'Pont Neuf';
   const longest = wet.reduce((a, b) => (b.s1 - b.s0 > a.s1 - a.s0 ? b : a));
@@ -554,7 +556,7 @@ export function bridgeStyle(road, v, waterDepthAt, levelAt = null, deckAt = null
 function writeDeck({ deck, body, walk, marks }, road, half, kind, info, clipRect) {
   const topY = CAR_ROADS.has(road.type) ? 0.08 : 0.14; // 歩道橋は少し高くして、重なっても Z ファイティングしないように
   const st = roadStyle(road);
-  const modern = kind === 'modern';
+  const modern = kind === 'modern' || kind === 'overpass';
   const car = CAR_ROADS.has(road.type) && st.tex === 'asphalt';
   // 車道の標示（中央線・バスレーン・自転車レーン。ポン・ヌフは写真 10・11）。橋の両端 4 m はあける
   if (car) {
@@ -587,6 +589,27 @@ function writeDeck({ deck, body, walk, marks }, road, half, kind, info, clipRect
         const uvs = (y0, y1) => [[0, y0 / 20], [l / 8, y0 / 20], [l / 8, y1 / 20], [0, y1 / 20]]; // 石の目地の大きさ
         const vq = (p, q, y0, y1, nn, col) => body.quad([p[0], y0, p[1]], [q[0], y0, q[1]], [q[0], y1, q[1]], [p[0], y1, p[1]], nn, ...uvs(y0, y1), col);
         const hq = (p, q, r, s, y, nn, col) => body.quad([p[0], y, p[1]], [q[0], y, q[1]], [r[0], y, r[1]], [s[0], y, s[1]], nn, [0, 0], [l / 4, 0], [l / 4, 0.1], [0, 0.1], col);
+        if (kind === 'overpass') {
+          // コンクリートの縁（0.35 m）の上に青灰色の鉄の手すり（支柱 1.6 m おき・上と中の横桟、高さ 1.1 m）
+          const ct = topY + 0.35, rt = topY + 1.1;
+          vq(a, b, CORNICE, ct, n, COL.concrete);
+          hq(a, b, ib, ia, ct, up, COL.concrete);
+          vq(ia, ib, topY, ct, ni, COL.concrete);
+          const ma = [(a[0] + ia[0]) / 2, (a[1] + ia[1]) / 2], mb = [(b[0] + ib[0]) / 2, (b[1] + ib[1]) / 2];
+          const tx = (mb[0] - ma[0]) / l, tz = (mb[1] - ma[1]) / l, ox = n[0] * 0.03, oz = n[2] * 0.03;
+          for (const y of [rt, topY + 0.7]) {
+            body.quad([ma[0] + ox, y - 0.06, ma[1] + oz], [mb[0] + ox, y - 0.06, mb[1] + oz], [mb[0] + ox, y, mb[1] + oz], [ma[0] + ox, y, ma[1] + oz], n, [0, 0], [1, 0], [1, 1], [0, 1], COL.railing);
+            body.quad([mb[0] - ox, y - 0.06, mb[1] - oz], [ma[0] - ox, y - 0.06, ma[1] - oz], [ma[0] - ox, y, ma[1] - oz], [mb[0] - ox, y, mb[1] - oz], ni, [0, 0], [1, 0], [1, 1], [0, 1], COL.railing);
+          }
+          for (let d = 0.8; d < l; d += 1.6) {
+            const px = ma[0] + tx * d, pz = ma[1] + tz * d;
+            for (const sg of [1, -1]) {
+              const qx = px + n[0] * 0.04 * sg, qz = pz + n[2] * 0.04 * sg;
+              body.quad([qx - tx * 0.04, ct, qz - tz * 0.04], [qx + tx * 0.04, ct, qz + tz * 0.04], [qx + tx * 0.04, rt, qz + tz * 0.04], [qx - tx * 0.04, rt, qz - tz * 0.04], sg > 0 ? n : ni, [0, 0], [1, 0], [1, 1], [0, 1], COL.railing);
+            }
+          }
+          continue;
+        }
         if (modern) {
           const top = topY + 0.95;
           vq(a, b, CORNICE, top, n, COL.concrete);
@@ -689,6 +712,7 @@ function writeStructure(w, road, v, stone = w) {
     }
   };
   if (kind === 'flat') return plainSides(LAND_BOTTOM, COL.flat);
+  if (kind === 'overpass') return plainSides(SLAB_BOTTOM - 0.4, COL.concrete); // 桁の高さ（写真の A620 は淡いコンクリートの厚い桁）
   if (kind === 'modern') {
     plainSides(SLAB_BOTTOM, COL.concrete);
     for (const wt of wet) {

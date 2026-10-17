@@ -279,7 +279,7 @@ class TileStreamer {
     const trees = buildTrees(treePts, {
       isPlane: planeTreeTest(this.roadnet, this.inWater),
       canPlace: (x, z) => !this.roadnet.onRoad(x, z, 0.3) && !this.inWater(x, z) && !insideBuilding(x, z),
-      groundH: (x, z) => T.h(x, z),
+      groundH: (x, z) => (T.treeGround ? T.treeGround(x, z) : T.h(x, z)),
     });
     group.add(trees);
 

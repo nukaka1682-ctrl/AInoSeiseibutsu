@@ -13,7 +13,8 @@ export const CELL = { bike: 0, arrow: 1, bus: 2, n30: 3, n20: 4, solid: 5 };
 // 絵の大きさ（m）: [道の向きの長さ, 幅]。路面の文字は運転席から読めるよう道の向きに長く引き伸ばす
 export const PIC_SIZE = { bike: [1.8, 1.0], arrow: [3, 0.7], bus: [3.6, 1.5], n30: [2.8, 1.4], n20: [2.8, 1.4] };
 // 線の種類 [線, すき間]: T1（中央線・車線、3 m と 10 m）、T3（自転車レーン・路側線、3 m と 3.5 m）、実線（バスレーン）
-export const DASH = { t1: [3, 10], t3: [3, 3.5], solid: [6, 0] };
+export const DASH = { t1: [3, 10], t3: [3, 3.5], solid: [6, 0], fill: [6, 0] };
+export const RED_LANE = [0.5, 0.21, 0.17]; // 赤い舗装の自転車レーン（kind: 'fill' の線の色）
 
 // バスレーン・自転車レーンのある通り（IGN のデータに車線の種類がないので名前で。OSM の cycleway=lane も使う）
 export const LANE_LIST = [
@@ -22,7 +23,7 @@ export const LANE_LIST = [
   { match: /^Rue de la R[ée]publique$/i, bike: true },
   { match: /^All[ée]es Jean[- ]Jaur[èe]s$/i, bike: true },
   { match: /^Avenue de (la )?Grande[- ]Bretagne$/i, bike: true },
-  { match: /^Route de Bayonne$/i, bike: true },
+  { match: /^Route de Bayonne$/i, bike: true, red: true }, // 赤い舗装の自転車レーン（ユーザーの写真: 22 Route de Bayonne）
   { match: /^Avenue [EÉ]tienne Billi[èe]res$/i, bike: true },
 ];
 const LANE_MIN = 2.5; // 一覧の通りでレーンを取ったあとの一般の車線の最小の幅（m）
@@ -34,7 +35,7 @@ const SPEED_GAP = 150; // 同じ道の「30」の最小の間隔（m）
 export const zone20 = (x, z) => x > -1000 && x < -150 && z > -150 && z < 650;
 
 // 道 1 本の標示の並び（純粋な関数）。off: 中心線からの横のずれ（+ = 頂点の順に進む車の右）。
-// lines: { off, kind, w }、pics: { off, dir（+1 = 頂点の順の向き）, kind, step, phase }、
+// lines: { off, kind, w, color? }（kind: 'fill' は赤い舗装のレーンの面）、pics: { off, dir（+1 = 頂点の順の向き）, kind, step, phase }、
 // bike: 自転車レーンがあるか（交差点の自転車の待機ボックス）、right / left: 縁石に沿ってバス・自転車レーンがある側
 // （頂点の順に進む向きの右・左。そこには路上駐車しない: furniture.js）、rw / lw: その幅（m）、speed: 交差点を出た所に書く数字（'n30' / 'n20'）
 export function laneLayout(road, { x = 0, z = 0, old = false } = {}) {
@@ -71,12 +72,14 @@ export function laneLayout(road, { x = 0, z = 0, old = false } = {}) {
     if (cur.bike && room < 1 && hi - lo - (two ? 4 : 2) >= 1) room = 1;
     const bw = Math.min(1.5, two && room >= 3 ? room / 2 : room);
     if (bw >= (cur.bike ? 1 : 1.5)) {
+      if (cur.red) lines.push({ off: hi - bw / 2, kind: 'fill', w: bw - 0.05, color: RED_LANE });
       lines.push({ off: hi - bw, kind: 't3', w: 0.2 });
       pics.push({ off: hi - bw / 2, dir: 1, kind: 'bike', step: 40, phase: 10 }, { off: hi - bw / 2, dir: 1, kind: 'arrow', step: 40, phase: 13.5 });
       hi -= bw;
       out.bike = out.right = true;
       out.rw = bw;
       if (two && room >= 2 * bw) {
+        if (cur.red) lines.push({ off: lo + bw / 2, kind: 'fill', w: bw - 0.05, color: RED_LANE });
         lines.push({ off: lo + bw, kind: 't3', w: 0.2 });
         pics.push({ off: lo + bw / 2, dir: -1, kind: 'bike', step: 40, phase: 30 }, { off: lo + bw / 2, dir: -1, kind: 'arrow', step: 40, phase: 26.5 });
         lo += bw;
@@ -281,7 +284,7 @@ export function writeRoadMarkings(road, cum, lay, cuts, clip, lineW, picW, { y =
           if (!inClip(m.x, m.z)) continue;
           const A = P(p0, ln.off), B = P(p1, ln.off);
           const nA = [-A.uz * hw, A.ux * hw], nB = [-B.uz * hw, B.ux * hw];
-          lineW.quad([A.x - nA[0], y, A.z - nA[1]], [B.x - nB[0], y, B.z - nB[1]], [B.x + nB[0], y, B.z + nB[1]], [A.x + nA[0], y, A.z + nA[1]], UP, lineUV[0], lineUV[0], lineUV[1], lineUV[1], WHITE);
+          lineW.quad([A.x - nA[0], y, A.z - nA[1]], [B.x - nB[0], y, B.z - nB[1]], [B.x + nB[0], y, B.z + nB[1]], [A.x + nA[0], y, A.z + nA[1]], UP, lineUV[0], lineUV[0], lineUV[1], lineUV[1], ln.color || WHITE);
           count++;
         }
       }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DASH, catenaryStations, frameAt, inLaneBand, laneLayout, mergeIntervals, slicePolyline, subtract, tramCrossCuts, writePicture, writeRoadMarkings } from '../../src/world/markings.js';
+import { DASH, catenaryStations, frameAt, inLaneBand, laneLayout, mergeIntervals, slicePolyline, subtract, tramCrossCuts, writePicture, RED_LANE, writeRoadMarkings } from '../../src/world/markings.js';
 import { planStreets, writeSignal } from '../../src/world/streets.js';
 import { writeCatenary } from '../../src/world/ground.js';
 import { MeshWriter } from '../../src/world/meshwriter.js';
@@ -155,4 +155,18 @@ test('トラム: 架線柱は電車にかからない所、坂でも地面から
   assert.ok(Math.abs(cuts[2][0] - 167.7) < 1e-6 && Math.abs(cuts[2][1] - 172.3) < 1e-6);
   const pts = [[0, 0], [10, 0], [10, 10]];
   assert.deepEqual(slicePolyline(pts, [0, 10, 20], 5, 15), [[5, 0], [10, 0], [10, 5]]);
+});
+
+test('赤い舗装の自転車レーン: Route de Bayonne は自転車レーンの幅に赤い面（白い破線の下）', () => {
+  const lay = laneLayout(road({ name: 'Route de Bayonne', type: 'primary', width: 12 }));
+  const fills = lay.lines.filter((l) => l.kind === 'fill');
+  assert.equal(fills.length, 2, '両側');
+  for (const f of fills) {
+    assert.deepEqual(f.color, RED_LANE);
+    assert.ok(f.w > 0.9 && f.w < 1.5);
+    // 面は破線の内側（車道の縁の側）
+    const dash = lay.lines.find((l) => l.kind === 't3' && Math.sign(l.off) === Math.sign(f.off));
+    assert.ok(Math.abs(f.off) > Math.abs(dash.off));
+  }
+  assert.equal(laneLayout(road({ name: 'Avenue Étienne Billières', type: 'primary', width: 12 })).lines.filter((l) => l.kind === 'fill').length, 0, 'ほかの通りは白線だけ');
 });

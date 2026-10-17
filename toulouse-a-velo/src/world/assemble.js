@@ -150,7 +150,7 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   const trees = buildTrees(treePts, {
     isPlane: planeTreeTest(roadnet, inWater),
     canPlace: (x, z) => !roadnet.onRoad(x, z, 0.3) && !inWater(x, z) && !insideBuilding(x, z),
-    groundH: (x, z) => terrain.h(x, z),
+    groundH: (x, z) => (terrain.treeGround ? terrain.treeGround(x, z) : terrain.h(x, z)),
   });
   group.add(trees);
   // 木の幹は道路の上でなければ当たり判定を付ける（道路に張り出した枝の下は通れる）
