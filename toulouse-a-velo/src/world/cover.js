@@ -140,13 +140,18 @@ function onBeforeCompile(uniforms) {
 
 // 1 枚の板: bounds（ローカル座標の範囲）を覆う。cover: { cols, rows, rle }、inOldTown(x, z): 旧市街か、
 // parsed: 地図（広場と並木道の名前で覆いを補正する。data/cover.js の coverStamps）
-export function buildCoverMesh(cover, bounds, shared, inOldTown = () => false, parsed = null) {
+// geometry: 地形のタイルの地面（terrainmesh.js。頂点はワールド座標）。あればそれに重ねて描く（同じ三角形なので地面とぴったり重なる）
+export function buildCoverMesh(cover, bounds, shared, inOldTown = () => false, parsed = null, geometry = null) {
   const grid = decodeCover(cover);
   const w = bounds.maxX - bounds.minX, h = bounds.maxZ - bounds.minZ;
-  const cx = (bounds.minX + bounds.maxX) / 2, cz = (bounds.minZ + bounds.maxZ) / 2;
-  const g = new THREE.PlaneGeometry(w, h, SEG, SEG);
-  g.rotateX(-Math.PI / 2);
-  g.deleteAttribute('uv');
+  let cx = (bounds.minX + bounds.maxX) / 2, cz = (bounds.minZ + bounds.maxZ) / 2;
+  let g = geometry;
+  if (g) cx = cz = 0;
+  else {
+    g = new THREE.PlaneGeometry(w, h, SEG, SEG);
+    g.rotateX(-Math.PI / 2);
+    g.deleteAttribute('uv');
+  }
   const pos = g.attributes.position;
   const old = new Float32Array(pos.count);
   let anyOld = false;

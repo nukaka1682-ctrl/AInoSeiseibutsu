@@ -15,6 +15,8 @@ import { MeshWriter } from './meshwriter.js';
 import { CAR_ROADS } from './parse.js';
 import { Grid, clipPolylineToRect, closestOnSegment } from '../geo.js';
 import { offsets, roadStyle } from './ground.js';
+import { DATUM } from './terrain.js';
+import { cleanProfile, fitDeckEnds } from './terraincond.js';
 
 const c3 = (hex, k = 1) => {
   const c = new THREE.Color(hex);
@@ -323,18 +325,143 @@ export function archRise(a, depth, ring) {
 
 // ---- メッシュ ----
 
-// 橋（tile の中の橋 bridges）を作る。allRoads: エリア全体の道路（並んだ橋のまとまりを調べる）
-export function buildBridges(bridges, allRoads, mats, waterDepthAt, clipRect) {
+// ---- 地形があるときの橋の高さ ----
+// 橋のまとまり（親の way）ごとの橋面の縦断面を地形に登録する（terrain.deck）。事前取得で表面モデルから測った縦断面
+// （両端の緯度経度で合わせる）があればそれ、なければ両端の地面を結ぶ線に少し山なりを足したもの。両端は 30 m かけて
+// 地面の高さに合わせる（取り付けの道路と段差ができないように）。戻り値: 親の way → 縦断面 { pts, y, step, length, half }
+const deckCache = new WeakMap();
+export function setupDecks(terrain, roads, proj, waterDepthAt = () => 0) {
+  if (!terrain || terrain.flat) return new Map();
+  const info = bridgeGroups(roads);
+  const baked = (terrain.profiles || []).map((b) => ({ ...b, pa: proj.project(...b.a), pb: proj.project(...b.b) }));
+  const near = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1]) < 3;
+  const out = new Map();
+  const raw = [], seen = new Set();
+  for (const v of info.values()) {
+    const r = v.root;
+    if (seen.has(r)) continue;
+    seen.add(r);
+    const fr = polyFrame(r.pts), L = fr.length, step = 5;
+    const p0 = r.pts[0], p1 = r.pts[r.pts.length - 1];
+    const b = baked.find((e) => near(e.pa, p0) && near(e.pb, p1));
+    const n = Math.max(2, Math.ceil(L / step) + 1);
+    const h0 = terrain.h(p0[0], p0[1]), h1 = terrain.h(p1[0], p1[1]);
+    // 測った縦断面（外れ値を捨てる。信用できなければ両端の地面を結ぶ直線 + ゆるいアーチ）
+    let y = null;
+    if (b) {
+      const ys = [];
+      for (let k = 0; k < n; k++) ys.push(b.y[Math.min(b.y.length - 1, Math.round(Math.min(L, k * step) / step))] - DATUM);
+      y = cleanProfile(ys);
+    }
+    if (!y) {
+      y = [];
+      for (let k = 0; k < n; k++) {
+        const t = Math.min(L, k * step) / (L || 1);
+        y.push(h0 + (h1 - h0) * t + Math.min(1.2, 0.01 * L) * 4 * t * (1 - t));
+      }
+    }
+    raw.push({ r, y, L, step, p0, p1, h0, h1, measured: !!b });
+  }
+  // 両端の高さ: ふつうの道路につながる端は地面（取り付ける道路の高さ）、ほかの橋の端とだけつながる所（高架の続き）は両方の端の平均。
+  // 差が大きいときは橋の中に長い坂を作る（fitDeckEnds）。どの橋も、端では必ず道路とつながる
+  const ends = [];
+  raw.forEach((e, i) => {
+    ends.push({ i, k: 0, p: e.p0, y: e.y[0] });
+    ends.push({ i, k: 1, p: e.p1, y: e.y[e.y.length - 1] });
+  });
+  const endGrid = new Grid(20);
+  ends.forEach((e, j) => endGrid.insertPoint(e.p[0], e.p[1], j));
+  // 橋ではない道路の点（橋の端がふつうの道路につながるか）
+  const roadNodes = new Grid(20);
+  for (const o of roads) if (!o.bridge && !o.tunnel) for (const q of o.pts) roadNodes.insertPoint(q[0], q[1], q);
+  const onLand = (p) => {
+    let hit = false;
+    roadNodes.queryPoint(p[0], p[1], 1.5, (q) => {
+      if (!hit && Math.hypot(q[0] - p[0], q[1] - p[1]) < 1.5) hit = true;
+    });
+    return hit;
+  };
+  const target = (e, i, k) => {
+    const p = k ? e.p1 : e.p0;
+    if (onLand(p)) return k ? e.h1 : e.h0;
+    const mates = [];
+    endGrid.queryPoint(p[0], p[1], 2, (j) => {
+      const o = ends[j];
+      if (o.i !== i && Math.hypot(o.p[0] - p[0], o.p[1] - p[1]) < 2) mates.push(o.y);
+    });
+    if (!mates.length) return k ? e.h1 : e.h0;
+    const own = k ? e.y[e.y.length - 1] : e.y[0];
+    return (own + mates.reduce((s, v) => s + v, 0)) / (mates.length + 1);
+  };
+  const targets = raw.map((e, i) => [target(e, i, 0), target(e, i, 1)]);
+  raw.forEach((e, i) => {
+    const { r } = e;
+    const y = fitDeckEnds(e.y, e.step, e.L, targets[i][0], targets[i][1]);
+    const { step, L } = e;
+    // 半幅: 並んだ way（歩道橋など）も含めた橋全体
+    let half = deckHalf(r);
+    for (const [m, mv] of info) {
+      if (mv.root !== r || m === r) continue;
+      const mid = m.pts[m.pts.length >> 1];
+      let d2 = Infinity;
+      for (let i = 0; i + 1 < r.pts.length; i++) d2 = Math.min(d2, closestOnSegment(mid[0], mid[1], ...r.pts[i], ...r.pts[i + 1]).d2);
+      half = Math.max(half, Math.sqrt(d2) + deckHalf(m));
+    }
+    out.set(r, { pts: r.pts, y, step, length: L, half: half + 0.3, measured: e.measured });
+  });
+  terrain.setDecks([...out.values()]);
+  deckCache.set(terrain, out);
+  return out;
+}
+
+// 橋 root の頂点の高さの置き換え: 蛇腹より上（相対 y ≥ −1.5）は縦断面に載せ、下（アーチ・橋脚）は縦断面の 1.5 m 下から
+// 水面（陸の上なら地面）まで引き延ばす。wet: 水の区間（相対の高さで作った水面の深さ depth。区間の外は最大の深さ）
+function deckMap(terrain, prof, wet, waterDepthAt) {
+  const dMax = Math.max(2, ...wet.map((w) => w.depth));
+  const fr = polyFrame(prof.pts);
+  const sAt = (x, z) => {
+    let best = Infinity, s = 0;
+    for (let i = 0; i + 1 < prof.pts.length; i++) {
+      const c = closestOnSegment(x, z, ...prof.pts[i], ...prof.pts[i + 1]);
+      if (c.d2 < best) {
+        best = c.d2;
+        s = fr.cum[i] + c.t * (fr.cum[i + 1] - fr.cum[i]);
+      }
+    }
+    return s;
+  };
+  return (x, y, z) => {
+    const s = sAt(x, z), D = terrain.deckY(prof, s);
+    if (y >= -1.5) return D + y;
+    const dRef = Math.max(2, wet.find((w) => s >= w.s0 - 4 && s <= w.s1 + 4)?.depth ?? dMax);
+    const low = waterDepthAt(x, z) > 0 ? terrain.waterLevel(x, z) : terrain.h(x, z);
+    if (y < -dRef) return low + (y + dRef);
+    const k = (D - 1.5 - low) / Math.max(0.5, dRef - 1.5);
+    return D - 1.5 + (y + 1.5) * k;
+  };
+}
+
+// 橋（tile の中の橋 bridges）を作る。allRoads: エリア全体の道路（並んだ橋のまとまりを調べる）。terrain: 地形（あれば橋面を縦断面に載せる）
+export function buildBridges(bridges, allRoads, mats, waterDepthAt, clipRect, terrain = null) {
   const info = bridgeGroups(allRoads);
-  const deck = new MeshWriter();
-  const body = new MeshWriter();
+  const decks = terrain && !terrain.flat ? deckCache.get(terrain) : null;
+  const deck = new MeshWriter(decks ? { maxEdge: 5 } : {});
+  const body = new MeshWriter(decks ? { maxEdge: 5 } : {});
   for (const road of bridges) {
     const v = info.get(road);
     if (!v) continue;
     const root = info.get(v.root);
-    if (!root.style) root.style = bridgeStyle(v.root, root, waterDepthAt);
+    const prof = decks?.get(v.root);
+    if (!root.style) root.style = bridgeStyle(v.root, root, waterDepthAt, prof ? (x, z) => terrain.waterLevel(x, z) : null, prof && ((s) => terrain.deckY(prof, s)));
+    if (prof) {
+      deck.map = body.map = deckMap(terrain, prof, root.style.wet, waterDepthAt);
+    }
     writeDeck(deck, body, road, v.half, root.style.kind, info, clipRect);
-    if (v.root === road) writeStructure(body, road, root);
+    if (v.root === road) {
+      writeStructure(body, road, root);
+      if (prof) writeLandPiers(body, road, root, prof, terrain, waterDepthAt, Math.max(2, ...root.style.wet.map((w) => w.depth)));
+    }
+    deck.map = body.map = null;
   }
   const g = new THREE.Group();
   g.name = 'bridges';
@@ -352,8 +479,25 @@ export function buildBridges(bridges, allRoads, mats, waterDepthAt, clipRect) {
   return g;
 }
 
-// 橋の種類と、水の区間ごとのアーチの並び
-export function bridgeStyle(road, v, waterDepthAt) {
+// 陸の上の高い橋（道路・線路を越える橋）: 橋面が地面より 2.5 m 以上高い所に、約 25 m ごとにコンクリートの橋脚
+function writeLandPiers(w, road, v, prof, terrain, waterDepthAt, dRef) {
+  const fr = polyFrame(road.pts);
+  const n = Math.floor(fr.length / 25);
+  for (let k = 1; k <= n; k++) {
+    const s = (fr.length * k) / (n + 1);
+    const [x, z] = fr.at(road.pts, s);
+    if (waterDepthAt(x, z) > 0) continue;
+    const D = terrain.deckY(prof, s);
+    if (D - terrain.h(x, z) < 2.5) continue;
+    const [ux, uz] = fr.tangent(fr.locate(s)[0]);
+    const off = ((v.extL ?? 3) - (v.extR ?? 3)) / 2;
+    writePier(w, x - uz * off, z + ux * off, ux, uz, ((v.extL ?? 3) + (v.extR ?? 3)) * 0.3, 0.6, 1.2, SLAB_BOTTOM, -dRef - 0.6, COL.concreteDark);
+  }
+}
+
+// 橋の種類と、水の区間ごとのアーチの並び。levelAt(x, z) / deckAt(s): 地形があるときの水面と橋面の高さ（水の区間の深さを
+// 本当の橋面から水面までの高さにして、アーチの大きさを本物の橋に合わせる）
+export function bridgeStyle(road, v, waterDepthAt, levelAt = null, deckAt = null) {
   const fr = polyFrame(road.pts);
   const step = 1.5;
   const depths = [];
@@ -362,6 +506,14 @@ export function bridgeStyle(road, v, waterDepthAt) {
     depths.push(waterDepthAt(x, z));
   }
   const wet = wetIntervals(depths, step).map((w) => ({ ...w, s1: Math.min(w.s1, fr.length) }));
+  if (levelAt && deckAt) {
+    for (const w of wet) {
+      const hs = [];
+      for (let s = w.s0; s <= w.s1; s += 4) hs.push(deckAt(s) - levelAt(...fr.at(road.pts, s)));
+      hs.sort((a, b) => a - b);
+      if (hs.length) w.depth = Math.max(w.depth, Math.min(18, hs[hs.length >> 1]));
+    }
+  }
   if (!wet.length) return { kind: 'flat', wet };
   // 石の橋の一覧にない橋と、高速道路・幹線道路を含むまとまりは近代の橋
   const members = v.members || [road];

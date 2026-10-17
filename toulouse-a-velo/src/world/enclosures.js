@@ -107,8 +107,10 @@ export function projectTrees(trees, proj) {
 }
 
 // 塀のメッシュ（materials は buildings.js の enclosureBrick・enclosureRender）。collision があれば当たり判定を足す
-export function buildEnclosures(segs, materials, collision = null) {
-  const brick = new MeshWriter(), render = new MeshWriter(), cap = new MeshWriter();
+// terrain: 地形（塀を地面に沿わせる。y は地面からの高さ）
+export function buildEnclosures(segs, materials, collision = null, terrain = null) {
+  const o = { drape: terrain, lift: -0.05 }; // 少し地面に埋める（地面の細かい凹凸で浮かないように）
+  const brick = new MeshWriter(o), render = new MeshWriter(o), cap = new MeshWriter(o);
   for (const [ax, az, bx, bz, h] of segs) {
     const L = Math.hypot(bx - ax, bz - az);
     if (L < 0.5) continue;

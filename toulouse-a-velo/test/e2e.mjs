@@ -30,6 +30,8 @@ async function newPage(query, baked = null) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
   // 同梱データ（data/light.json）の代わり
   if (baked) await page.route('**/data/light.json', (r) => r.fulfill({ contentType: 'application/json', body: JSON.stringify(baked) }));
+  // 同梱の地形（本物のトゥールーズ）は合成の地図と合わないので使わず、合成の LiDAR の地形モデルから作らせる（直接取得の経路を試す）
+  await page.route('**/data/light-terrain.bin', (r) => r.fulfill({ status: 404, body: '' }));
   page.on('console', (m) => {
     if (m.type() === 'error') errors.push(m.text());
   });
@@ -47,7 +49,7 @@ async function newPage(query, baked = null) {
 
 const bikeState = (page) => page.evaluate(() => {
   const b = window.__tav.bike;
-  return { x: b.x, z: b.z, speed: b.speed, heading: b.heading };
+  return { x: b.x, y: b.y, z: b.z, speed: b.speed, heading: b.heading };
 });
 
 try {
@@ -57,6 +59,8 @@ try {
   await page.screenshot({ path: join(out, '01-start.png') });
   const start = await bikeState(page);
   check(true, `スタート地点 (${start.x.toFixed(1)}, ${start.z.toFixed(1)})`);
+  // 合成の地形モデルは標高 140 m → y = 140 − 145 = −5（歩道の上なら 0.14 m 高い）
+  check(Number.isFinite(start.y) && Math.abs(start.y + 5) < 0.4, `地形の高さに乗る（y = ${start.y?.toFixed(2)}、標高 ${(start.y + 145).toFixed(1)} m）`);
   const capitole = (p) => p.evaluate(() => {
     let tris = 0;
     window.__tav.world.group.traverse((o) => {

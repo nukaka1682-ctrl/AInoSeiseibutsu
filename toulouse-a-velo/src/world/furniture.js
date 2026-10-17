@@ -663,15 +663,16 @@ export class FurnitureSet {
     const n = items.length;
     const mesh = new THREE.InstancedMesh(geometry, material, n);
     mesh.name = name;
-    const mats = new Float32Array(n * 16), xz = new Float32Array(n * 2);
+    const mats = new Float32Array(n * 16), xz = new Float32Array(n * 2), ys = new Float32Array(n);
     const cols = items[0].color ? new Float32Array(n * 3) : null;
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), s = new THREE.Vector3(), e = new THREE.Euler(), c = new THREE.Color();
     items.forEach((it, i) => {
       // a: Y 軸まわりの向き、roll: 模型の x 軸（前後）まわりの傾き（歩道に乗り上げた車）
-      m.compose(p.set(it.x, it.y || 0, it.z), q.setFromEuler(e.set(it.roll || 0, it.a || 0, 0, 'YXZ')), s.set(it.sx || 1, it.sy || 1, 1));
+      m.compose(p.set(it.x, it.y || 0, it.z), q.setFromEuler(e.set(it.roll || 0, it.a || 0, it.pitch || 0, 'YXZ')), s.set(it.sx || 1, it.sy || 1, 1));
       m.toArray(mats, i * 16);
       xz[2 * i] = it.x;
       xz[2 * i + 1] = it.z;
+      ys[i] = it.y || 0;
       if (cols) c.set(it.color).toArray(cols, i * 3);
     });
     if (cols) mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3);
@@ -681,7 +682,7 @@ export class FurnitureSet {
     mesh.count = 0;
     mesh.visible = false;
     mesh.boundingSphere = new THREE.Sphere();
-    this.parts.push({ mesh, mats, xz, cols, n });
+    this.parts.push({ mesh, mats, xz, ys, cols, n });
     this.group.add(mesh);
     this.count += n;
   }
@@ -693,11 +694,13 @@ export class FurnitureSet {
     const r2 = FURNITURE_FAR * FURNITURE_FAR;
     for (const P of this.parts) {
       const dst = P.mesh.instanceMatrix.array, dc = P.mesh.instanceColor?.array;
-      let k = 0, x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+      let k = 0, x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity, y0 = Infinity, y1 = -Infinity;
       for (let i = 0; i < P.n; i++) {
         const ix = P.xz[2 * i], iz = P.xz[2 * i + 1], dx = ix - x, dz = iz - z;
         if (dx * dx + dz * dz > r2) continue;
         [x0, z0, x1, z1] = [Math.min(x0, ix), Math.min(z0, iz), Math.max(x1, ix), Math.max(z1, iz)];
+        y0 = Math.min(y0, P.ys[i]);
+        y1 = Math.max(y1, P.ys[i]);
         dst.set(P.mats.subarray(i * 16, i * 16 + 16), k * 16);
         if (dc) dc.set(P.cols.subarray(i * 3, i * 3 + 3), k * 3);
         k++;
@@ -707,14 +710,30 @@ export class FurnitureSet {
       P.mesh.instanceMatrix.needsUpdate = true;
       if (dc) P.mesh.instanceColor.needsUpdate = true;
       // 描く物をすべて囲む球（視錐台カリング用。小物の大きさの分 12 m 足す）
-      if (k) P.mesh.boundingSphere.set(P.mesh.boundingSphere.center.set((x0 + x1) / 2, 5, (z0 + z1) / 2), Math.hypot(x1 - x0, z1 - z0) / 2 + 12);
+      // （坂の上下に並ぶ物も囲むように、高さの幅も入れる）
+      if (k) P.mesh.boundingSphere.set(P.mesh.boundingSphere.center.set((x0 + x1) / 2, (y0 + y1) / 2 + 5, (z0 + z1) / 2), Math.hypot(x1 - x0, z1 - z0, y1 - y0) / 2 + 12);
     }
   }
 }
 
 // 範囲の小物を作り、当たり判定（cw: CollisionWorld）に足す。戻り値の group をシーンに足し、毎フレーム cull(x, z) を呼ぶ
+// opts.terrain: 地形（小物を地面の高さに。車は坂に沿って前後に傾ける）
 export function buildFurniture(opts, cw = null) {
   const items = planFurniture(opts);
+  const T = opts.terrain;
+  if (T && !T.flat) {
+    for (const [k, list] of Object.entries(items)) {
+      if (k === 'colliders') continue;
+      for (const it of list) {
+        it.y = (it.y || 0) + T.h(it.x, it.z);
+        if (k === 'cars') {
+          // 模型の x 軸（車の前後）の向きの勾配
+          const fx = Math.cos(it.a || 0), fz = -Math.sin(it.a || 0);
+          it.pitch = Math.atan((T.h(it.x + fx * 2, it.z + fz * 2) - T.h(it.x - fx * 2, it.z - fz * 2)) / 4);
+        }
+      }
+    }
+  }
   const set = new FurnitureSet();
   const mat = furnitureMaterial();
   set.add('cars', carGeometry(), mat, items.cars, { shadow: true });

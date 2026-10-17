@@ -268,7 +268,7 @@ export class RoadNetwork {
       const best = this.nearestSegment(x, z, r, (s) => s.bike && !s.road.bridge && s.road.type !== 'service');
       if (best && isOk(best.x, best.z)) {
         const s = best.seg;
-        return { x: best.x, z: best.z, heading: Math.atan2(s.bx - s.ax, -(s.bz - s.az)) };
+        return { x: best.x, z: best.z, heading: Math.atan2(s.bx - s.ax, -(s.bz - s.az)), road: s.road };
       }
     }
     return null;
