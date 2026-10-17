@@ -69,3 +69,39 @@ test('メトロの出入口: 坂の途中の吹き抜けの穴は、周りの地
   for (const x of [-6, -2, 3, 6]) assert.ok(Math.abs(T.h(x, 0) - 0.04 * x) < 0.25, `穴の中 ${x}: ${T.h(x, 0)}`);
   assert.ok(Math.abs(rimAt(ent[0], 5, 0) - 0.2) < 0.05, '縁の高さは傾きの面');
 });
+
+test('地下駐車場の車の坂: 駐車場の近くの長くてなだらかな穴だけ。急な吹き抜け・遠い穴はメトロの出入口のまま', async () => {
+  const { isParkingRamp } = await import('../../src/data/metro.js');
+  const ramp = { len: 26, wid: 11, depth: 4.6 }; // なだらかな坂（18 %）
+  assert.ok(isParkingRamp(ramp, 60));
+  assert.ok(!isParkingRamp(ramp, 170), '駐車場から遠い');
+  assert.ok(isParkingRamp({ len: 27, wid: 16, depth: 8.8 }, 3), 'キャピトル広場の坂（駐車場の印の上。幅が広く奥が深い）');
+  assert.ok(!isParkingRamp({ len: 27, wid: 16, depth: 8.8 }, 60), '印から離れた幅の広い急な穴');
+  assert.ok(!isParkingRamp({ len: 12, wid: 6, depth: 6.9 }, 10), '急な階段の吹き抜け（エスキロル）');
+  assert.ok(!isParkingRamp({ len: 8, wid: 4, depth: 1.5 }, 10), '短い穴');
+  const proj = { project: (lat, lon) => [(lon - 1.44) * 80000, -(lat - 43.6) * 111000] };
+  const [p, m] = projectEntrances([
+    { kind: 'parking', name: 'Parking Capitole', lat: 43.6, lon: 1.44, len: 36, wid: 11, ang: 0, down: 1, depth: 4.6 },
+    { station: 'Capitole', lat: 43.6, lon: 1.441, len: 36, wid: 11, ang: 0, down: 1, depth: 4.6 },
+  ], proj);
+  assert.equal(p.kind, 'parking');
+  assert.equal(p.wid, 11);
+  assert.equal(m.kind, 'metro', '古いデータ（kind なし）はメトロ');
+  assert.equal(m.wid, 9);
+});
+
+test('穴の向きは、近くの建物の壁の向き（15° 以内）にそろえる', async () => {
+  const { snapToStreetGrid } = await import('../../src/data/metro.js');
+  // 東西・南北の壁の街並み（少し回った 3° の向き）
+  const r = (3 * Math.PI) / 180, c = Math.cos(r), s = Math.sin(r);
+  const segs = [];
+  for (let k = -3; k <= 3; k++) {
+    segs.push([20 * k * c, 20 * k * s, (20 * k + 15) * c, (20 * k + 15) * s]);
+    segs.push([-30 * s + 10 * k * c, 30 * c + 10 * k * s, -30 * s + 10 * k * c - 12 * s, 30 * c + 10 * k * s + 12 * c]);
+  }
+  const deg = (a) => (a * 180) / Math.PI;
+  assert.ok(Math.abs(deg(snapToStreetGrid((-10.6 * Math.PI) / 180, 0, 0, segs)) - 3) < 1.2, '−10.6° → 3°');
+  assert.ok(Math.abs(deg(snapToStreetGrid((80 * Math.PI) / 180, 0, 0, segs)) - 93) < 1.2, '80° → 93°（南北の向き）');
+  assert.ok(Math.abs(deg(snapToStreetGrid((40 * Math.PI) / 180, 0, 0, segs)) - 40) < 1e-6, '離れた向きはそのまま');
+  assert.equal(snapToStreetGrid(0.3, 500, 500, segs), 0.3, '近くに建物がなければそのまま');
+});

@@ -16,7 +16,7 @@ import { bridgeGroups, buildBridges, setupDecks } from './bridges.js';
 import { DRAPE_LIFT, FLAT_TERRAIN } from './terrain.js';
 import { buildFarTerrain, createTerrainMaterials, splitGeometry, TERRAIN_ORDER } from './terrainmesh.js';
 import { conditionRoads, despike, sharpenQuays } from './terraincond.js';
-import { buildMetroEntrances, createMetroMaterials, fillMetroPits, projectEntrances, writeEntranceMasks } from './metro.js';
+import { buildMetroEntrances, createMetroMaterials, fillMetroPits, orientRamps, projectEntrances, writeEntranceMasks } from './metro.js';
 
 export const ORDER = {
   waterMask: -50,
@@ -480,6 +480,7 @@ export function buildGroundBase(parsed, rect, mats, terrain = FLAT_TERRAIN, layo
     T.conditioned = true;
     // メトロの出入口: 地形モデルに写った吹き抜けの穴を周りの高さで埋める（穴は下でステンシルにして、中に階段を作る）
     T.metro = projectEntrances(T.metroRaw, T.proj).filter((e) => !inWater(e.x, e.z));
+    orientRamps(T.metro, parsed.roads);
     fillMetroPits(T, T.metro);
     conditionRoads(T, parsed.roads, inWater);
     T.quayWalls = sharpenQuays(T, parsed.proj ? parsed.proj.project(...QUAY_LATLON) : [-250, 0], QUAY_RADIUS + 150, { inWater, paths: parsed.roads });

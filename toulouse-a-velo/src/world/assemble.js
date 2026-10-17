@@ -14,7 +14,7 @@ import { buildCoverMesh } from './cover.js';
 import { tileBounds, tileLayout } from '../data/tiles.js';
 import { buildTrees, fillParkTrees, planeTreeTest, streetTrees } from './trees.js';
 import { buildEnclosures, clearRoads, projectTrees, projectWalls, tameWalls } from './enclosures.js';
-import { clearEntrances, entranceWalls, projectEntrances } from './metro.js';
+import { clearEntrances, entranceWalls, inEntrance, projectEntrances } from './metro.js';
 import { findTowers } from './towers.js';
 import { buildMonuments, findMonuments, monumentClearance, monumentSolid } from './monuments.js';
 import { findCapitoleFacade, markBrickSites } from './landmarkfacades.js';
@@ -119,7 +119,7 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   let treePts;
   if (data.trees?.length) {
     // LiDAR で見つけた木（水の上・道路の真ん中は除く）
-    treePts = projectTrees(data.trees, proj).filter((p) => !inWater(p.x, p.z) && !roadnet.onRoad(p.x, p.z, -1.5));
+    treePts = projectTrees(data.trees, proj).filter((p) => !inWater(p.x, p.z) && !roadnet.onRoad(p.x, p.z, -1.5) && !inEntrance(terrain.metro || [], p.x, p.z));
   } else {
     const m = 30;
     const inRect = ([x, z]) => x > rect.minX - m && x < rect.maxX + m && z > rect.minZ - m && z < rect.maxZ + m;
