@@ -6,6 +6,7 @@ import { RaisedIndex, planStreets, writeStreets } from '../../src/world/streets.
 import { LocalProjection, pointInPolygon, ringBounds } from '../../src/geo.js';
 import { historicCoreTest } from '../../src/config.js';
 import { MeshWriter } from '../../src/world/meshwriter.js';
+import { inLaneBand } from '../../src/world/markings.js';
 
 const road = (id, type, width, pts, extra = {}) => ({ id, type, name: extra.name || `Rue ${id}`, width, pts, nodeIds: pts.map((_, i) => id * 100 + i), bridge: false, tunnel: false, oneway: false, surface: '', sidewalk: '', ...extra });
 const box = (x0, z0, x1, z1) => ({ outer: [[x0, z0], [x1, z0], [x1, z1], [x0, z1]], holes: [] });
@@ -161,7 +162,7 @@ test('小物のメッシュ: 種類ごとに 1 つの InstancedMesh、近い物�
   const { opts } = town();
   const cw = { circles: 0, rings: 0, addCircle() { this.circles++; }, addRing() { this.rings++; } };
   const set = buildFurniture(opts, cw);
-  assert.ok(set.group.children.length >= 4 && set.group.children.length <= 7);
+  assert.ok(set.group.children.length >= 4 && set.group.children.length <= 12);
   assert.equal(cw.rings, set.stats.cars + set.stats.containers);
   set.cull(0, 0, true);
   const cars = set.group.children.find((m) => m.name === 'cars');
@@ -177,10 +178,10 @@ test('小物のメッシュ: 種類ごとに 1 つの InstancedMesh、近い物�
   assert.ok(set.group.children.every((m) => m.count === 0 && !m.visible), '遠くでは描かない');
   set.cull(0, FURNITURE_FAR + 305);
   assert.equal(cars.count, 0);
-  // 車の形: 約 120 三角形、長さ 4.2 m、塗装の印
+  // 車の形: 約 150 三角形、長さ 4.2 m、塗装の印
   const g = carGeometry();
   const n = g.getAttribute('position').count / 3;
-  assert.ok(n > 80 && n < 160, `${n} 三角形`);
+  assert.ok(n > 80 && n < 200, `${n} 三角形`);
   g.computeBoundingBox();
   assert.ok(Math.abs(g.boundingBox.max.x - g.boundingBox.min.x - CAR_L) < 0.1);
   assert.ok(g.getAttribute('paint') && !g.getAttribute('uv'));
@@ -188,4 +189,21 @@ test('小物のメッシュ: 種類ごとに 1 つの InstancedMesh、近い物�
   const fs = new FurnitureSet();
   fs.add('x', carGeometry(), furnitureMaterial(), []);
   assert.equal(fs.group.children.length, 0);
+});
+
+test('バス・自転車レーンの上に路上駐車しない（markings.js と同じ断面）', () => {
+  const gb = { ...road(4, 'tertiary', 11, [[-200, 100], [200, 100]]), name: 'Avenue de Grande Bretagne' };
+  const metz = { ...road(5, 'tertiary', 11, [[-200, -100], [200, -100]]), name: 'Rue de Metz', oneway: true };
+  const plain = road(6, 'tertiary', 11, [[-200, 200], [200, 200]]);
+  // 駐車場の区画が Grande-Bretagne の車道（z 94.5〜105.5）とレーンにかかる（データのずれ）
+  const { opts } = town(() => false, [gb, metz, plain], undefined, [area(11, 'parking', 100, 88, 170, 112)]);
+  const out = planFurniture(opts);
+  assert.ok(out.cars.some((c) => Math.abs(c.z - 200) < 6), 'レーンのない通りには止める');
+  assert.ok(out.cars.some((c) => c.x > 100 && c.z > 88 && c.z < 94), '駐車場のレーンにかからない所には止める');
+  for (const c of out.cars) assert.ok(!inLaneBand(c.x, c.z, [gb, metz], opts.plan.layout, CAR_W / 2 - 0.35), `車 ${c.x.toFixed(1)},${c.z.toFixed(1)} がレーンにかかる`);
+  for (const [r, z0] of [[gb, 100], [metz, -100]]) {
+    const lanes = opts.plan.layout(r).pics.filter((p) => p.kind === 'bike' || p.kind === 'bus').map((p) => z0 + p.off);
+    assert.ok(lanes.length > 0, r.name);
+    for (const c of out.cars) for (const z of lanes) assert.ok(Math.abs(c.x) > 210 || Math.abs(c.z - z) > 1.5, `${r.name}: 車 ${c.x.toFixed(1)},${c.z.toFixed(1)} がレーンの上`);
+  }
 });

@@ -8,6 +8,7 @@
 //   npm run fetch-data -- centre --ign    # IGN BD TOPO だけで作る
 //   npm run fetch-data -- toulouse        # トゥールーズ全体（半径 5 km）: 道路などの基本データ（toulouse.json）と、
 //                                         # 建物・塀・木・地面の覆いを 500 m のタイルに分けたファイル（toulouse-tiles/<i>_<j>.json）
+//   npm run fetch-data -- all --oneway    # 逆向きの一方通行の一覧（<preset>-oneway.json）だけ作る
 //   npm run fetch-data -- toulouse --resume  # 途中で止まった取得の続き（今の形式で保存済みのタイルは取得し直さない）
 //
 // 塀と木は、地籍（敷地の境界）と LiDAR HD の表面モデルから見つける（src/data/walls.js）。
@@ -26,11 +27,13 @@ import { fetchWfsLayer } from '../src/data/bdtopo.js';
 import { IGN_LAYERS } from '../src/data/ign.js';
 import { areaFrame } from '../src/world/assemble.js';
 import { DATA_VERSION } from '../src/config.js';
+import { fetchReverseKeys } from '../src/data/oneway.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
 const provider = args.includes('--ign') ? 'ign' : 'auto';
 const resume = args.includes('--resume');
+const onewayOnly = args.includes('--oneway');
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const arg = args.find((a) => !a.startsWith('--')) || DEFAULT_AREA;
 const ids = arg === 'all' ? Object.keys(AREA_PRESETS) : [arg];
@@ -43,6 +46,9 @@ for (const id of ids) {
   }
   const bbox = bboxAround(preset.lat, preset.lon, preset.radius);
   console.log(`[${id}] bbox ${JSON.stringify(bbox)}`);
+  // 逆向きの一方通行の一覧（IGN の 'Sens inverse'。src/data/oneway.js）。古い形式の地図データを直すのに使う
+  await bakeOneway(id, bbox);
+  if (onewayOnly) continue;
   if (preset.stream) {
     await bakeStream(id, bbox);
     continue;
@@ -81,6 +87,18 @@ for (const id of ids) {
   const json = JSON.stringify(save);
   await writeFile(out, json);
   console.log(`  保存: ${out} (${(json.length / 1048576).toFixed(1)} MB)`);
+}
+
+async function bakeOneway(id, bbox) {
+  try {
+    const keys = await fetchReverseKeys(bbox, { onPage: (n) => process.stdout.write(`\r  道路（一方通行の向き）: ${n.toLocaleString()} 件`.padEnd(60)) });
+    const out = join(root, 'public', 'data', `${id}-oneway.json`);
+    await mkdir(dirname(out), { recursive: true });
+    await writeFile(out, JSON.stringify({ keys }));
+    console.log(`\n  保存: ${out}（逆向きの一方通行 ${keys.length.toLocaleString()} 本）`);
+  } catch (err) {
+    console.log(`\n  逆向きの一方通行の一覧を作れませんでした: ${err.message}`);
+  }
 }
 
 // 広いエリア: 基本データ（建物以外）と、建物をタイルに分けたファイル

@@ -6,9 +6,10 @@
 import * as THREE from 'three';
 import { MeshWriter, writeFlatPolygon } from './meshwriter.js';
 import { COVER_COLORS, createCoverShared } from './cover.js';
-import { CAR_ROADS } from './parse.js';
 import { Grid, centroid, clipPolylineToRect, clipRingToRect, closestOnSegment, freeRects, hash01, pointInPolygon, signedArea } from '../geo.js';
-import { RaisedIndex, oldTownBase, planStreets, streetSteps } from './streets.js';
+import { RaisedIndex, oldTownBase, planStreets, streetSteps, writePrism } from './streets.js';
+import { CAR_ROADS } from './parse.js';
+import { catenaryStations, slicePolyline, subtract, tramCrossCuts } from './markings.js';
 import { bridgeGroups, buildBridges } from './bridges.js';
 
 export const ORDER = {
@@ -74,6 +75,7 @@ export function createGroundMaterials(tex) {
       grass: flat(tex.grass),
       gravel: flat(tex.gravel),
       plain: flat(null),
+      marks: flat(tex.marks, { alphaTest: 0.5 }), // 路面の絵（自転車・矢印・BUS・30）のアトラス
     },
     // 一段高い歩道と縁石。角で重なる所は、縁石 → えんじ色の歩道 → 灰色の歩道の順に手前に出す
     raised: {
@@ -111,6 +113,9 @@ export function createGroundMaterials(tex) {
     // 草の土手（運河・街の外れの川岸の斜面）
     bank: new THREE.MeshLambertMaterial({ map: tex.grass, vertexColors: true }),
     deck: new THREE.MeshStandardMaterial({ map: tex.asphalt, vertexColors: true, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -6 }),
+    // 石の橋の歩道（淡い花崗岩の板）と、橋面の標示（線も絵もアトラス 1 枚で）
+    deckWalk: new THREE.MeshStandardMaterial({ map: tex.granite, vertexColors: true, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -6 }),
+    deckMarks: new THREE.MeshLambertMaterial({ map: tex.marks, vertexColors: true, alphaTest: 0.5, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -8 }),
     bridge: new THREE.MeshStandardMaterial({ map: tex.plain, vertexColors: true, roughness: 0.9 }),
     cover: createCoverShared(tex, ORDER.cover),
   };
@@ -207,24 +212,77 @@ function writeDisc(w, p, r, y, color, uvScale = 4, seg = 10) {
   }
 }
 
-function writeDashes(w, pts, dash, gap, width, y, color) {
-  const up = [0, 1, 0];
-  let carry = 0;
-  for (let i = 0; i + 1 < pts.length; i++) {
-    const [ax, az] = pts[i], [bx, bz] = pts[i + 1];
-    const len = Math.hypot(bx - ax, bz - az);
-    if (len < 0.01) continue;
-    const ux = (bx - ax) / len, uz = (bz - az) / len;
-    const nx = -uz * width / 2, nz = ux * width / 2;
-    let s = carry;
-    while (s < len) {
-      const e = Math.min(len, s + dash);
-      const p0 = [ax + ux * s, az + uz * s], p1 = [ax + ux * e, az + uz * e];
-      w.quad([p0[0] + nx, y, p0[1] + nz], [p0[0] - nx, y, p0[1] - nz], [p1[0] - nx, y, p1[1] - nz], [p1[0] + nx, y, p1[1] + nz], up, [0, 0], [1, 0], [1, 1], [0, 1], color);
-      s += dash + gap;
-    }
-    carry = s - len;
+// トラムの架線柱と架線（地面からの高さで書く）。柱の位置は線の始点からの距離で決め、範囲 clip の中の柱だけ書く。
+// cutsFor(t): 線 t が車道・横断歩道を横切る区間（tramCrossCuts）。柱はその中に立てない（catenaryStations）。戻り値: 柱の位置（当たり判定）
+// 柱は路面電車（幅 2.4 m、半幅 1.2 m＋揺れ）にかからない所: 複線（隣のトラムの線が 2〜5.5 m 横）は 2 本の線の真ん中に
+// 1 本（腕を両側へ。2 本のうち一覧で先の線が立てる）、単線は右へ 2.2 m（芝の帯の外の縁）
+const CAT_STEP = 35, CAT_SIDE = 2.2, WIRE_Y = 5.8;
+export function writeCatenary(rails, clip, w, cutsFor = () => []) {
+  const trams = rails.filter((r) => r.type === 'tram' && !r.bridge);
+  const grey = c3('#8b9094'), wire = c3('#2a2c2e');
+  const inClip = (x, z) => x >= clip.minX && x < clip.maxX && z >= clip.minZ && z < clip.maxZ;
+  // 隣のトラムの線（横のずれ d、+ = 右）と、その線の一覧での順番
+  const neighbour = (ti, x, z, nx, nz) => {
+    let best = null;
+    trams.forEach((t, k) => {
+      if (k === ti) return;
+      const b = t.bounds;
+      if (b && (x < b[0] - 6 || x > b[2] + 6 || z < b[1] - 6 || z > b[3] + 6)) return;
+      for (let i = 0; i + 1 < t.pts.length; i++) {
+        const c = closestOnSegment(x, z, t.pts[i][0], t.pts[i][1], t.pts[i + 1][0], t.pts[i + 1][1]);
+        if (c.d2 > 5.5 * 5.5) continue;
+        const d = (c.x - x) * nx + (c.z - z) * nz;
+        if (Math.abs(d) >= 2 && Math.abs(d) * Math.abs(d) > c.d2 * 0.8 && (!best || Math.abs(d) < Math.abs(best.d))) best = { d, k };
+      }
+    });
+    return best;
+  };
+  const poles = [];
+  for (const t of trams) {
+    if (!t.bounds) t.bounds = t.pts.reduce((a, [x, z]) => [Math.min(a[0], x), Math.min(a[1], z), Math.max(a[2], x), Math.max(a[3], z)], [Infinity, Infinity, -Infinity, -Infinity]);
   }
+  trams.forEach((t, ti) => {
+    const b = t.bounds;
+    if (b[2] < clip.minX - 10 || b[0] > clip.maxX + 10 || b[3] < clip.minZ - 10 || b[1] > clip.maxZ + 10) return;
+    let total = 0;
+    for (let i = 0; i + 1 < t.pts.length; i++) total += Math.hypot(t.pts[i + 1][0] - t.pts[i][0], t.pts[i + 1][1] - t.pts[i][1]);
+    const stations = catenaryStations(total, cutsFor(t), CAT_STEP);
+    let acc = 0, si = 0;
+    for (let i = 0; i + 1 < t.pts.length && si < stations.length; i++) {
+      const [ax, az] = t.pts[i], [bx, bz] = t.pts[i + 1];
+      const L = Math.hypot(bx - ax, bz - az);
+      if (L < 1e-6) continue;
+      const ux = (bx - ax) / L, uz = (bz - az) / L, nx = -uz, nz = ux;
+      for (; si < stations.length && stations[si] <= acc + L; si++) {
+        const x = ax + ux * (stations[si] - acc), z = az + uz * (stations[si] - acc);
+        if (!inClip(x, z)) continue;
+        const nb = neighbour(ti, x, z, nx, nz);
+        if (nb && nb.k < ti) continue; // 複線の真ん中の柱は隣の線が立てる
+        const off = nb ? nb.d / 2 : CAT_SIDE;
+        const px = x + nx * off, pz = z + nz * off;
+        writePrism(w, px, pz, ux, uz, 0.11, 0.11, 0, 7.5, grey);
+        // 腕: 柱から線の上へ（複線は両方の線の上まで）
+        const a0 = nb ? Math.min(0, nb.d) : 0, a1 = nb ? Math.max(0, nb.d) : off;
+        writePrism(w, x + nx * (a0 + a1) / 2, z + nz * (a0 + a1) / 2, nx, nz, (a1 - a0) / 2 + 0.1, 0.04, WIRE_Y + 0.35, WIRE_Y + 0.45, grey);
+        writePrism(w, x, z, nx, nz, 0.03, 0.03, WIRE_Y, WIRE_Y + 0.4, grey); // 吊り金具
+        if (nb) writePrism(w, x + nx * nb.d, z + nz * nb.d, nx, nz, 0.03, 0.03, WIRE_Y, WIRE_Y + 0.4, grey);
+        poles.push([px, pz]);
+      }
+      acc += L;
+    }
+    // 架線: 線の上の細い黒い帯（縦と横の 2 枚）
+    for (const pts of clipPolylineToRect(t.pts, clip.minX, clip.minZ, clip.maxX, clip.maxZ)) {
+      for (let i = 0; i + 1 < pts.length; i++) {
+        const [ax, az] = pts[i], [bx, bz] = pts[i + 1];
+        const L = Math.hypot(bx - ax, bz - az);
+        if (L < 1e-6) continue;
+        const nx = -(bz - az) / L * 0.012, nz = (bx - ax) / L * 0.012;
+        w.quad([ax - nx, WIRE_Y, az - nz], [bx - nx, WIRE_Y, bz - nz], [bx + nx, WIRE_Y, bz + nz], [ax + nx, WIRE_Y, az + nz], [0, -1, 0], [0, 0], [0, 0], [0, 0], [0, 0], wire);
+        w.quad([ax, WIRE_Y, az], [bx, WIRE_Y, bz], [bx, WIRE_Y + 0.03, bz], [ax, WIRE_Y + 0.03, az], [nx / 0.012, 0, nz / 0.012], [0, 0], [0, 0], [0, 0], [0, 0], wire);
+      }
+    }
+  });
+  return poles;
 }
 
 export function roadStyle(road) {
@@ -232,7 +290,8 @@ export function roadStyle(road) {
   const s = road.surface;
   const paved = /^(paving_stones|sett|cobblestone|unhewn_cobblestone|bricks|stone)$/.test(s);
   const loose = /^(gravel|fine_gravel|compacted|dirt|ground|earth|grass|sand|pebblestone|unpaved)$/.test(s);
-  if (t === 'cycleway') return { order: ORDER.cycleway, tex: 'asphalt', color: c3('#8fb59a') };
+  // 自転車道: トゥールーズは赤茶色の舗装（ユーザーの写真 6・33。灰色のアスファルトのテクスチャに掛けて赤茶に見える色）
+  if (t === 'cycleway') return { order: ORDER.cycleway, tex: 'asphalt', color: [2.05, 0.8, 0.6] };
   if (t === 'pedestrian' || t === 'living_street') return { order: ORDER.pedestrian, tex: 'paving', color: c3('#ffffff') };
   if (t === 'footway' || t === 'path' || t === 'bridleway' || t === 'track' || t === 'steps') {
     if (loose) return { order: ORDER.footway, tex: 'gravel', color: c3('#ffffff') };
@@ -769,13 +828,11 @@ function* groundDetailSteps(parsed, clip, mats, waterDepthAt, opts) {
     if (!parts.length) continue;
     const st = roadStyle(road);
     const half = road.width / 2;
-    const isCar = CAR_ROADS.has(road.type);
     for (const pts of parts) {
       const w = W(st.order, st.tex);
       writeRibbon(w, pts, half, 0, st.color);
       writeDisc(w, pts[0], half, 0, st.color);
       writeDisc(w, pts[pts.length - 1], half, 0, st.color);
-      if (isCar && road.width >= 7 && !road.oneway) writeDashes(W(ORDER.marking, 'plain'), pts, 3, 5, 0.15, 0, c3('#f2f2ee'));
     }
   }
   // 縁石・一段高い歩道（建物の壁まで）・旧市街の石畳・側溝・横断歩道と停止線
@@ -785,6 +842,7 @@ function* groundDetailSteps(parsed, clip, mats, waterDepthAt, opts) {
     slabs: () => W(ORDER.road - 0.5, 'slabs'),
     gutter: () => W(ORDER.road + 0.5, 'gutter'),
     marking: () => W(ORDER.marking, 'plain'),
+    marks: () => W(ORDER.marking + 0.5, 'marks'),
     curb: () => W(ORDER.raised, 'curb', 'raised'),
     sidewalk: () => W(ORDER.raised, 'sidewalk', 'raised'),
     sidewalkRed: () => W(ORDER.raised + 0.1, 'sidewalkRed', 'raised'),
@@ -794,13 +852,32 @@ function* groundDetailSteps(parsed, clip, mats, waterDepthAt, opts) {
   const streetStats = yield* streetSteps(parsed, plan, clip, { buildings: opts.buildings || [], walls: opts.walls || [], waterDepthAt }, (k) => OUT[k](), raised);
 
   // ---- 線路（トラム・鉄道） ----
+  // トラム（ユーザーの写真 4・5・31・32、Avenue de Grande-Bretagne）: 芝の軌道（線路の間と両側の 3.5 m の帯。複線では
+  // 2 本の帯がつながる）、架線柱（灰色の細い柱を約 35 m おき、複線は 2 本の線の真ん中・単線は芝の帯の縁に立てて腕を線路の上へ。
+  // 車道・横断歩道を横切る所には立てない）と架線（高さ 5.8 m）
+  let near = null;
+  const carRoads = () => near || (near = plan.roadsNear(clip, 30).filter((r) => CAR_ROADS.has(r.type) && r.type !== 'service' && !r.bridge && !r.tunnel));
+  const nearXs = plan.crossings.filter((c) => c.x > clip.minX - 30 && c.x < clip.maxX + 30 && c.z > clip.minZ - 30 && c.z < clip.maxZ + 30);
+  // 架線柱は車道・横断歩道を横切る所（芝を切る所と同じ区間）に立てない
+  const tramPts = writeCatenary(parsed.rails, clip, W(ORDER.raised + 0.2, 'post', 'raised'), (t) => tramCrossCuts(t.pts, carRoads(), nearXs));
+  streetStats.postPts.push(...tramPts);
   for (const r of parsed.rails) {
     if (r.bridge) continue;
     for (const pts of clipPolylineToRect(r.pts, ...clipRect)) {
       if (r.type === 'rail') writeRibbon(W(ORDER.rail - 0.5, 'gravel'), pts, 1.5, 0, c3('#9a9088'));
+      // トラムの芝の軌道は車道の標示（中央分離帯に重なる車線の線）より上に描き、線を隠す
+      else if (r.type === 'tram') {
+        // 車道・横断歩道を横切る所は芝を切る（路面のアスファルトと横断歩道が見える）。レールだけ通す
+        const cum = pts.reduce((c, p, i) => (i ? [...c, c[i - 1] + Math.hypot(p[0] - pts[i - 1][0], p[1] - pts[i - 1][1])] : [0]), []);
+        const cuts = tramCrossCuts(pts, carRoads(), nearXs);
+        for (const [a, b] of subtract(0, cum[cum.length - 1], cuts)) {
+          if (b - a > 0.3) writeRibbon(W(ORDER.marking + 0.7, 'grass'), slicePolyline(pts, cum, a, b), 1.75, 0, GREEN_COLOR.grass, 6);
+        }
+      }
       const { L, R } = offsets(pts, 0.72);
-      writeRibbon(W(ORDER.rail, 'plain'), L, 0.06, 0, c3('#55585c'));
-      writeRibbon(W(ORDER.rail, 'plain'), R, 0.06, 0, c3('#55585c'));
+      const ro = r.type === 'tram' ? ORDER.marking + 0.8 : ORDER.rail;
+      writeRibbon(W(ro, 'plain'), L, 0.06, 0, c3('#55585c'));
+      writeRibbon(W(ro, 'plain'), R, 0.06, 0, c3('#55585c'));
     }
   }
 
