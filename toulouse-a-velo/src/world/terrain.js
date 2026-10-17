@@ -115,6 +115,8 @@ export class Terrain {
     this.datum = DATUM;
     this.conditioned = false; // 道路・岸壁で格子を手直ししたか（terraincond.js、ground.js の buildGroundBase）
     this.quayWalls = [];
+    this.metroRaw = data.metro || []; // メトロの出入口（緯度経度。<エリア>-metro.json）
+    this.metro = []; // ローカル座標にして、穴を埋めたもの（ground.js の buildGroundBase。world/metro.js）
     this.decks = [];
     this.maxHalf = 0;
     this.deckGrid = new Grid(40);

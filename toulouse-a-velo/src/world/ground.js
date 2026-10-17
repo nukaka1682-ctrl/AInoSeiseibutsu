@@ -16,6 +16,7 @@ import { bridgeGroups, buildBridges, setupDecks } from './bridges.js';
 import { DRAPE_LIFT, FLAT_TERRAIN } from './terrain.js';
 import { buildFarTerrain, createTerrainMaterials, splitGeometry, TERRAIN_ORDER } from './terrainmesh.js';
 import { conditionRoads, despike, sharpenQuays } from './terraincond.js';
+import { buildMetroEntrances, createMetroMaterials, fillMetroPits, projectEntrances, writeEntranceMasks } from './metro.js';
 
 export const ORDER = {
   waterMask: -50,
@@ -130,6 +131,10 @@ export function createGroundMaterials(tex) {
     cover: createCoverShared(tex, ORDER.cover),
   };
   mats.terrain = createTerrainMaterials(mats.ground);
+  mats.metro = createMetroMaterials(tex);
+  // 地面の上の面（道路・歩道・縁石など）は、水とメトロの吹き抜けの穴（ステンシル 1）には描かない
+  const holeTest = { stencilWrite: true, stencilRef: 1, stencilFunc: THREE.NotEqualStencilFunc, stencilFail: THREE.KeepStencilOp, stencilZFail: THREE.KeepStencilOp, stencilZPass: THREE.KeepStencilOp };
+  for (const m of [...Object.values(mats.flat), ...Object.values(mats.raised)]) Object.assign(m, holeTest);
   return mats;
 }
 
@@ -473,11 +478,27 @@ export function buildGroundBase(parsed, rect, mats, terrain = FLAT_TERRAIN, layo
   // 地形の手直し（エリアで 1 回だけ。地面・道路・橋を作る前に）: 車道の縦断面でならし、旧市街のまわりの岸壁を段差に戻す
   if (!T.flat && !T.conditioned) {
     T.conditioned = true;
+    // メトロの出入口: 地形モデルに写った吹き抜けの穴を周りの高さで埋める（穴は下でステンシルにして、中に階段を作る）
+    T.metro = projectEntrances(T.metroRaw, T.proj).filter((e) => !inWater(e.x, e.z));
+    fillMetroPits(T, T.metro);
     conditionRoads(T, parsed.roads, inWater);
     T.quayWalls = sharpenQuays(T, parsed.proj ? parsed.proj.project(...QUAY_LATLON) : [-250, 0], QUAY_RADIUS + 150, { inWater, paths: parsed.roads });
     despike(T);
   }
   if (!T.flat && T.quayWalls.length) group.add(buildQuayWalls(T.quayWalls, mats));
+  if (!T.flat && T.metro.length) {
+    // メトロの出入口の吹き抜け: 水と同じステンシルの穴（地面のあとに深度テスト付きで印を付け、その所の深度を一番奥に戻す）
+    const hole = new MeshWriter();
+    writeEntranceMasks(hole, T.metro);
+    const geo = hole.toGeometry();
+    const m = new THREE.Mesh(geo, mats.waterMask);
+    m.renderOrder = TERRAIN_ORDER.mask;
+    m.name = 'metro-mask';
+    const r = new THREE.Mesh(geo, mats.terrain.maskReset);
+    r.renderOrder = TERRAIN_ORDER.maskReset;
+    r.name = 'metro-mask-reset';
+    group.add(m, r, buildMetroEntrances(T.metro, mats.metro));
+  }
   const bankTrees = []; // 街の外れの土手に植える木 { x, z, y, h, r }
   {
     // 地形があるとき: 水面は本当の水面の高さ（堰・閘門の段差の所だけ細かく分ける）。岸は、相対の高さ（陸 0、水面 −d）を

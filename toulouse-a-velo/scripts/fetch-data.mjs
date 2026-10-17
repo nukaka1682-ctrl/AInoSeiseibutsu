@@ -12,7 +12,8 @@
 //   npm run fetch-data -- toulouse --resume  # 途中で止まった取得の続き（今の形式で保存済みのタイルは取得し直さない）
 //   npm run fetch-data -- all --terrain   # 地形（<preset>-terrain.bin）だけ作り直す（保存済みの <preset>.json を使う）
 //
-// どのプリセットも最後に地形（LiDAR HD の地形モデルの 5 m の格子・水面の高さ・橋の縦断面）を <preset>-terrain.bin に保存する
+// どのプリセットも最後に地形（LiDAR HD の地形モデルの 5 m の格子・水面の高さ・橋の縦断面）を <preset>-terrain.bin に、
+// メトロの駅の出入口（LiDAR の地形モデルの吹き抜けの穴）を <preset>-metro.json に保存する
 //
 // 塀と木は、地籍（敷地の境界）と LiDAR HD の表面モデルから見つける（src/data/walls.js）。
 // 地面の覆い（公道・敷地の中・芝生・木の下）は、さらに赤外線航空写真の植生指数を使う（src/data/cover.js）。
@@ -34,6 +35,7 @@ import { parseOsm } from '../src/world/parse.js';
 import { bakeTerrain } from '../src/data/terrainbake.js';
 import { DATUM, Terrain, encodeTerrain } from '../src/world/terrain.js';
 import { fetchReverseKeys } from '../src/data/oneway.js';
+import { fetchMetroEntrances } from '../src/data/metro.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -55,6 +57,7 @@ for (const id of ids) {
   console.log(`[${id}] bbox ${JSON.stringify(bbox)}`);
   if (terrainOnly) {
     await bakeTerrainFile(id, bbox);
+    await bakeMetroFile(id, bbox);
     continue;
   }
   // 逆向きの一方通行の一覧（IGN の 'Sens inverse'。src/data/oneway.js）。古い形式の地図データを直すのに使う
@@ -63,6 +66,7 @@ for (const id of ids) {
   if (preset.stream) {
     await bakeStream(id, bbox);
     await bakeTerrainFile(id, bbox);
+    await bakeMetroFile(id, bbox);
     continue;
   }
   let last = '';
@@ -100,6 +104,19 @@ for (const id of ids) {
   await writeFile(out, json);
   console.log(`  保存: ${out} (${(json.length / 1048576).toFixed(1)} MB)`);
   await bakeTerrainFile(id, bbox);
+  await bakeMetroFile(id, bbox);
+}
+
+// メトロの駅の出入口（BD TOPO の駅 + LiDAR の地形モデルの穴。src/data/metro.js）。失敗してもほかのデータは使える
+async function bakeMetroFile(id, bbox) {
+  try {
+    const r = await fetchMetroEntrances(bbox, { log: (t) => console.log(t) });
+    const out = join(root, 'public', 'data', `${id}-metro.json`);
+    await writeFile(out, JSON.stringify(r));
+    console.log(`  保存: ${out}（駅 ${r.stations.length}、出入口 ${r.entrances.length}）`);
+  } catch (err) {
+    console.log(`  メトロの出入口を取得できませんでした: ${err.message}`);
+  }
 }
 
 // 地形のファイル（保存済みの地図データの水域と橋を使う）。最後に、確かめやすい場所の高さを表示する
