@@ -88,10 +88,11 @@ export function crownLimit(h) {
   return { bottom, rmax: Math.max(1.5, Math.min(0.45 * h + 1, (h - bottom) / (2 * CROWN_ASPECT))) };
 }
 
-export function shapeTrees(points, canPlace = () => true) {
+// groundH(x, z): 地面の高さ（地形）。abs の付いた点（川岸の土手の木）は y がそのまま高さ
+export function shapeTrees(points, canPlace = () => true, groundH = null) {
   const out = [];
   for (const t of points) {
-    const x = t.x ?? t[0], z = t.z ?? t[1], y = t.y ?? 0;
+    const x = t.x ?? t[0], z = t.z ?? t[1], y = t.abs ? t.y : (t.y ?? 0) + (groundH ? groundH(x, z) : 0);
     const seed = treeSeed(x, z);
     if (!(t.h > 0) || !(t.r > 0)) {
       // 大きさの分からない木（OSM・並木道・公園に補った木）
@@ -249,9 +250,9 @@ let barkTexture = null;
 // points: [x, z]（大きさは推定）か { x, z, y, h, r }（LiDAR で測った高さと枝の広がり）。
 // isPlane(x, z): プラタナス（まだらな樹皮・オリーブ色の葉）にする場所、canPlace(x, z): 塊を分けた木を置ける場所。
 // group.userData.trunks に、実際に幹を立てた位置（当たり判定用）を入れる
-export function buildTrees(points, { isPlane = () => false, canPlace = () => true } = {}) {
+export function buildTrees(points, { isPlane = () => false, canPlace = () => true, groundH = null } = {}) {
   const src = points.length > MAX_TREES ? points.filter((_, i) => i % Math.ceil(points.length / MAX_TREES) === 0) : points;
-  const trees = shapeTrees(src, canPlace);
+  const trees = shapeTrees(src, canPlace, groundH);
   const n = trees.length;
   const group = new THREE.Group();
   group.name = 'trees';

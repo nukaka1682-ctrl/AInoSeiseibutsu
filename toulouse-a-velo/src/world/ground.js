@@ -3,13 +3,18 @@
 // 地面と同じ高さ (y=0) に重なる面は、深度を書かずに renderOrder の順に塗り重ねる（Z ファイティング防止）。
 // 一段高い歩道と縁石（streets.js）は深度を書き、平らな面をすべて塗った後に描く（下に隠れた車道は描かれない）。
 // 川や運河は地面より低い位置に水面を置き、ステンシルで地面に「穴」をあけて見せる。
+// 地形（terrain.js）があるときは、地面はタイルごとの高さの格子（terrainmesh.js）で、平らな面・歩道・縁石は地形に載せる
+// （MeshWriter の drape。y は地面からの高さ）。水面は本当の水面の高さ、岸は本当の岸の高さから水面まで（bankY）。
 import * as THREE from 'three';
 import { MeshWriter, writeFlatPolygon } from './meshwriter.js';
 import { COVER_COLORS, createCoverShared } from './cover.js';
 import { CAR_ROADS } from './parse.js';
 import { Grid, centroid, clipPolylineToRect, clipRingToRect, closestOnSegment, freeRects, hash01, pointInPolygon, signedArea } from '../geo.js';
 import { RaisedIndex, oldTownBase, planStreets, streetSteps } from './streets.js';
-import { bridgeGroups, buildBridges } from './bridges.js';
+import { bridgeGroups, buildBridges, setupDecks } from './bridges.js';
+import { DRAPE_LIFT, FLAT_TERRAIN } from './terrain.js';
+import { buildFarTerrain, createTerrainMaterials, splitGeometry, TERRAIN_ORDER } from './terrainmesh.js';
+import { conditionRoads, despike, sharpenQuays } from './terraincond.js';
 
 export const ORDER = {
   waterMask: -50,
@@ -61,7 +66,7 @@ export function createGroundMaterials(tex) {
     map, vertexColors: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4, ...extra,
   });
   const waterNormal = tex.waterNormal;
-  return {
+  const mats = {
     flat: {
       asphalt: flat(tex.asphalt),
       paving: flat(tex.paving),
@@ -91,9 +96,14 @@ export function createGroundMaterials(tex) {
       stencilZFail: THREE.KeepStencilOp,
       stencilZPass: THREE.KeepStencilOp,
     }),
+    // 水の穴（ステンシル）。地形があるときは地面のあとに深度テスト付きで描き、手前の土手・岸壁に隠れた所には穴をあけない
+    // （地面と同じ面なので少し手前に出す）
     waterMask: new THREE.MeshBasicMaterial({
       colorWrite: false,
       depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -4,
       stencilWrite: true,
       stencilRef: 1,
       stencilFunc: THREE.AlwaysStencilFunc,
@@ -114,6 +124,8 @@ export function createGroundMaterials(tex) {
     bridge: new THREE.MeshStandardMaterial({ map: tex.plain, vertexColors: true, roughness: 0.9 }),
     cover: createCoverShared(tex, ORDER.cover),
   };
+  mats.terrain = createTerrainMaterials(mats.ground);
+  return mats;
 }
 
 // 水面: ガロンヌ川はにごったオリーブ色の灰緑（写真 #4b5642〜#7b888a）、運河は暗い緑（#45523a）。色は頂点カラーで付ける。
@@ -258,9 +270,13 @@ export function makeWaterTest(areas) {
   };
 }
 
+// 水の穴の三角形が地面より下に沈んでいないか調べる点（重心座標）
+const MASK_SAMPLES = [[1 / 3, 1 / 3], [0.5, 0], [0, 0.5], [0.5, 0.5], [0.15, 0.15], [0.7, 0.15], [0.15, 0.7], [0.25, 0], [0.75, 0], [0, 0.25], [0, 0.75], [0.25, 0.75], [0.75, 0.25]];
+
 // 地図から生成する地面（エリア全体をまとめて作る）
 export function buildGround(parsed, rect, mats, opts = {}) {
-  const base = buildGroundBase(parsed, rect, mats);
+  const base = buildGroundBase(parsed, rect, mats, opts.terrain, opts.layout);
+  if (opts.terrain && !opts.terrain.flat) setupDecks(opts.terrain, parsed.roads, opts.proj, base.waterDepthAt); // 橋の縦断面
   const pad = 120;
   const detail = buildGroundDetail(parsed, { minX: rect.minX - pad, minZ: rect.minZ - pad, maxX: rect.maxX + pad, maxZ: rect.maxZ + pad }, mats, base.waterDepthAt, opts);
   base.group.add(detail.group);
@@ -326,14 +342,40 @@ function bankSection(kind, d, W = 16) {
   return null;
 }
 
-// 地面の板と水（エリア全体で 1 回だけ作る）
-export function buildGroundBase(parsed, rect, mats) {
+// 旧市街のまわりの岸壁（terraincond.js の sharpenQuays の線）: 上の河岸から下の遊歩道まで垂直のレンガの壁と、
+// 壁の上から上の段へ 5 m の笠石（地面の段差の斜面を隠す。上の段の地面より 2 cm 下なので、平らな所では地面の下に隠れる）
+function buildQuayWalls(list, mats) {
+  const w = new MeshWriter();
+  for (const q of list) {
+    let { ax, az, at, ab, bx, bz, bt, bb } = q;
+    const { nx, nz } = q;
+    // 表の面（反時計回り）が n を向く並び: 辺の向き (dx, dz) に対して (-dz, 0, dx) が n の側
+    if ((bx - ax) * nz - (bz - az) * nx < 0) [ax, az, at, ab, bx, bz, bt, bb] = [bx, bz, bt, bb, ax, az, at, ab];
+    const L = Math.hypot(bx - ax, bz - az), h0 = ab - 0.4, ha = at - h0, hb = bt - h0;
+    const t = hash01(Math.round(ax * 7 + az * 13), 3);
+    const brick = BANK.brickA.map((c, j) => c * (1 - t) + BANK.brickB[j] * t);
+    w.quad([ax, h0, az], [bx, h0, bz], [bx, bt, bz], [ax, at, az], [nx, 0, nz], [0, 0], [L / 4, 0], [L / 4, hb / 4], [0, ha / 4], brick);
+    const k = 5, ux = -nx * k, uz = -nz * k, cy = (y) => y - 0.02;
+    w.quad([ax, cy(at), az], [ax + ux, cy(at), az + uz], [bx + ux, cy(bt), bz + uz], [bx, cy(bt), bz], [0, 1, 0], [0, 0], [0, k / 4], [L / 4, k / 4], [L / 4, 0], BANK.quayCoping);
+  }
+  const m = new THREE.Mesh(w.toGeometry(), mats.quai);
+  m.castShadow = true;
+  m.receiveShadow = true;
+  m.name = 'quay-walls';
+  return m;
+}
+
+// 地面の板と水（エリア全体で 1 回だけ作る）。地形があるときは、平らな板の代わりに遠くの地面（読み込んだタイルの中は
+// タイルの地面 terrainmesh.js の buildTerrainTile が描く。layout: タイルの並び。far.setTile で印を付ける）
+export function buildGroundBase(parsed, rect, mats, terrain = FLAT_TERRAIN, layout = null) {
   const group = new THREE.Group();
   group.name = 'ground';
+  const T = terrain || FLAT_TERRAIN;
+  let far = null;
 
   // ---- 地面（水面部分はステンシルで抜く） ----
   // 1 枚の巨大な三角形だと深度の補間の誤差で上に重ねた道路の面が隠れることがあるので、約 250 m ごとに分ける
-  {
+  if (T.flat) {
     const big = 3000;
     const sw = rect.maxX - rect.minX + big * 2, sh = rect.maxZ - rect.minZ + big * 2;
     const g = new THREE.PlaneGeometry(sw, sh, Math.ceil(sw / 250), Math.ceil(sh / 250));
@@ -366,15 +408,51 @@ export function buildGroundBase(parsed, rect, mats) {
     });
     return d;
   };
+  // 地形の手直し（エリアで 1 回だけ。地面・道路・橋を作る前に）: 車道の縦断面でならし、旧市街のまわりの岸壁を段差に戻す
+  if (!T.flat && !T.conditioned) {
+    T.conditioned = true;
+    conditionRoads(T, parsed.roads, inWater);
+    T.quayWalls = sharpenQuays(T, parsed.proj ? parsed.proj.project(...QUAY_LATLON) : [-250, 0], QUAY_RADIUS + 150, { inWater, paths: parsed.roads });
+    despike(T);
+  }
+  if (!T.flat && T.quayWalls.length) group.add(buildQuayWalls(T.quayWalls, mats));
   const bankTrees = []; // 街の外れの土手に植える木 { x, z, y, h, r }
   {
-    const mask = new MeshWriter();
-    const surface = new MeshWriter();
-    const walls = new MeshWriter();
-    const stoneWalls = new MeshWriter();
-    const bank = new MeshWriter();
+    // 地形があるとき: 水面は本当の水面の高さ（堰・閘門の段差の所だけ細かく分ける）。岸は、相対の高さ（陸 0、水面 −d）を
+    // 本当の岸の高さ（地面）から水面までに引き延ばす（水面より下はそのまま）
+    let cur = null;
+    const bankY = (x, y, z) => {
+      const d = cur.depth, wl = T.waterLevel(x, z, cur), ht = Math.max(T.h(x, z), wl + 0.3);
+      return y >= -d ? wl + ((y + d) * (ht - wl)) / d : wl + (y + d);
+    };
+    const tf = !T.flat;
+    const bankOpts = tf ? { map: bankY, maxEdge: 8 } : {};
+    // 水の穴の形: 地面（川の上は岸から延ばしたなめらかな面）から 0.5 m 浮かせ、辺 30 m 以下に分けて載せる
+    // （地面より下だと穴があかない。地面の格子どおりに切るとガロンヌ川全体で 80 万枚を超える）
+    // 地面が三角形の平面より上に出る所（岸・堰の近く）だけ、辺 4 m まで細かく分ける
+    const bulge = (A, B, C) => {
+      const ha = T.h(A[0], A[2]), hb = T.h(B[0], B[2]), hc = T.h(C[0], C[2]);
+      for (const [a, b] of MASK_SAMPLES) {
+        const c = 1 - a - b;
+        if (T.h(A[0] * c + B[0] * a + C[0] * b, A[2] * c + B[2] * a + C[2] * b) - (ha * c + hb * a + hc * b) > 0.3) return true;
+      }
+      return false;
+    };
+    const mask = new MeshWriter(tf ? { map: (x, y, z) => T.h(x, z) + 0.5, maxEdge: 4, split: (A, B, C) => bulge(A, B, C) || Math.max((A[0] - B[0]) ** 2 + (A[2] - B[2]) ** 2, (B[0] - C[0]) ** 2 + (B[2] - C[2]) ** 2, (C[0] - A[0]) ** 2 + (C[2] - A[2]) ** 2) > 900 } : {});
+    const surface = new MeshWriter(tf ? {
+      // 堰・閘門の段差の所だけ細かく分ける（下流の流れる区間のゆるい傾きは三角形の平面のままでよい）
+      map: (x, y, z) => T.waterLevel(x, z, cur), maxEdge: 6,
+      split: (A, B, C) => {
+        const a = T.waterLevel(A[0], A[2], cur), b = T.waterLevel(B[0], B[2], cur), c = T.waterLevel(C[0], C[2], cur);
+        const M = T.waterLevel((A[0] + B[0] + C[0]) / 3, (A[2] + B[2] + C[2]) / 3, cur);
+        return Math.max(a, b, c) - Math.min(a, b, c) > 0.5 || Math.abs(M - (a + b + c) / 3) > 0.15;
+      },
+    } : {});
+    const walls = new MeshWriter(bankOpts);
+    const stoneWalls = new MeshWriter(bankOpts);
+    const bank = new MeshWriter(bankOpts);
     const quayCentre = parsed.proj ? parsed.proj.project(...QUAY_LATLON) : [-250, 0];
-    const edge = new MeshWriter();
+    const edge = new MeshWriter(bankOpts);
     const onRectEdge = (p, q) => {
       const e = 0.01;
       return (Math.abs(p[0] - rect.minX) < e && Math.abs(q[0] - rect.minX) < e) ||
@@ -418,7 +496,7 @@ export function buildGroundBase(parsed, rect, mats) {
     };
     // stepOnly: 橋の下を埋めたパッチ（陸との岸は作らず、隣の浅い水との段差の壁だけ）
     const writeQuai = (ring0, isHole, a, stepOnly = false) => {
-      const ring = subdivideRing(ring0, 10);
+      const ring = subdivideRing(ring0, tf ? 7 : 10);
       const s = signedArea(ring) > 0 ? 1 : -1;
       const d = a.depth, n = ring.length;
       // 辺ごとの水側の向き（外周なら内向き、島（穴）なら外向き）と、頂点ごとの斜めの向き（隣の辺の向きの平均）
@@ -561,7 +639,7 @@ export function buildGroundBase(parsed, rect, mats) {
             const f = 0.06 + hash01(hs, 2) * 0.36, Wt = Wp + (Wq - Wp) * t;
             const x = x0 + nx * f * Wt, z = z0 + nz * f * Wt;
             if (hash01(hs, 1) < 0.62 && Wt >= 6 && !nearBridge(x, z, 8)) {
-              bankTrees.push({ x, z, y: naturalHeight(f, d), h: 10 + hash01(hs, 3) * 8, r: 2.8 + hash01(hs, 4) * 2 });
+              bankTrees.push({ x, z, y: tf ? bankY(x, naturalHeight(f, d), z) : naturalHeight(f, d), abs: tf, h: 10 + hash01(hs, 3) * 8, r: 2.8 + hash01(hs, 4) * 2 });
             }
             nextTree += 6 + hash01(hs, 5) * 6;
           }
@@ -627,6 +705,7 @@ export function buildGroundBase(parsed, rect, mats) {
       }
     };
     for (const a of water) {
+      cur = a;
       writeFlatPolygon(mask, a.outer, a.holes, 0, 10);
       writeFlatPolygon(surface, a.outer, a.holes, -a.depth, WATER_TILE, WATER_COLOR[a.kind] || WATER_COLOR.canal);
       // 橋の下を埋めたパッチには岸壁を作らない（隣の浅い水との段差の壁だけ）
@@ -638,15 +717,28 @@ export function buildGroundBase(parsed, rect, mats) {
       for (const h of a.holes) writeQuai(h, true, a);
     }
     if (!mask.empty) {
-      const m = new THREE.Mesh(mask.toGeometry(), mats.waterMask);
-      m.renderOrder = ORDER.waterMask;
-      m.name = 'water-mask';
-      group.add(m);
-      const s = new THREE.Mesh(surface.toGeometry(), mats.water);
-      s.renderOrder = ORDER.water;
-      s.receiveShadow = true;
-      s.name = 'water';
-      group.add(s);
+      // 地形があるときは 500 m ごとに分ける（見えない所の水の穴・水面を描かない）
+      const cells = (geo) => (tf ? splitGeometry(geo, 500) : [geo]);
+      for (const geo of cells(mask.toGeometry())) {
+        const m = new THREE.Mesh(geo, mats.waterMask);
+        m.renderOrder = tf ? TERRAIN_ORDER.mask : ORDER.waterMask; // 地形があるときは地面のあと（terrainmesh.js）
+        m.name = 'water-mask';
+        group.add(m);
+        if (tf) {
+          // 見えている水の所の深度を一番奥に戻す（地形の深度を先に書いたので、そのままでは水面が隠れる）
+          const r = new THREE.Mesh(geo, mats.terrain.maskReset);
+          r.renderOrder = TERRAIN_ORDER.maskReset;
+          r.name = 'water-mask-reset';
+          group.add(r);
+        }
+      }
+      for (const geo of cells(surface.toGeometry())) {
+        const s = new THREE.Mesh(geo, mats.water);
+        s.renderOrder = ORDER.water;
+        s.receiveShadow = true;
+        s.name = 'water';
+        group.add(s);
+      }
     }
     if (!walls.empty) {
       const m = new THREE.Mesh(walls.toGeometry(), mats.quai);
@@ -676,7 +768,11 @@ export function buildGroundBase(parsed, rect, mats) {
     }
   }
 
-  return { group, water, inWater, waterDepthAt, bankTrees };
+  if (!T.flat) {
+    far = buildFarTerrain(T, rect, mats, layout, { inWater });
+    group.add(far.group);
+  }
+  return { group, water, inWater, waterDepthAt, bankTrees, far };
 }
 
 // 緑地・広場・駐車場・道路・線路・橋を、範囲 clip の中だけ作る（広いエリアではタイルごとに呼ぶ）。
@@ -710,13 +806,15 @@ export async function buildGroundDetailAsync(parsed, clip, mats, waterDepthAt, o
 function* groundDetailSteps(parsed, clip, mats, waterDepthAt, opts) {
   const covered = opts.covered || [];
   const inOldTown = opts.inOldTown || (() => false);
+  const terrain = opts.terrain || FLAT_TERRAIN;
   const group = new THREE.Group();
   group.name = 'ground-detail';
   const writers = new Map();
   const W = (order, tex, set = 'flat') => {
     const k = `${order}|${tex}|${set}`;
     let w = writers.get(k);
-    if (!w) writers.set(k, (w = { order, tex, set, w: new MeshWriter() }));
+    // 地形に載せる（平らな面は 2 cm 浮かせる。一段高い歩道・縁石は y がそのまま地面からの高さ）
+    if (!w) writers.set(k, (w = { order, tex, set, w: new MeshWriter({ drape: terrain, lift: set === 'flat' ? DRAPE_LIFT : 0.03 }) }));
     return w.w;
   };
   const plan = planStreets(parsed, opts.inOldTown);
@@ -816,7 +914,7 @@ function* groundDetailSteps(parsed, clip, mats, waterDepthAt, opts) {
 
   // ---- 橋 ----
   const big = [clip.minX - 2000, clip.minZ - 2000, clip.maxX + 2000, clip.maxZ + 2000];
-  group.add(buildBridges(bridges, parsed.roads, mats, waterDepthAt, big));
+  group.add(buildBridges(bridges, parsed.roads, mats, waterDepthAt, big, terrain));
 
   // posts: 横断歩道の脇の車止めの位置（当たり判定に足す）
   return { group, bridges, heightAt: (x, z) => raised.heightAt(x, z), streetStats, raised, posts: streetStats.postPts };

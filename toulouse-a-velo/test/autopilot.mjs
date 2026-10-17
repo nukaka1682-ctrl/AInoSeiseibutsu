@@ -5,7 +5,8 @@
 import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { assembleWorld } from '../src/world/assemble.js';
+import { areaFrame, assembleWorld } from '../src/world/assemble.js';
+import { Terrain, decodeTerrain } from '../src/world/terrain.js';
 import { Bike } from '../src/game/bike.js';
 import { distanceToLandmark } from '../src/game/landmarks.js';
 import { LANDMARKS, TOUR_ROUTE } from '../src/config.js';
@@ -23,18 +24,27 @@ try {
 const noTex = new Proxy({}, { get: () => null });
 const { createBuildingMaterials } = await import('../src/world/buildings.js');
 const { createGroundMaterials } = await import('../src/world/ground.js');
+// 地形（public/data/<area>-terrain.bin があれば。ポン・ヌフの坂・河岸の高さ・橋の下の道で走る）
+let terrain;
+try {
+  const buf = await readFile(join(root, 'public', 'data', `${area}-terrain.bin`));
+  terrain = new Terrain(await decodeTerrain(buf), areaFrame(data.bbox).proj);
+} catch {
+  console.log(`public/data/${area}-terrain.bin がないので平らな地面で走る`);
+}
 const w = await assembleWorld({ ...data, source: 'test' }, data.bbox, {
   buildingMats: createBuildingMaterials(noTex),
   groundMats: createGroundMaterials(noTex),
+  terrain,
 });
 console.log(`建物 ${w.stats.buildings.total} / 道 ${w.stats.roads} / 木 ${w.stats.trees} / 通路として開けた壁 ${w.stats.passages}${w.real ? ' / LiDAR の地形' : ''}`);
 
 const DT = 1 / 30;
-const world = { collision: w.collision, surfaceAt: w.surfaceAt, groundAt: w.groundAt };
+const world = { collision: w.collision, surfaceAt: w.surfaceAt, groundAt: w.groundAt, heightAt: w.heightAt, spawnY: w.spawnY, rideY: w.rideY, roadnet: w.roadnet };
 const bike = new Bike();
 const L = (id) => w.landmarks.find((l) => l.id === id);
 const start = w.roadnet.nearestRideablePoint(L('place-capitole').approach.x, L('place-capitole').approach.z);
-bike.place(start.x, start.z, start.heading, w.heightAt(start.x, start.z));
+bike.place(start.x, start.z, start.heading, (w.spawnY || w.heightAt)(start.x, start.z));
 
 // プレイヤーの代わりに、ナビのルート上の少し先の点に向かってハンドルを切る
 function ride(target, limit = 600) {
@@ -111,7 +121,7 @@ for (const id of seq) {
   if (!r.ok) {
     fails++;
     const p = w.roadnet.nearestRideablePoint(bike.x, bike.z);
-    bike.place(p.x, p.z, p.heading, w.heightAt(p.x, p.z));
+    bike.place(p.x, p.z, p.heading, (w.spawnY || w.heightAt)(p.x, p.z));
   }
 }
 console.log(`走行 ${(bike.odometer / 1000).toFixed(1)} km / ${(total / 60).toFixed(0)} 分（ゲーム内時間）`);

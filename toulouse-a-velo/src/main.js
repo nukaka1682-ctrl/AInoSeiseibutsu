@@ -11,6 +11,7 @@ import { ORDER, createGroundMaterials } from './world/ground.js';
 import { assembleWorld } from './world/assemble.js';
 import { assembleStreamWorld } from './world/stream.js';
 import { loadBaseData } from './data/tiles.js';
+import { fetchTerrainFile, loadTerrain } from './data/terrain.js';
 import { Bike } from './game/bike.js';
 import { CAMERA_LABELS, CameraRig } from './game/camera.js';
 import { Input } from './game/input.js';
@@ -48,13 +49,32 @@ renderer.setSize(innerWidth, innerHeight);
 THREE.ShaderChunk.tonemapping_pars_fragment = THREE.ShaderChunk.tonemapping_pars_fragment
   .replace('vec3 CustomToneMapping( vec3 color ) { return color; }', TONE_MAPPING_GLSL);
 renderer.toneMapping = THREE.CustomToneMapping;
+// 高さで変わる霧（解析的な指数の高さの霧）: 霧の濃さは、カメラの高さ + tl m（近くは +30 m、1.6 km より遠くは +4 m）までは一定、
+// それより上は 12 m ごとに 1/e。カメラから点までの線に沿った濃さの平均を距離に掛けて「霧の中を通った長さ」にし、いつもの
+// smoothstep(fogNear, fogFar) に入れる。線に沿って積分するので、霧は距離とともに増え（逆転しない）、丘のふもとから頂上まで
+// なめらかに薄くなる（遠くの丘の稜線が霧の上に見える）。近くの建物（カメラより 30 m 上まで）は今までと同じ霧。
+// 建物・木・タイルの地面・遠くの地面のすべてに同じ霧をかける（読み込んだタイルの境で霧の濃さが変わらない）
+THREE.ShaderChunk.fog_pars_vertex += '\n#ifdef USE_FOG\nvarying float vFogY;\n#endif';
+THREE.ShaderChunk.fog_vertex += '\n#ifdef USE_FOG\nvFogY = (transpose(mat3(viewMatrix)) * mvPosition.xyz).y + cameraPosition.y;\n#endif';
+THREE.ShaderChunk.fog_pars_fragment += `
+#ifdef USE_FOG
+varying float vFogY;
+float fogG( float y, float yT ) { return y <= yT ? y : yT + 12.0 * ( 1.0 - exp( -( y - yT ) / 12.0 ) ); }
+float fogPath( float d ) {
+  float yT = max( cameraPosition.y, 0.0 ) + 4.0 + 26.0 * ( 1.0 - smoothstep( 700.0, 1600.0, d ) );
+  float ya = cameraPosition.y, dy = vFogY - ya;
+  float avg = abs( dy ) < 0.5 ? exp( -max( 0.0, 0.5 * ( ya + vFogY ) - yT ) / 12.0 ) : ( fogG( vFogY, yT ) - fogG( ya, yT ) ) / dy;
+  return d * avg;
+}
+#endif`;
+THREE.ShaderChunk.fog_fragment = THREE.ShaderChunk.fog_fragment.replace('smoothstep( fogNear, fogFar, vFogDepth )', 'smoothstep( fogNear, fogFar, fogPath( vFogDepth ) )');
 renderer.toneMappingExposure = 1.1;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
 $('app').appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.5, 5000);
+const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.5, 8000); // 遠くの丘（パーパンからペシュ・ダヴィッドまで 6.3 km）
 camera.position.set(0, 40, 80);
 
 // 午後のトゥールーズ: 南西の空に太陽
@@ -64,6 +84,7 @@ const sunDir = new THREE.Vector3().setFromSphericalCoords(
 );
 const sky = new Sky();
 sky.scale.setScalar(4000);
+sky.renderOrder = -1000; // 最初に描く（深度を書かないので、箱より遠くの丘も上に描かれる）
 sky.material.uniforms.turbidity.value = 3.5;
 sky.material.uniforms.rayleigh.value = 1.4;
 sky.material.uniforms.mieCoefficient.value = 0.004;
@@ -184,7 +205,8 @@ const shadowFit = { half: 0, fwd: new THREE.Vector3(), c: new THREE.Vector3(), x
 function fitSunShadow() {
   const f = shadowFit;
   if (f.lock) return; // デバッグ用: 影の箱を固定する
-  const h = Math.max(1.5, camera.position.y);
+  const gy = state.world?.terrain ? state.world.terrain.h(camera.position.x, camera.position.z) : 0; // 地面の高さ
+  const h = Math.max(1.5, camera.position.y - gy);
   const half = Math.min(320, Math.round((95 + h * 2.2) / 10) * 10);
   camera.getWorldDirection(f.fwd);
   const down = -f.fwd.y;
@@ -194,7 +216,7 @@ function fitSunShadow() {
   else f.fwd.divideScalar(fl);
   const look = down > 0.02 ? (h / down) * fl : Infinity; // 見ている点までの水平距離
   const ahead = Math.min(Math.max(look, half * 0.45), half * 0.7);
-  const c = f.c.set(camera.position.x, 0, camera.position.z).addScaledVector(f.fwd, ahead);
+  const c = f.c.set(camera.position.x, gy, camera.position.z).addScaledVector(f.fwd, ahead);
   f.x.crossVectors(sun.up, sunDir).normalize(); // 影のカメラの x・y 軸（lookAt と同じ向き）
   f.y.crossVectors(sunDir, f.x);
   const texel = (2 * half) / sun.shadow.mapSize.x;
@@ -314,6 +336,7 @@ async function startGame() {
       await startStream(bbox);
       return;
     }
+    const terrainFile = fetchTerrainFile(area.custom ? null : state.presetId); // 地図データと並行して
     const data = await loadAreaData({
       bbox,
       presetId: area.custom ? null : state.presetId,
@@ -323,7 +346,8 @@ async function startGame() {
     });
     setLoading(`地図データ: ${PROVIDER_LABEL[data.provider]}（${data.source}）\n地図を解析中…`, 0.3);
     await nextFrame();
-    state.world = await buildWorld(data, bbox, (t, p) => setLoading(`地図データ: ${data.source}\n${t}`, 0.3 + p * 0.65));
+    const { terrain } = await loadTerrain({ filePromise: terrainFile, bbox, osm: data.osm, onStatus: (t) => setLoading(t, 0.3) });
+    state.world = await buildWorld(data, bbox, (t, p) => setLoading(`地図データ: ${data.source}\n${t}`, 0.3 + p * 0.65), terrain);
     beginPlay();
   } catch (err) {
     console.error(err);
@@ -336,9 +360,11 @@ async function startGame() {
 // 広いエリア（トゥールーズ全体）: 道路などの基本データと粗い高さを読み込み、スタート地点の周りのタイルを組み立ててから始める
 async function startStream(bbox) {
   const forceNetwork = $('opt-refresh').checked;
+  const terrainFile = fetchTerrainFile(state.presetId); // 地図データと並行して
   const base = await loadBaseData({ bbox, presetId: state.presetId, forceNetwork, onStatus: (t) => setLoading(t, 0.08) });
+  const { terrain } = await loadTerrain({ filePromise: terrainFile, bbox, osm: base.osm, onStatus: (t) => setLoading(t, 0.15) });
   const world = await assembleStreamWorld({
-    base, bbox, presetId: state.presetId, buildingMats, groundMats,
+    base, bbox, presetId: state.presetId, buildingMats, groundMats, terrain,
     progress: (t, p) => setLoading(`地図データ: IGN BD TOPO（${base.source}）\n${t}`, 0.2 + p * 0.3),
   });
   state.world = finishWorld(world);
@@ -350,8 +376,8 @@ async function startStream(bbox) {
 }
 
 // ---------------------------------------------------------------- 3D 都市の構築
-async function buildWorld(data, bbox, progress) {
-  return finishWorld(await assembleWorld(data, bbox, { buildingMats, groundMats, progress, pause: nextFrame }));
+async function buildWorld(data, bbox, progress, terrain) {
+  return finishWorld(await assembleWorld(data, bbox, { buildingMats, groundMats, progress, pause: nextFrame, terrain }));
 }
 
 // ミニマップ・目的地の光の柱・ルートの帯を加えて、シーンに置く
@@ -397,8 +423,11 @@ function spawnPoint(w) {
 }
 
 // ワープした地点などの地面の高さ
-function groundForTeleport(x, z) {
-  return state.world?.heightAt ? state.world.heightAt(x, z) : 0;
+function groundForTeleport(x, z, road = null) {
+  // 橋の下の道路で橋の上に置かないように spawnY（地面の高さ。水の上だけ橋の面）。置く道そのものが橋なら橋の面
+  const w = state.world;
+  const onBridge = !!(road && (road.bridge || (road.layer || 0) > 0));
+  return w?.spawnY ? w.spawnY(x, z, onBridge) : w?.heightAt ? w.heightAt(x, z) : 0;
 }
 
 function updateAttribution() {
@@ -434,7 +463,7 @@ function beginPlay() {
     }
   }
   const p = spawnPoint(w);
-  bike.place(p.x, p.z, p.heading, groundForTeleport(p.x, p.z));
+  bike.place(p.x, p.z, p.heading, groundForTeleport(p.x, p.z, p.road));
   if (!w.stream) w.furniture?.cull(p.x, p.z, true); // 一度に作る街: 始まる前から近くの小物を描く（遊んでいる間は update で）
   updateAttribution();
   rig.initialized = false;
@@ -577,13 +606,18 @@ function updateRouteMesh() {
   const pos = [];
   const half = 0.9;
   const lift = 0.06;
-  const yAt = (x, z) => w.heightAt(x, z) + lift;
+  // 坂・橋に沿うように 4 m ごとに区切り、自転車の高さから順にたどる（橋の下の道は橋の上に上げない）
+  let prevY = state.bike?.y ?? 0;
+  const yAt = (x, z) => {
+    prevY = w.groundAt ? w.groundAt(x, z, prevY) : w.heightAt(x, z);
+    return prevY + lift;
+  };
   for (let i = 0; i + 1 < pts.length; i++) {
     const [px, pz] = pts[i], [qx, qz] = pts[i + 1];
     const l = Math.hypot(qx - px, qz - pz);
     if (l < 0.01) continue;
     const nx = (-(qz - pz) / l) * half, nz = ((qx - px) / l) * half;
-    const steps = 1;
+    const steps = Math.max(1, Math.ceil(l / 4));
     for (let k = 0; k < steps; k++) {
       const ax = px + ((qx - px) * k) / steps, az = pz + ((qz - pz) * k) / steps;
       const bx = px + ((qx - px) * (k + 1)) / steps, bz = pz + ((qz - pz) * (k + 1)) / steps;
@@ -622,6 +656,10 @@ function update(dt, forced) {
       collision: w.collision,
       surfaceAt: w.surfaceAt,
       groundAt: w.groundAt || null,
+      heightAt: w.heightAt || null,
+      spawnY: w.spawnY || null,
+      rideY: w.terrain && !w.terrain.flat ? w.rideY : null, // 地形の坂の勾配・崖
+      roadnet: w.roadnet,
     });
   }
   state.playTime += dt;
@@ -638,7 +676,7 @@ function update(dt, forced) {
 
   groundMats.water.userData.time.value = state.playTime; // 水面の波を流す
 
-  rig.update(dt, bike, w.collision, null);
+  rig.update(dt, bike, w.collision, w.groundAt ? (x, z) => w.groundAt(x, z, bike.y + 1) : null); // カメラが坂・河岸に潜らないように
   audio.update(dt, bike.speed, ctl.throttle === 0);
 
   // 名所の発見
@@ -802,7 +840,7 @@ $('fullmap').addEventListener('click', (e) => {
   const [x, z] = mapXf.toWorld(px, py);
   const p = w.roadnet.nearestRideablePoint(x, z, (qx, qz) => !w.collision.blockedByWater(qx, qz) && !w.collision.outOfBounds(qx, qz));
   if (p) {
-    state.bike.place(p.x, p.z, p.heading, groundForTeleport(p.x, p.z));
+    state.bike.place(p.x, p.z, p.heading, groundForTeleport(p.x, p.z, p.road));
     rig.initialized = false;
     state.routeTimer = 0;
     openMap(false);
@@ -816,7 +854,7 @@ function respawn() {
   const b = state.bike;
   const p = w.roadnet.nearestRideablePoint(b.x, b.z, (x, z) => !w.collision.blockedByWater(x, z) && !w.collision.outOfBounds(x, z));
   if (p) {
-    b.place(p.x, p.z, p.heading, groundForTeleport(p.x, p.z));
+    b.place(p.x, p.z, p.heading, groundForTeleport(p.x, p.z, p.road));
     rig.initialized = false;
   }
 }

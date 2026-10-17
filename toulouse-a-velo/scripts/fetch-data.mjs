@@ -9,6 +9,9 @@
 //   npm run fetch-data -- toulouse        # トゥールーズ全体（半径 5 km）: 道路などの基本データ（toulouse.json）と、
 //                                         # 建物・塀・木・地面の覆いを 500 m のタイルに分けたファイル（toulouse-tiles/<i>_<j>.json）
 //   npm run fetch-data -- toulouse --resume  # 途中で止まった取得の続き（今の形式で保存済みのタイルは取得し直さない）
+//   npm run fetch-data -- all --terrain   # 地形（<preset>-terrain.bin）だけ作り直す（保存済みの <preset>.json を使う）
+//
+// どのプリセットも最後に地形（LiDAR HD の地形モデルの 5 m の格子・水面の高さ・橋の縦断面）を <preset>-terrain.bin に保存する
 //
 // 塀と木は、地籍（敷地の境界）と LiDAR HD の表面モデルから見つける（src/data/walls.js）。
 // 地面の覆い（公道・敷地の中・芝生・木の下）は、さらに赤外線航空写真の植生指数を使う（src/data/cover.js）。
@@ -26,11 +29,15 @@ import { fetchWfsLayer } from '../src/data/bdtopo.js';
 import { IGN_LAYERS } from '../src/data/ign.js';
 import { areaFrame } from '../src/world/assemble.js';
 import { DATA_VERSION } from '../src/config.js';
+import { parseOsm } from '../src/world/parse.js';
+import { bakeTerrain } from '../src/data/terrainbake.js';
+import { DATUM, Terrain, encodeTerrain } from '../src/world/terrain.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
 const provider = args.includes('--ign') ? 'ign' : 'auto';
 const resume = args.includes('--resume');
+const terrainOnly = args.includes('--terrain');
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const arg = args.find((a) => !a.startsWith('--')) || DEFAULT_AREA;
 const ids = arg === 'all' ? Object.keys(AREA_PRESETS) : [arg];
@@ -43,8 +50,13 @@ for (const id of ids) {
   }
   const bbox = bboxAround(preset.lat, preset.lon, preset.radius);
   console.log(`[${id}] bbox ${JSON.stringify(bbox)}`);
+  if (terrainOnly) {
+    await bakeTerrainFile(id, bbox);
+    continue;
+  }
   if (preset.stream) {
     await bakeStream(id, bbox);
+    await bakeTerrainFile(id, bbox);
     continue;
   }
   let last = '';
@@ -81,6 +93,43 @@ for (const id of ids) {
   const json = JSON.stringify(save);
   await writeFile(out, json);
   console.log(`  保存: ${out} (${(json.length / 1048576).toFixed(1)} MB)`);
+  await bakeTerrainFile(id, bbox);
+}
+
+// 地形のファイル（保存済みの地図データの水域と橋を使う）。最後に、確かめやすい場所の高さを表示する
+async function bakeTerrainFile(id, bbox) {
+  const base = JSON.parse(await readFile(join(root, 'public', 'data', `${id}.json`), 'utf8'));
+  const { proj, rect } = areaFrame(bbox);
+  const parsed = parseOsm(base.osm, proj, rect, []);
+  let last = '';
+  const t0 = Date.now();
+  const data = await bakeTerrain({
+    bbox, parsed, proj,
+    onStatus: (t) => {
+      if (t !== last) process.stdout.write(`\r  地形: ${t}`.padEnd(70));
+      last = t;
+    },
+  });
+  const buf = await encodeTerrain(data);
+  const out = join(root, 'public', 'data', `${id}-terrain.bin`);
+  await writeFile(out, buf);
+  console.log(`\n  保存: ${out}（${(buf.length / 1048576).toFixed(2)} MB、${data.near.cols} × ${data.near.rows} 点、橋の縦断面 ${data.bridges.length}、${((Date.now() - t0) / 1000).toFixed(0)} 秒）`);
+  // 確かめ: 標高（m）。トゥールーズ全体の座標（x = 東, z = 南）から緯度経度にして引く
+  const t = new Terrain(data, proj);
+  const T = areaFrame({ s: 43.5994, n: 43.5994, w: 1.4395, e: 1.4395 }).proj;
+  const probes = [
+    ['ポン・ヌフの右岸の端', 73, -22], ['ポン・ヌフの頂上（原点の近く）', -14, 0], ['ポン・ヌフの左岸の端', -142, 32], ['シャトー・ドーの角', -215, 40],
+    ['共和国通り', -306, 95], ['キャピトル', 330, -560], ['ドラード港の低い河岸', 10, -110], ['ポン・ヌフの下の水面', -40, 0, 'w'],
+    ['大ブルターニュ通り（平ら）', -2000, -300], ['パーパン', -3415, -960], ['バイヨンヌ通り（トゥシュの谷）', -4511, -994],
+    ['栄光通りの上', 2155, -845], ['ペシュ・ダヴィッド', 605, 3941], ['ミディ運河（バヤール閘門の上）', 1150, -1300, 'w'], ['バザクルの下の水面', -700, -500, 'w'],
+  ];
+  for (const [name, x, z, w] of probes) {
+    const [x2, z2] = proj.project(...T.unproject(x, z));
+    const y = w ? t.waterLevel(x2, z2) : t.h(x2, z2);
+    console.log(`    ${name}${w ? '（水面）' : ''}: ${(y + DATUM).toFixed(1)} m`);
+  }
+  const pn = data.bridges.find((b) => b.name === 'Pont Neuf');
+  if (pn) console.log(`    ポン・ヌフの橋面（5 m ごと）: ${pn.y.filter((_, i) => i % 4 === 0).map((v) => v.toFixed(1)).join(' ')}`);
 }
 
 // 広いエリア: 基本データ（建物以外）と、建物をタイルに分けたファイル

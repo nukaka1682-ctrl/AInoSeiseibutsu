@@ -17,7 +17,9 @@ import { areaFrame, makeSurfaceAt } from './assemble.js';
 import { buildGroundBase, buildGroundDetailAsync, makeWaterTest } from './ground.js';
 import { POST_HIT, planStreets } from './streets.js';
 import { historicCoreTest, oldTownTest } from '../config.js';
-import { makeDeckTest } from './bridges.js';
+import { makeDeckTest, setupDecks } from './bridges.js';
+import { FLAT_TERRAIN, surfaceFns, waterPass } from './terrain.js';
+import { buildTerrainTile } from './terrainmesh.js';
 import { buildCoverMesh } from './cover.js';
 import { buildFurniture } from './furniture.js';
 import { CollisionWorld } from '../game/collision.js';
@@ -28,7 +30,8 @@ export const NEAR = 650; // これより近いタイルを作る（m、タイル
 export const FAR = 1000; // これより遠いタイルは捨てる
 const pause = () => new Promise((r) => setTimeout(r, 0));
 
-export async function assembleStreamWorld({ base, bbox, presetId, buildingMats, groundMats, progress = () => {} }) {
+// terrain: 地形（world/terrain.js。なければ平ら）
+export async function assembleStreamWorld({ base, bbox, presetId, buildingMats, groundMats, progress = () => {}, terrain = FLAT_TERRAIN }) {
   const { proj, rect } = areaFrame(bbox);
   const layout = tileLayout(rect);
   progress('道路・川・公園を解析中…', 0.05);
@@ -43,8 +46,9 @@ export async function assembleStreamWorld({ base, bbox, presetId, buildingMats, 
   await pause();
   const group = new THREE.Group();
   group.name = 'stream-city';
-  const ground = buildGroundBase(parsed, rect, groundMats);
+  const ground = buildGroundBase(parsed, rect, groundMats, terrain, layout);
   group.add(ground.group);
+  setupDecks(terrain, parsed.roads, proj, ground.waterDepthAt); // 橋の縦断面
   const inWater = makeWaterTest(parsed.areas);
 
   progress('名所を探しています…', 0.7);
@@ -61,14 +65,17 @@ export async function assembleStreamWorld({ base, bbox, presetId, buildingMats, 
   const streamer = new TileStreamer({
     presetId, bbox, rect, proj, layout, parsed, roadnet, inWater, onRoad, avenues, inOldTown, inCore: historicCoreTest(proj),
     materials: buildingMats, groundMats, waterDepthAt: ground.waterDepthAt, bankTrees: ground.bankTrees || [], collision, group,
+    terrain, far: ground.far, quayCentre: proj.project(43.5994, 1.4364),
   });
-  for (const lm of landmarks) lm.y = 0;
+  for (const lm of landmarks) lm.y = terrain.h(lm.x, lm.z);
+  collision.terrain = terrain;
   // 一段高い歩道の高さ（読み込んだタイルの歩道から。歩道はタイルの境を少しはみ出すので、隣のタイルも見る）
-  const heightAt = (x, z) => streamer.heightAt(x, z);
+  const liftAt = (x, z) => streamer.heightAt(x, z);
+  const surf = surfaceFns(terrain, liftAt);
 
   return {
     proj, rect, parsed, roadnet, ground, collision, trees: null, landmarks, group, surfaceAt,
-    heightAt, groundAt: heightAt, stream: streamer,
+    heightAt: surf.heightAt, groundAt: surf.groundAt, rideY: surf.rideY, spawnY: (x, z, onBridge = false) => surf.spawnY(x, z, inWater, onBridge), liftAt, terrain, stream: streamer,
     stats: {
       buildings: { total: 0 },
       roads: parsed.roads.length,
@@ -198,8 +205,12 @@ class TileStreamer {
 
     // 地面（地面の覆い・緑地・道路・歩道・線路・橋）。覆いのあるタイルでは、緑地は覆い（芝生・木の下）にまかせる。
     // 歩道はこのタイルと隣のタイルの境近くの建物・塀の壁まで延ばす。歩道の計算は重いので、道ごとに区切ってフレームに譲りながら作る
-    const ground = await buildGroundDetailAsync(this.parsed, B, this.groundMats, this.waterDepthAt, { buildings: buildings.concat(context), walls, inOldTown: this.inOldTown, covered: data.cover ? [B] : [] }, pause);
-    if (data.cover) ground.group.add(buildCoverMesh(data.cover, B, this.groundMats.cover, this.inOldTown, this.parsed));
+    const T = this.terrain;
+    const ground = await buildGroundDetailAsync(this.parsed, B, this.groundMats, this.waterDepthAt, { buildings: buildings.concat(context), walls, inOldTown: this.inOldTown, covered: data.cover ? [B] : [], terrain: T }, pause);
+    // 地形: タイルの地面（地面の覆いは同じ三角形に描く）
+    const tile = T.flat ? null : buildTerrainTile(T, B, this.groundMats, { quayCentre: this.quayCentre, inWater: this.inWater });
+    if (tile) ground.group.add(tile.group);
+    if (data.cover) ground.group.add(buildCoverMesh(data.cover, B, this.groundMats.cover, this.inOldTown, this.parsed, tile?.geometry));
     group.add(ground.group);
     await pause();
     if (t.state !== 'loading') return disposeGroup(group);
@@ -213,17 +224,21 @@ class TileStreamer {
     const onCarRoad = (x, z) => this.roadnet.onRoad(x, z, 0.3);
     const monuments = findMonuments(this.proj, { buildings, areas: this.parsed.areas, roads: this.parsed.roads, facade, bounds: B, onRoad: onCarRoad });
     const tb = performance.now();
-    const built = await buildBuildings(tp, this.materials, null, facade, { context, towers, groundAt: ground.heightAt, skip: new Set(monuments.flatMap((m) => m.replaced)) });
+    const built = await buildBuildings(tp, this.materials, null, facade, { context, towers, groundAt: ground.heightAt, skip: new Set(monuments.flatMap((m) => m.replaced)), terrain: T });
     const buildingMs = performance.now() - tb;
     group.add(built.group);
-    const mon = buildMonuments(monuments, this.materials, { groundAt: ground.heightAt, onRoad: onCarRoad });
+    const mon = buildMonuments(monuments, this.materials, { groundAt: (x, z) => T.h(x, z) + ground.heightAt(x, z), onRoad: onCarRoad });
     group.add(mon.group);
     if (t.state !== 'loading') return disposeGroup(group);
 
     // 塀
     const cw = new CollisionWorld({ minX: B.minX - 80, maxX: B.maxX + 80, minZ: B.minZ - 80, maxZ: B.maxZ + 80 });
-    group.add(buildEnclosures(walls, this.materials, cw));
+    group.add(buildEnclosures(walls, this.materials, cw, T));
     for (const [x, z] of ground.posts) cw.addCircle(x, z, POST_HIT); // 横断歩道の脇の車止め
+    for (const q of T.quayWalls || []) {
+      const mx = (q.ax + q.bx) / 2, mz = (q.az + q.bz) / 2;
+      if (mx >= B.minX && mx < B.maxX && mz >= B.minZ && mz < B.maxZ) cw.addSegment(q.ax, q.az, q.bx, q.bz); // 岸壁（タイルに中点が入る壁だけ）
+    }
     for (const c of mon.colliders) {
       if (c.length === 4) cw.addSegment(...c); // 像の台・塔の鉄柵（円 [x, z, r] か線分 [ax, az, bx, bz]）
       else cw.addCircle(...c);
@@ -260,6 +275,7 @@ class TileStreamer {
     const trees = buildTrees(treePts, {
       isPlane: planeTreeTest(this.roadnet, this.inWater),
       canPlace: (x, z) => !this.roadnet.onRoad(x, z, 0.3) && !this.inWater(x, z) && !insideBuilding(x, z),
+      groundH: (x, z) => T.h(x, z),
     });
     group.add(trees);
 
@@ -281,7 +297,7 @@ class TileStreamer {
     const onMonument = monumentSolid(mon.keepOut);
     const furniture = buildFurniture({
       parsed: this.parsed, plan: planStreets(this.parsed, this.inOldTown), clip: B, curbs: ground.streetStats.curbs, inOldTown: this.inCore,
-      heightAt: ground.heightAt, onRoad: (x, z, m) => this.roadnet.onRoad(x, z, m), solid: (x, z) => insideBuilding(x, z) || insideContext(x, z) || this.inWater(x, z) || onMonument(x, z), trunks: trees.userData.trunks,
+      heightAt: ground.heightAt, terrain: T, onRoad: (x, z, m) => this.roadnet.onRoad(x, z, m), solid: (x, z) => insideBuilding(x, z) || insideContext(x, z) || this.inWater(x, z) || onMonument(x, z), trunks: trees.userData.trunks,
     }, cw);
     furniture.cull(this.focus[0], this.focus[1], true);
     group.add(furniture.group);
@@ -298,6 +314,7 @@ class TileStreamer {
     Object.assign(t, { group, cw, furniture, heightAt: ground.heightAt, buildings: buildings.length, trees: treePts.length, walls: walls.length, triangles: tris, buildMs: ms, state: 'ready' });
     this.group.add(group);
     this.collision.add(cw);
+    this.far?.setTile(t.i, t.j, true); // 遠くの地面はこのタイルの中を描かない
     this.onTileReady?.(t, buildings);
     this.totals.buildings += buildings.length;
     this.totals.trees += treePts.length;
@@ -311,6 +328,7 @@ class TileStreamer {
     t.state = 'gone';
     this.tiles.delete(t.key);
     this.group.remove(t.group);
+    this.far?.setTile(t.i, t.j, false);
     disposeGroup(t.group);
     this.collision.remove(t.cw);
     this.totals.buildings -= t.buildings;
@@ -367,8 +385,11 @@ class StreamCollision {
     this.parts.delete(cw);
   }
 
-  blockedByWater(x, z) {
-    return this.inWater(x, z) && !this.onRoad(x, z);
+  // 水の上か（橋の上は通れる。地形があるときは、橋の面の高さ近くにいるときだけ。y: 自転車の高さ）
+  blockedByWater(x, z, y = null) {
+    if (!this.inWater(x, z)) return false;
+    if (y == null || !this.terrain || this.terrain.flat) return !this.onRoad(x, z);
+    return !waterPass(this.terrain, x, z, y, (px, pz) => this.onRoad(px, pz));
   }
 
   outOfBounds(x, z, margin = 15) {
