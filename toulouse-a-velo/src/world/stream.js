@@ -10,6 +10,7 @@ import { loadTileData, tileAt, tileBounds, tileLayout } from '../data/tiles.js';
 import { buildBuildings } from './buildings.js';
 import { buildTrees, fillParkTrees, planeTreeTest, streetTrees } from './trees.js';
 import { buildEnclosures, clearRoads, projectTrees, projectWalls, tameWalls } from './enclosures.js';
+import { clearEntrances, entranceWalls } from './metro.js';
 import { findCapitoleFacade, markBrickSites } from './landmarkfacades.js';
 import { findTowers } from './towers.js';
 import { buildMonuments, findMonuments, monumentClearance, monumentSolid } from './monuments.js';
@@ -201,7 +202,7 @@ class TileStreamer {
     const context = parseOsm(data.ctx, this.proj, this.rect, []).buildings;
     const group = new THREE.Group();
     group.name = `tile-${t.key}`;
-    const walls = clearRoads(tameWalls(projectWalls(data.walls, this.proj), buildings.concat(context)), (x, z) => this.roadnet.onRoad(x, z, 0.3));
+    const walls = clearEntrances(clearRoads(tameWalls(projectWalls(data.walls, this.proj), buildings.concat(context)), (x, z) => this.roadnet.onRoad(x, z, 0.3)), this.terrain.metro || []);
 
     // 地面（地面の覆い・緑地・道路・歩道・線路・橋）。覆いのあるタイルでは、緑地は覆い（芝生・木の下）にまかせる。
     // 歩道はこのタイルと隣のタイルの境近くの建物・塀の壁まで延ばす。歩道の計算は重いので、道ごとに区切ってフレームに譲りながら作る
@@ -238,6 +239,9 @@ class TileStreamer {
     for (const q of T.quayWalls || []) {
       const mx = (q.ax + q.bx) / 2, mz = (q.az + q.bz) / 2;
       if (mx >= B.minX && mx < B.maxX && mz >= B.minZ && mz < B.maxZ) cw.addSegment(q.ax, q.az, q.bx, q.bz); // 岸壁（タイルに中点が入る壁だけ）
+    }
+    for (const e of T.metro || []) {
+      if (e.x >= B.minX && e.x < B.maxX && e.z >= B.minZ && e.z < B.maxZ) for (const s of entranceWalls(e)) cw.addSegment(...s); // メトロの出入口の吹き抜け
     }
     for (const c of mon.colliders) {
       if (c.length === 4) cw.addSegment(...c); // 像の台・塔の鉄柵（円 [x, z, r] か線分 [ax, az, bx, bz]）

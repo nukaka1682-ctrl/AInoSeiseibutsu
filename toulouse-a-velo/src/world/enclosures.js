@@ -7,6 +7,7 @@ import { Grid, closestOnSegment, hash01 } from '../geo.js';
 
 const THICK = 0.4;
 const CAP = [0.78, 0.45, 0.32]; // 笠木の瓦（瓦のテクスチャに掛ける色）
+const FILL = [0.66, 0.62, 0.56]; // 土留めの上の平らな面（漆喰のテクスチャに掛ける、砂利敷きのような色）
 
 // walls: [経度 1, 緯度 1, 経度 2, 緯度 2, 高さ] の配列 → [[x1, z1, x2, z2, 高さ], ...]
 export function projectWalls(walls, proj) {
@@ -112,7 +113,7 @@ export function buildEnclosures(segs, materials, collision = null, terrain = nul
   const o = { drape: terrain, lift: -0.05 }; // 少し地面に埋める（地面の細かい凹凸で浮かないように）
   const brick = new MeshWriter(o), render = new MeshWriter(o), cap = new MeshWriter(o);
   const sloped = terrain && !terrain.flat;
-  const plain = sloped ? { brick: new MeshWriter(), render: new MeshWriter(), cap: new MeshWriter() } : null;
+  const plain = sloped ? { brick: new MeshWriter(), render: new MeshWriter(), cap: new MeshWriter(), fill: new MeshWriter() } : null;
   for (const [ax, az, bx, bz, h] of segs) {
     const L = Math.hypot(bx - ax, bz - az);
     if (L < 0.5) continue;
@@ -120,7 +121,7 @@ export function buildEnclosures(segs, materials, collision = null, terrain = nul
       // 地形の上: 地面にそのまま沿わせると、段差（河岸・土手）を斜めに横切る塀の上端が 5 m の格子ごとにのこぎりの歯になる。
       // 上端はなめらかな線（wallProfile）、下端は地面より下まで（地面に隠れる）の普通の面で作る
       const seed = Math.floor(ax * 3.1) * 7919 + Math.floor(az * 2.3);
-      writeSlopedWall(hash01(seed, 1) < 0.75 ? plain.brick : plain.render, plain.cap, wallProfile(terrain, ax, az, bx, bz, h), seed);
+      writeSlopedWall(hash01(seed, 1) < 0.75 ? plain.brick : plain.render, plain.cap, wallProfile(terrain, ax, az, bx, bz, h), seed, plain.fill);
       if (collision) collision.addSegment(ax, az, bx, bz);
       continue;
     }
@@ -159,7 +160,7 @@ export function buildEnclosures(segs, materials, collision = null, terrain = nul
   const group = new THREE.Group();
   group.name = 'enclosure-walls';
   const list = [[brick, materials.enclosureBrick], [render, materials.enclosureRender], [cap, materials.roof]];
-  if (plain) list.push([plain.brick, materials.enclosureBrick], [plain.render, materials.enclosureRender], [plain.cap, materials.roof]);
+  if (plain) list.push([plain.brick, materials.enclosureBrick], [plain.render, materials.enclosureRender], [plain.cap, materials.roof], [plain.fill, materials.enclosureRender]);
   for (const [w, material] of list) {
     if (w.empty) continue;
     const m = new THREE.Mesh(w.toGeometry(), material);
@@ -173,7 +174,10 @@ export function buildEnclosures(segs, materials, collision = null, terrain = nul
 // 地形の上の塀の縦断面。step m ごとの点 { x, z, base, top }（y。base: 塀の足＝両側の地面の低い方より bury m 下、
 // top: 笠木の上端）。上端は「低い側の地面 + h」と「高い側の地面 + 胸壁 min(h, rail) m」の大きい方を、±win m の最大で包んでから
 // ±win m で平均する（包んだ線の平均なので、どの点でも元の高さより下がらない）。段差を斜めに横切る塀ものこぎりの歯にならない
-export function wallProfile(terrain, ax, az, bx, bz, h, { step = 2, win = 4, rail = 1, bury = 0.3, half = THICK / 2 } = {}) {
+// 土留め: 塀から reach m 先の地面が塀の足より retain m 以上高い側があれば（盛り土の道の脇の塀など。5 m の格子では塀と道の間が
+// 土の斜面になる）、塀はその高さを支える土留めの壁: 上端は少なくともその高さ + 胸壁、点に fill: { s: 側（+1: 法線の側）, y } を付ける
+// （writeSlopedWall が塀からその側へ reach m の平らな面で斜面を隠す）
+export function wallProfile(terrain, ax, az, bx, bz, h, { step = 2, win = 4, rail = 1, bury = 0.3, half = THICK / 2, reach = 5.5, retain = 1.2 } = {}) {
   const L = Math.hypot(bx - ax, bz - az), n = Math.max(1, Math.ceil(L / step));
   const ux = (bx - ax) / (L || 1), uz = (bz - az) / (L || 1), nx = -uz * half, nz = ux * half;
   const pts = [], lo = [], raw = [];
@@ -181,9 +185,11 @@ export function wallProfile(terrain, ax, az, bx, bz, h, { step = 2, win = 4, rai
     const x = ax + ((bx - ax) * i) / n, z = az + ((bz - az) * i) / n;
     const g1 = terrain.h(x + nx, z + nz), g2 = terrain.h(x - nx, z - nz), g0 = terrain.h(x, z);
     const l = Math.min(g0, g1, g2), u = Math.max(g0, g1, g2);
-    pts.push({ x, z, base: 0, top: 0 });
+    const k = reach / half, f1 = terrain.h(x + nx * k, z + nz * k), f2 = terrain.h(x - nx * k, z - nz * k);
+    const fy = Math.max(f1, f2), fill = fy - l > retain && fy > u + 0.3 ? { s: f1 >= f2 ? 1 : -1, y: fy } : null;
+    pts.push({ x, z, base: 0, top: 0, fill });
     lo.push(l);
-    raw.push(Math.max(l + h, u + Math.min(h, rail)));
+    raw.push(Math.max(l + h, u + Math.min(h, rail), fill ? fy + rail : -Infinity));
   }
   const w = Math.max(1, Math.round(win / (L / n)));
   const env = raw.map((_, i) => Math.max(...raw.slice(Math.max(0, i - w), i + w + 1)));
@@ -198,7 +204,7 @@ export function wallProfile(terrain, ax, az, bx, bz, h, { step = 2, win = 4, rai
 }
 
 // wallProfile の点で塀を書く（地形の上。w: 壁の面、cap: 笠木）
-function writeSlopedWall(w, cap, P, seed) {
+function writeSlopedWall(w, cap, P, seed, fillW = null, reach = 5.5) {
   const k = 0.9 + hash01(seed, 2) * 0.15;
   const color = [k, k * (0.97 + hash01(seed, 3) * 0.03), k * (0.94 + hash01(seed, 4) * 0.06)];
   const u0 = hash01(seed, 5) * 4;
@@ -221,6 +227,16 @@ function writeSlopedWall(w, cap, P, seed) {
     for (const [j0, j1] of [[0, 1], [2, 3]]) {
       const ex2 = c[j1][0] - c[j0][0], ez2 = c[j1][1] - c[j0][1], l = Math.hypot(ex2, ez2) || 1;
       cap.quad(at(j0, -0.12), at(j1, -0.12), at(j1), at(j0), [ez2 / l, 0, -ex2 / l], [0, 0], [l / 1.6, 0], [l / 1.6, 0.06], [0, 0.06], CAP);
+    }
+    // 土留めの上の平らな面（盛り土の側。地面より 2 cm 下なので、平らな所では地面・歩道に隠れる）
+    if (fillW && p.fill && q.fill && p.fill.s === q.fill.s) {
+      const s = p.fill.s, ox = (-uz) * s, oz = ux * s, ya = p.fill.y - 0.02, yb = q.fill.y - 0.02;
+      const a0 = [p.x + nx * s, p.z + nz * s], b0 = [q.x + nx * s, q.z + nz * s];
+      let quad = [[a0[0], ya, a0[1]], [b0[0], yb, b0[1]], [b0[0] + ox * reach, yb, b0[1] + oz * reach], [a0[0] + ox * reach, ya, a0[1] + oz * reach]];
+      // 表（反時計回り）が上を向く並びに: (b - a) × (d - a) の y が正
+      const [A0, B0, , D0] = quad;
+      if ((D0[0] - A0[0]) * (B0[2] - A0[2]) - (D0[2] - A0[2]) * (B0[0] - A0[0]) < 0) quad = [quad[0], quad[3], quad[2], quad[1]];
+      fillW.quad(...quad, [0, 1, 0], [0, 0], [d / 4, 0], [d / 4, reach / 4], [0, reach / 4], FILL);
     }
     s0 = s1;
   }

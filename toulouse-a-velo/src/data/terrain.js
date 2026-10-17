@@ -9,12 +9,26 @@ import { areaFrame } from '../world/assemble.js';
 export async function fetchTerrainFile(presetId) {
   if (!presetId) return null;
   try {
+    const metro = fetchMetroFile(presetId); // メトロの出入口（並行して。なくてもよい）
     const res = await fetch(`${import.meta.env.BASE_URL}data/${presetId}-terrain.bin`);
     if (!res.ok || /html/.test(res.headers.get('content-type') || '')) return null;
-    return await decodeTerrain(await res.arrayBuffer());
+    const data = await decodeTerrain(await res.arrayBuffer());
+    data.metro = await metro;
+    return data;
   } catch (err) {
     console.warn('地形のファイルを読めませんでした', err);
     return null;
+  }
+}
+
+// 同梱のメトロの出入口（public/data/<エリア>-metro.json の entrances。なければ空）
+async function fetchMetroFile(presetId) {
+  try {
+    const res = await fetch(`${import.meta.env.BASE_URL}data/${presetId}-metro.json`);
+    if (!res.ok || /html/.test(res.headers.get('content-type') || '')) return [];
+    return (await res.json()).entrances || [];
+  } catch {
+    return [];
   }
 }
 

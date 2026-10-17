@@ -3,7 +3,7 @@
 //   川側へ傾いたりしないように。水の上の区間は両岸の高さを結ぶ）
 // - sharpenQuays: 旧市街のまわりの岸壁（上の河岸と下の遊歩道の段差）を、なまった斜面から 1 マスの段差に戻し、
 //   垂直のレンガの壁を立てる線（walls）を返す（水辺から near m 以内、低い側が水面 + lowAbove m 以下、車道の上は触らない。
-//   遊歩道へ下りる歩道・自転車道の坂と階段は残し、車道でない道を横切る壁は作らない）
+//   遊歩道へ下りる歩道・自転車道の坂と階段は残し、車道でない道を横切る壁は作らない。斜面に沿って走る遊歩道は下の段にする）
 // - extendHeights: 測った範囲の外（遠くの地面の格子の NaN）を、縁の高さから地方の平均へゆるやかに移る丘で埋める
 // - despike: 格子の 1 点だけの穴・とげ（測りの外れ）を近くの中央値に戻す
 // - cleanProfile / fitDeckEnds: 測った橋の縦断面の外れ値を捨て、両端を取り付ける道路の高さに合わせる
@@ -108,13 +108,16 @@ export function conditionRoads(terrain, roads, inWater = () => false, { window =
 
 // 岸壁を立て直す。centre, radius: レンガの岸壁がある範囲（旧市街のまわりのガロンヌ川・ブリエンヌ運河）。
 // inWater(x, z): 水の上か（水の上の格子点は使わない。水辺から near m より遠い点も使わない）。
-// roadW: 格子点ごとの車道の重み（conditionRoads。roadMax より大きい点は触らない＝車道を横切る壁は作らない）。
+// roadW: 格子点ごとの車道の重み（conditionRoads。roadMax より大きい点＝車道の上は触らない＝車道を横切る壁は作らない。
+// 車道の脇のならした帯は触る: 河岸の道は岸壁のすぐ上を走るので、帯を避けると岸壁が途切れて斜面が残る）。
 // ±win m の中で高さの差が drop m より大きく、低い側が水面 + lowAbove m 以下（水辺の遊歩道）の格子点を、上の段か下の段に
 // 分け（真ん中の高さより上か下か）、上の段の点は近くの最大へ、下の段の点は近くの最小へ寄せて、なまった斜面を 1 マスの段差にする。
 // paths: 車道でない道（歩道・小道・自転車道・階段・サービス道路など。parse.js の道路）。遊歩道へ下りる坂・階段（中心線の ±rampSpan m で
 // 高さが rampMin m 以上違う所）のまわりの格子点は触らず（元の坂のまま）、残った壁の線も道を横切るものは捨てる（自転車で通れるように）。
+// 斜面に沿って走る遊歩道（道に沿った勾配が地面の勾配の半分未満）のまわりは下の段にする（岸壁の下の船着き場。上の段の縁の近くは除く）。
+// 下の段は水面 + lowMin m より下げない。
 // 返り値: 壁の線分 [{ ax, az, at, ab, bx, bz, bt, bb, nx, nz }]（at/ab: 壁の上端・下端の y。n: 下の段に向く水平の向き）
-export function sharpenQuays(terrain, centre, radius, { win = 15, drop = 3, lowAbove = 4, near = 45, level = 0.12, inWater = () => false, roadW = terrain?.roadW, roadMax = 0.3, paths = [], rampSpan = 8, rampMin = 0.6 } = {}) {
+export function sharpenQuays(terrain, centre, radius, { win = 15, drop = 3, lowAbove = 4, near = 45, level = 0.12, inWater = () => false, roadW = terrain?.roadW, roadMax = 0.99, paths = [], rampSpan = 8, rampMin = 0.6, terraceGrad = 0.12, edgeKeep = 0.6, lowMin = 0.9 } = {}) {
   if (!terrain || terrain.flat || !centre) return [];
   const g = terrain.near, D = g.data, cols = g.cols, rows = g.rows, DAT = terrain.datum;
   const c0 = Math.max(0, Math.floor(g.ax * (centre[0] - radius) + g.bx)), c1 = Math.min(cols - 1, Math.ceil(g.ax * (centre[0] + radius) + g.bx));
@@ -142,7 +145,7 @@ export function sharpenQuays(terrain, centre, radius, { win = 15, drop = 3, lowA
   for (let r = Hn - 1; r >= 0; r--) for (let c = W - 1; c >= 0; c--) for (const [dr, dc, w] of CHAMFER_A) relax(r, c, -dr, -dc, w);
   const nearCells = near * g.ax;
   // 車道でない道の坂・階段のまわり（道の幅の半分 + 1 m、少なくとも 3/4 マス: 道が通るマスの角のどれかは必ず入る）
-  const ramp = new Uint8Array(W * Hn);
+  const ramp = new Uint8Array(W * Hn), lowPath = new Uint8Array(W * Hn);
   const lines = [];
   const bx0 = centre[0] - radius - 50, bx1 = centre[0] + radius + 50, bz0 = centre[1] - radius - 50, bz1 = centre[1] + radius + 50;
   for (const p of paths) {
@@ -152,6 +155,8 @@ export function sharpenQuays(terrain, centre, radius, { win = 15, drop = 3, lowA
     const S = samplePolyline(p.pts, 2);
     for (const q of S) q.h = terrain.h(q.x, q.z);
     const rr = Math.max((p.width || 2.5) / 2 + 1, 0.75 * Math.max(1 / g.ax, 1 / g.az));
+    // 斜面に沿う遊歩道は、道の両側の格子点が必ず下の段に入る幅（1 マス + α。壁が道を横切らないように）
+    const rrLow = Math.max(rr, 1.15 * Math.max(1 / g.ax, 1 / g.az));
     for (let i = 0, a = 0, b = 0; i < S.length; i++) {
       while (S[i].s - S[a].s > rampSpan) a++;
       while (b + 1 < S.length && S[b + 1].s - S[i].s <= rampSpan) b++;
@@ -160,12 +165,35 @@ export function sharpenQuays(terrain, centre, radius, { win = 15, drop = 3, lowA
         lo = Math.min(lo, S[j].h);
         hi = Math.max(hi, S[j].h);
       }
-      if (!(hi - lo >= rampMin)) continue;
       const q = S[i];
-      const cc0 = Math.max(0, Math.ceil(g.ax * (q.x - rr) + g.bx) - c0), cc1 = Math.min(W - 1, Math.floor(g.ax * (q.x + rr) + g.bx) - c0);
-      const rw0 = Math.max(0, Math.ceil(g.az * (q.z - rr) + g.bz) - r0), rw1 = Math.min(Hn - 1, Math.floor(g.az * (q.z + rr) + g.bz) - r0);
+      // 道に沿った勾配（窓の中の高さの回帰の傾き）が地面の勾配の半分より小さい斜面の上の道は、斜面に沿って走る遊歩道
+      // （なまった斜面に載っているだけ）: 坂ではなく下の段の道として扱う（岸壁の下の船着き場の遊歩道が斜面に貼り付いて傾かないように）
+      let ms = 0, mh = 0;
+      for (let j = a; j <= b; j++) {
+        ms += S[j].s;
+        mh += S[j].h;
+      }
+      ms /= b - a + 1;
+      mh /= b - a + 1;
+      let sxy = 0, sxx = 0;
+      for (let j = a; j <= b; j++) {
+        sxy += (S[j].s - ms) * (S[j].h - mh);
+        sxx += (S[j].s - ms) ** 2;
+      }
+      const along = sxx > 0 ? Math.abs(sxy / sxx) : 0;
+      const grad = Math.hypot(terrain.h(q.x + 2.5, q.z) - terrain.h(q.x - 2.5, q.z), terrain.h(q.x, q.z + 2.5) - terrain.h(q.x, q.z - 2.5)) / 5;
+      const terraceRun = grad > terraceGrad && along < 0.5 * grad;
+      if (!terraceRun && !(hi - lo >= rampMin)) continue;
+      const R = terraceRun ? rrLow : rr;
+      const cc0 = Math.max(0, Math.ceil(g.ax * (q.x - R) + g.bx) - c0), cc1 = Math.min(W - 1, Math.floor(g.ax * (q.x + R) + g.bx) - c0);
+      const rw0 = Math.max(0, Math.ceil(g.az * (q.z - R) + g.bz) - r0), rw1 = Math.min(Hn - 1, Math.floor(g.az * (q.z + R) + g.bz) - r0);
       for (let r = rw0; r <= rw1; r++) {
-        for (let c = cc0; c <= cc1; c++) if (Math.hypot(nodeX(g, c + c0) - q.x, nodeZ(g, r + r0) - q.z) <= rr) ramp[r * W + c] = 1;
+        for (let c = cc0; c <= cc1; c++) {
+          const dn = Math.hypot(nodeX(g, c + c0) - q.x, nodeZ(g, r + r0) - q.z);
+          if (terraceRun) {
+            if (dn <= rrLow) lowPath[r * W + c] = 1;
+          } else if (dn <= rr) ramp[r * W + c] = 1;
+        }
       }
     }
   }
@@ -198,7 +226,9 @@ export function sharpenQuays(terrain, centre, radius, { win = 15, drop = 3, lowA
         hi = Math.max(hi, rowMax[k * W + c]);
       }
       if (hi - lo < drop || lo - DAT > terrain.waterLevel(nodeX(g, c + c0), nodeZ(g, r + r0)) + lowAbove) continue;
-      cls[r * W + c] = v > (hi + lo) / 2 ? 1 : 0;
+      // 斜面に沿う遊歩道の上は下の段（坂の印が付いた所と、上の段の縁の近く（上の段の歩道）は除く）
+      const low = lowPath[r * W + c] && !ramp[r * W + c] && v < hi - edgeKeep;
+      cls[r * W + c] = v > (hi + lo) / 2 && !low ? 1 : 0;
     }
   }
   // 上の段は 8 近傍の最大へ、下の段は最小へ（3 回。斜面が 1 マスの段差になる）。分けた段の中だけを見る
@@ -221,6 +251,16 @@ export function sharpenQuays(terrain, centre, radius, { win = 15, drop = 3, lowA
         }
         cur[k] = v;
       }
+    }
+  }
+  // 下の段は水面 + lowMin m より下げない（最小へ寄せると水辺の点の高さまで下がり、遊歩道が水面すれすれになる）。
+  // 水面の格子がないときは水面の高さが分からないので何もしない
+  for (let r = 0; r < (terrain.level ? Hn : 0); r++) {
+    for (let c = 0; c < W; c++) {
+      const k = r * W + c;
+      if (cls[k] !== 0) continue;
+      const floor = terrain.waterLevel(nodeX(g, c + c0), nodeZ(g, r + r0)) + DAT + lowMin;
+      if (orig[k] >= floor) cur[k] = Math.max(cur[k], floor);
     }
   }
   if (!terrain.quayMask) terrain.quayMask = new Uint8Array(cols * rows);

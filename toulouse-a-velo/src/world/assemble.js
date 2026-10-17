@@ -14,6 +14,7 @@ import { buildCoverMesh } from './cover.js';
 import { tileBounds, tileLayout } from '../data/tiles.js';
 import { buildTrees, fillParkTrees, planeTreeTest, streetTrees } from './trees.js';
 import { buildEnclosures, clearRoads, projectTrees, projectWalls, tameWalls } from './enclosures.js';
+import { clearEntrances, entranceWalls, projectEntrances } from './metro.js';
 import { findTowers } from './towers.js';
 import { buildMonuments, findMonuments, monumentClearance, monumentSolid } from './monuments.js';
 import { findCapitoleFacade, markBrickSites } from './landmarkfacades.js';
@@ -83,7 +84,7 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   progress('道路と川を作成中…', 0.15);
   await pause();
   // 塀（地籍の敷地の境界と LiDAR から見つけたもの）。歩道は建物の壁・塀まで延ばすので、地面より先に用意する
-  const walls = clearRoads(tameWalls(projectWalls(data.walls || [], proj), parsed.buildings), (x, z) => roadnet.onRoad(x, z, 0.3));
+  const walls = clearEntrances(clearRoads(tameWalls(projectWalls(data.walls || [], proj), parsed.buildings), (x, z) => roadnet.onRoad(x, z, 0.3)), projectEntrances(terrain.metroRaw || [], proj)); // 出入口の腰壁は塀にしない（地形の手直しはまだなので緯度経度から）
   // 地面の覆い（500 m のブロックごと。fetch-data の bakeSite と同じ区切り）。覆いのある所の緑地は覆いにまかせる
   const layout = tileLayout(rect);
   const covers = (data.cover || []).map((c) => ({ c, b: tileBounds(layout, c.i, c.j) }));
@@ -110,6 +111,7 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   group.add(ground.group);
   for (const [x, z] of ground.posts) collision.addCircle(x, z, POST_HIT); // 横断歩道の脇の車止め
   for (const q of terrain.quayWalls || []) collision.addSegment(q.ax, q.az, q.bx, q.bz); // 岸壁（垂直のレンガの壁）
+  for (const e of terrain.metro || []) for (const s of entranceWalls(e)) collision.addSegment(...s); // メトロの出入口の吹き抜け
   group.add(buildEnclosures(walls, buildingMats, collision, terrain));
 
   progress('木を植えています…', 0.25);
