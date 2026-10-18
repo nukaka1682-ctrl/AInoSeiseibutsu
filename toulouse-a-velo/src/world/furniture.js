@@ -893,7 +893,7 @@ export function buildFurniture(opts, cw = null) {
     for (const [k, list] of Object.entries(items)) {
       if (k === 'colliders') continue;
       for (const it of list) {
-        it.y = (it.y || 0) + T.h(it.x, it.z);
+        it.y = (it.y || 0) + T.top(it.x, it.z);
         if (k === 'cars') {
           // 模型の x 軸（車の前後）の向きの勾配
           const fx = Math.cos(it.a || 0), fz = -Math.sin(it.a || 0);

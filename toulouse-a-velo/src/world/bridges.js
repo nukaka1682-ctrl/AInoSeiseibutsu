@@ -16,7 +16,7 @@ import { CAR_ROADS } from './parse.js';
 import { Grid, clipPolylineToRect, closestOnSegment } from '../geo.js';
 import { offsets, roadStyle } from './ground.js';
 import { DATUM } from './terrain.js';
-import { cleanProfile, fitDeckEnds } from './terraincond.js';
+import { cleanProfile, fitDeckEnds, segmentsCross } from './terraincond.js';
 import { laneLayout, writeRoadMarkings } from './markings.js';
 
 const c3 = (hex, k = 1) => {
@@ -413,7 +413,138 @@ export function setupDecks(terrain, roads, proj, waterDepthAt = () => 0) {
   });
   terrain.setDecks([...out.values()]);
   deckCache.set(terrain, out);
+  terrain.abutments = abutmentWalls(terrain, roads, waterDepthAt);
   return out;
+}
+
+// 陸の上の高速道路の高架の下をくぐる車道の両脇の擁壁（ユーザーのストリートビュー: A620 の下の Grande-Bretagne 通りは、
+// 盛り土を支える淡いコンクリートの垂直な壁に赤い帯）。高架と交わる車道に沿って、交わる所から前後 ABUT_REACH m まで
+// ABUT_STEP m ごとに道の縁から外へ地面を測り、道より 1 m 以上高くなる所（盛り土の斜面）があれば、その手前の足元に盛り土の上
+// （その先 10 m の最高）までの壁を立てる（道より ABUT_RISE m 以上高い所だけ）。ほかの道（盛り土を上る坂・階段）を横切る壁は捨てる。
+// 返り値: [{ ax, az, at, ab, bx, bz, bt, bb, nx, nz }]（at/ab: 上端・下端の y。n: 道の側に向く水平の向き）
+const ABUT_REACH = 90, ABUT_STEP = 2, ABUT_RISE = 1.8;
+export function abutmentWalls(terrain, roads, waterDepthAt = () => 0) {
+  if (!terrain || terrain.flat || !terrain.deck) return [];
+  const og = new Grid(50), osegs = [];
+  for (const r of roads) {
+    if (!r.bridge || r.tunnel || !MOTOR_TYPES.has(r.type)) continue;
+    for (let i = 0; i + 1 < r.pts.length; i++) {
+      og.insertSegment(...r.pts[i], ...r.pts[i + 1], osegs.length);
+      osegs.push([...r.pts[i], ...r.pts[i + 1]]);
+    }
+  }
+  if (!osegs.length) return [];
+  const all = new Grid(30), segs = [];
+  for (const r of roads) {
+    if (r.tunnel || (r.layer || 0) < 0) continue;
+    for (let i = 0; i + 1 < r.pts.length; i++) {
+      all.insertSegment(...r.pts[i], ...r.pts[i + 1], segs.length);
+      segs.push([r, ...r.pts[i], ...r.pts[i + 1]]);
+    }
+  }
+  const out = [];
+  for (const road of roads) {
+    if (!CAR_ROADS.has(road.type) || road.bridge || road.tunnel || road.pts.length < 2) continue;
+    const fr = polyFrame(road.pts);
+    // 高架と交わる所（道からの距離 s）。橋面が道より 3 m 以上高いものだけ
+    const hits = [];
+    for (let i = 0; i + 1 < road.pts.length; i++) {
+      const [ax, az] = road.pts[i], [bx, bz] = road.pts[i + 1];
+      og.query(Math.min(ax, bx), Math.min(az, bz), Math.max(ax, bx), Math.max(az, bz), (k) => {
+        const [cx, cz, dx, dz] = osegs[k];
+        if (!segmentsCross(ax, az, bx, bz, cx, cz, dx, dz)) return;
+        const den = (bx - ax) * (dz - cz) - (bz - az) * (dx - cx);
+        if (Math.abs(den) < 1e-9) return;
+        const t = ((cx - ax) * (dz - cz) - (cz - az) * (dx - cx)) / den;
+        const x = ax + (bx - ax) * t, z = az + (bz - az) * t;
+        const D = terrain.deck(x, z);
+        if (D != null && D - terrain.h(x, z) > 3) hits.push(fr.cum[i] + t * Math.hypot(bx - ax, bz - az));
+      });
+    }
+    if (!hits.length) continue;
+    const ss = [];
+    for (let s = 0; s <= fr.length; s += ABUT_STEP) if (hits.some((h) => Math.abs(s - h) <= ABUT_REACH)) ss.push(s);
+    const hw = road.width / 2;
+    for (const sd of [1, -1]) {
+      let prev = null;
+      const run = [];
+      const flush = () => {
+        // 上端を前後の 3 点でならして、隣どうしを壁でつなぐ
+        const tops = run.map((p, i) => (run[Math.max(0, i - 1)].top + p.top + run[Math.min(run.length - 1, i + 1)].top) / 3);
+        for (let i = 0; i + 1 < run.length; i++) {
+          const A = run[i], B = run[i + 1];
+          out.push({ ax: A.x, az: A.z, at: tops[i], ab: A.bot, bx: B.x, bz: B.z, bt: tops[i + 1], bb: B.bot, nx: A.nx, nz: A.nz, road });
+        }
+        run.length = 0;
+      };
+      for (const s of ss) {
+        if (prev != null && s - prev > ABUT_STEP + 1e-6) flush();
+        prev = s;
+        const [x, z] = fr.at(road.pts, s), [ux, uz] = fr.tangent(fr.locate(s)[0]);
+        const nx = -uz * sd, nz = ux * sd, y0 = terrain.h(x, z);
+        if (waterDepthAt(x, z) > 0) {
+          flush();
+          continue;
+        }
+        let foot = hw + 0.5, rise = 0;
+        for (let d = hw + 0.5; d <= hw + 25; d += 0.5) {
+          const y = terrain.h(x + nx * d, z + nz * d) - y0;
+          if (y < 0.4) foot = d;
+          else if (y > 1) {
+            rise = d;
+            break;
+          }
+        }
+        let top = -Infinity;
+        if (rise) for (let d = rise; d <= rise + 10; d += 1) top = Math.max(top, terrain.h(x + nx * d, z + nz * d));
+        if (!rise || top - y0 < ABUT_RISE) {
+          flush();
+          continue;
+        }
+        const px = x + nx * foot, pz = z + nz * foot;
+        run.push({ x: px, z: pz, top, bot: terrain.h(px, pz) - 0.3, nx: -nx, nz: -nz });
+      }
+      flush();
+    }
+  }
+  // ほかの道（盛り土を上る坂・階段・歩道）を横切る壁は捨てる
+  return out.filter((w) => {
+    let hit = false;
+    all.query(Math.min(w.ax, w.bx), Math.min(w.az, w.bz), Math.max(w.ax, w.bx), Math.max(w.az, w.bz), (k) => {
+      const [r, cx, cz, dx, dz] = segs[k];
+      if (!hit && r !== w.road && segmentsCross(w.ax, w.az, w.bx, w.bz, cx, cz, dx, dz)) hit = true;
+    });
+    delete w.road;
+    return !hit;
+  });
+}
+
+// 擁壁の形: 道の側の面（淡いコンクリートに、上から 0.5〜1.1 m の赤い帯）、厚さ 0.4 m の笠と裏の面
+const ABUT_COL = { face: T('#c2beb6'), band: T('#a8523f'), cap: T('#d0ccc4') };
+export function buildAbutments(list, mats) {
+  const w = new MeshWriter();
+  for (const q of list) {
+    let { ax, az, at, ab, bx, bz, bt, bb } = q;
+    const { nx, nz } = q;
+    // 表の面（反時計回り）が n を向く並び
+    if ((bx - ax) * nz - (bz - az) * nx < 0) [ax, az, at, ab, bx, bz, bt, bb] = [bx, bz, bt, bb, ax, az, at, ab];
+    const L = Math.hypot(bx - ax, bz - az), th = 0.4, px = -nx * th, pz = -nz * th;
+    const ba = at - 1.1, bb2 = bt - 1.1, ca = at - 0.5, cb = bt - 0.5;
+    const face = (y0a, y0b, y1a, y1b, color) => {
+      if (y1a <= y0a && y1b <= y0b) return;
+      w.quad([ax, y0a, az], [bx, y0b, bz], [bx, y1b, bz], [ax, y1a, az], [nx, 0, nz], [0, y0a / 4], [L / 4, y0b / 4], [L / 4, y1b / 4], [0, y1a / 4], color);
+    };
+    face(ab, bb, Math.max(ab, ba), Math.max(bb, bb2), ABUT_COL.face);
+    face(Math.max(ab, ba), Math.max(bb, bb2), ca, cb, ABUT_COL.band);
+    face(ca, cb, at, bt, ABUT_COL.face);
+    w.quad([ax, at, az], [ax + px, at, az + pz], [bx + px, bt, bz + pz], [bx, bt, bz], [0, 1, 0], [0, 0], [0, th / 4], [L / 4, th / 4], [L / 4, 0], ABUT_COL.cap);
+    w.quad([bx + px, bb, bz + pz], [ax + px, ab, az + pz], [ax + px, at, az + pz], [bx + px, bt, bz + pz], [-nx, 0, -nz], [0, 0], [L / 4, 0], [L / 4, (bt - bb) / 4], [0, (at - ab) / 4], ABUT_COL.face);
+  }
+  const m = new THREE.Mesh(w.toGeometry(), mats.bridge);
+  m.castShadow = true;
+  m.receiveShadow = true;
+  m.name = 'abutments';
+  return m;
 }
 
 // 橋 root の頂点の高さの置き換え: 蛇腹より上（相対 y ≥ −1.5）は縦断面に載せ、下（アーチ・橋脚）は縦断面の 1.5 m 下から

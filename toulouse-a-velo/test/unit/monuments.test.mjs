@@ -199,3 +199,17 @@ test('小物を置かない所: シャトー・ドーの柵に抜けがあって
     assert.ok(solid(9.8, 0) && solid(0, -10) && !solid(13, 0));
   }
 });
+
+test('ファストフード店: 近くの外形を置き換え、看板塔・砂利の植え込みの位置を持つ。正面のガラスと屋根を作る', () => {
+  const proj = new LocalProjection(43.5994, 1.4395);
+  const spec = MONUMENTS.find((m) => m.id === 'mcdo-bayonne');
+  const [x, z] = proj.project(spec.lat, spec.lon);
+  const shop = bld(rect(x, z, 14, 9), { height: 3.9 });
+  const far = bld(rect(x + 60, z, 14, 9));
+  const [m] = findMonuments(proj, { buildings: [shop, far] }).filter((q) => q.kind === 'fastfood');
+  assert.ok(m && m.replaced[0] === shop && m.height >= 4.8);
+  assert.equal(m.gravel.length, spec.gravel.length);
+  assert.ok(Math.hypot(m.pylon[0] - x, m.pylon[1] - z) < 40, '看板塔は店の近く');
+  const built = buildMonuments([m], { monument: {}, monumentMetal: {}, monumentInlay: {} }, { groundAt: () => 0 });
+  assert.ok(built.colliders.some((c) => c.length === 3 && Math.hypot(c[0] - m.pylon[0], c[1] - m.pylon[1]) < 1e-6), '看板塔の当たり判定');
+});

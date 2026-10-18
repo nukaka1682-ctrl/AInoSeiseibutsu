@@ -12,10 +12,10 @@ import { Grid, centroid, clipPolylineToRect, clipRingToRect, closestOnSegment, f
 import { RaisedIndex, oldTownBase, planStreets, streetSteps, writePrism } from './streets.js';
 import { CAR_ROADS } from './parse.js';
 import { catenaryStations, slicePolyline, subtract, tramCrossCuts } from './markings.js';
-import { bridgeGroups, buildBridges, setupDecks } from './bridges.js';
+import { bridgeGroups, buildAbutments, buildBridges, setupDecks } from './bridges.js';
 import { DRAPE_LIFT, FLAT_TERRAIN } from './terrain.js';
 import { buildFarTerrain, createTerrainMaterials, splitGeometry, TERRAIN_ORDER } from './terrainmesh.js';
-import { conditionRoads, despike, sharpenQuays } from './terraincond.js';
+import { conditionRoads, despike, sharpenQuays, WALK_DEF } from './terraincond.js';
 import { buildMetroEntrances, createMetroMaterials, fillMetroPits, orientRamps, projectEntrances, writeEntranceMasks } from './metro.js';
 
 export const ORDER = {
@@ -121,6 +121,8 @@ export function createGroundMaterials(tex) {
     quai: new THREE.MeshStandardMaterial({ map: tex.plain, vertexColors: true, roughness: 0.95 }),
     // 運河の石積み・水面の段差の壁・土手の袖壁（敷石のテクスチャは壁では市松模様に見えるので、無地の壁のテクスチャに色を掛ける）
     quaiStone: new THREE.MeshStandardMaterial({ map: tex.plain, vertexColors: true, roughness: 0.95 }),
+    // 岸壁の上の歩道の板（淡い花崗岩の敷石。橋の歩道と同じテクスチャ。地面の下に隠れる所があるので深度はずらさない）
+    quayWalk: new THREE.MeshStandardMaterial({ map: tex.granite, vertexColors: true, roughness: 0.9 }),
     // 草の土手（運河・街の外れの川岸の斜面）
     bank: new THREE.MeshLambertMaterial({ map: tex.grass, vertexColors: true }),
     deck: new THREE.MeshStandardMaterial({ map: tex.asphalt, vertexColors: true, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -6 }),
@@ -341,6 +343,7 @@ const MASK_SAMPLES = [[1 / 3, 1 / 3], [0.5, 0], [0, 0.5], [0.5, 0.5], [0.15, 0.1
 export function buildGround(parsed, rect, mats, opts = {}) {
   const base = buildGroundBase(parsed, rect, mats, opts.terrain, opts.layout);
   if (opts.terrain && !opts.terrain.flat) setupDecks(opts.terrain, parsed.roads, opts.proj, base.waterDepthAt); // 橋の縦断面
+  if (opts.terrain?.abutments?.length) base.group.add(buildAbutments(opts.terrain.abutments, mats)); // 高架の下の擁壁
   const pad = 120;
   const detail = buildGroundDetail(parsed, { minX: rect.minX - pad, minZ: rect.minZ - pad, maxX: rect.maxX + pad, maxZ: rect.maxZ + pad }, mats, base.waterDepthAt, opts);
   base.group.add(detail.group);
@@ -353,7 +356,7 @@ export function buildGround(parsed, rect, mats, opts = {}) {
 const QUAY_LATLON = [43.5994, 1.4364], QUAY_RADIUS = 1250;
 const BANK = {
   // 岸壁のレンガ（写真の日なた #b89676〜#bb7d4f）、明るい石の根石（#ccc3b4）と笠石。白っぽいテクスチャに掛けるので少し明るく
-  brickA: c3('#b89676', 1.16), brickB: c3('#bb7d4f', 1.16), quayBase: c3('#ccc3b4', 1.16), quayCoping: c3('#c9bfae', 1.16),
+  brickA: c3('#b89676', 1.16), brickB: c3('#bb7d4f', 1.16), quayBase: c3('#ccc3b4', 1.16), quayCoping: c3('#c9bfae', 1.16), quayWalk: c3('#d6d0c4', 1.0),
   // 運河の石積み・段差の壁（切石のテクスチャ（敷石と同じ）に掛ける色。仕上がりが #a8957a・笠石 #9c7c56 ほど）
   canalStone: c3('#c9c1b5'), canalCoping: c3('#bd9f7b'), canalLow: c3('#b3ab9c'), drop: c3('#bfb7aa'),
   // 草の土手（緑のテクスチャ #6f8f45 に掛ける色。写真の土手はくすんだオリーブ色 #4f5338〜#58544d、水際は土）。
@@ -406,40 +409,71 @@ function bankSection(kind, d, W = 16) {
   return null;
 }
 
-// 旧市街のまわりの岸壁（terraincond.js の sharpenQuays の線）: 上の河岸から下の遊歩道まで垂直のレンガの壁と、
-// 壁の上から上の段へ 5 m の笠石（地面の段差の斜面を隠す。上の段の地面より 2 cm 下なので、平らな所では地面の下に隠れる）
+// 旧市街のまわりの岸壁（terraincond.js の sharpenQuays の線）: 上の河岸から下の遊歩道まで垂直のレンガの壁と手すり壁、
+// 壁の上から河岸の車道の縁までの歩道の板（壁の裏の 1 マスの斜面を隠す）
 const QUAY_PARAPET = 1.0; // 岸壁の上のレンガの手すり壁の高さ（m）
 function buildQuayWalls(list, mats) {
-  const w = new MeshWriter();
+  const w = new MeshWriter(), walk = new MeshWriter();
+  // 端の点の向き: まわり NEAR_N m の壁の向き（n）の長さの重みの平均（壁の線は格子の三角形の辺の階段なので、1 本ずつの向きは
+  // 45° ずつ違う。つながる壁で同じ向きを使うので、手すり壁・歩道の板の角もすき間なく合い、板の外の縁もなめらかになる）
+  const NEAR_N = 7;
+  const key = (x, z) => `${Math.round(x * 100)},${Math.round(z * 100)}`;
+  const mid = new Grid(10);
+  list.forEach((q, i) => mid.insertPoint((q.ax + q.bx) / 2, (q.az + q.bz) / 2, i));
+  const vn = new Map();
+  const dirAt = (x, z) => {
+    const k = key(x, z);
+    if (vn.has(k)) return vn.get(k);
+    let sx = 0, sz = 0;
+    mid.queryPoint(x, z, NEAR_N, (i) => {
+      const q = list[i];
+      if (Math.hypot((q.ax + q.bx) / 2 - x, (q.az + q.bz) / 2 - z) > NEAR_N) return;
+      const L = Math.hypot(q.bx - q.ax, q.bz - q.az);
+      sx += q.nx * L;
+      sz += q.nz * L;
+    });
+    const l = Math.hypot(sx, sz), v = l > 1e-6 ? [sx / l, sz / l] : null;
+    vn.set(k, v);
+    return v;
+  };
   for (const q of list) {
-    let { ax, az, at, ab, bx, bz, bt, bb } = q;
+    let { ax, az, at, ab, bx, bz, bt, bb, wa: ka = WALK_DEF, wb: kb = WALK_DEF } = q;
     const { nx, nz } = q;
     // 表の面（反時計回り）が n を向く並び: 辺の向き (dx, dz) に対して (-dz, 0, dx) が n の側
-    if ((bx - ax) * nz - (bz - az) * nx < 0) [ax, az, at, ab, bx, bz, bt, bb] = [bx, bz, bt, bb, ax, az, at, ab];
+    if ((bx - ax) * nz - (bz - az) * nx < 0) [ax, az, at, ab, ka, bx, bz, bt, bb, kb] = [bx, bz, bt, bb, kb, ax, az, at, ab, ka];
     const L = Math.hypot(bx - ax, bz - az), h0 = ab - 0.4, ha = at - h0, hb = bt - h0;
     const t = hash01(Math.round(ax * 7 + az * 13), 3);
     const brick = BANK.brickA.map((c, j) => c * (1 - t) + BANK.brickB[j] * t);
+    // 端の点の向き（手すり壁の厚さは壁の面に垂直に保つので、向きの違いの分だけ 1.6 倍まで伸ばす）
+    const [aex, aez] = dirAt(ax, az) || [nx, nz], [bex, bez] = dirAt(bx, bz) || [nx, nz];
+    const am = Math.min(1.6, 1 / Math.max(0.3, aex * nx + aez * nz)), bm = Math.min(1.6, 1 / Math.max(0.3, bex * nx + bez * nz));
+    const [anx, anz, bnx, bnz] = [aex * am, aez * am, bex * bm, bez * bm];
     // 壁の面は上の河岸の高さ + 胸壁（QUAY_PARAPET m）まで（写真: ドラード河岸・トゥニ河岸は上の歩道の縁にレンガの手すり壁）
     const P = QUAY_PARAPET, ta = at + P, tb = bt + P;
     w.quad([ax, h0, az], [bx, h0, bz], [bx, tb, bz], [ax, ta, az], [nx, 0, nz], [0, 0], [L / 4, 0], [L / 4, (hb + P) / 4], [0, (ha + P) / 4], brick);
     // 手すり壁の内側の面と上面（厚さ 0.45 m、レンガの笠）
-    const T = 0.45, px = -nx * T, pz = -nz * T;
-    w.quad([bx + px, bt, bz + pz], [ax + px, at, az + pz], [ax + px, ta, az + pz], [bx + px, tb, bz + pz], [-nx, 0, -nz], [0, 0], [L / 4, 0], [L / 4, P / 4], [0, P / 4], brick);
-    w.quad([ax, ta, az], [ax + px, ta, az + pz], [bx + px, tb, bz + pz], [bx, tb, bz], [0, 1, 0], [0, 0], [0, T / 4], [L / 4, T / 4], [L / 4, 0], brick.map((c) => c * 0.85));
+    const T = 0.45, pax = ax - anx * T, paz = az - anz * T, pbx = bx - bnx * T, pbz = bz - bnz * T;
+    w.quad([pbx, bt, pbz], [pax, at, paz], [pax, ta, paz], [pbx, tb, pbz], [-nx, 0, -nz], [0, 0], [L / 4, 0], [L / 4, P / 4], [0, P / 4], brick);
+    w.quad([ax, ta, az], [pax, ta, paz], [pbx, tb, pbz], [bx, tb, bz], [0, 1, 0], [0, 0], [0, T / 4], [L / 4, T / 4], [L / 4, 0], brick.map((c) => c * 0.85));
     // 足元の石積みの帯（遊歩道から 1.3 m。写真では淡い石の切石の土台の上にレンガが積まれている）。壁の面より 3 cm 手前
     const sa = Math.min(at, ab + 1.3), sb = Math.min(bt, bb + 1.3), ox = nx * 0.03, oz = nz * 0.03;
     if (sa > h0 + 0.5 && sb > h0 + 0.5) w.quad([ax + ox, h0, az + oz], [bx + ox, h0, bz + oz], [bx + ox, sb, bz + oz], [ax + ox, sa, az + oz], [nx, 0, nz], [0, 0], [L / 2, 0], [L / 2, (sb - h0) / 2], [0, (sa - h0) / 2], BANK.quayBase);
-    // 手すり壁の内側から上の段へ 7.5 m（格子の 1.5 マス。壁の線から上の段の格子点まで届く）の歩道の板（地面の段差の斜面を隠す。
-    // 上の段の地面より 2 cm 下なので、平らな所では地面の下に隠れる）。板の先の縁は 3 m 下まで垂らす（板が浮いて見えないように）
-    const k = 7.5, ux = -nx * k, uz = -nz * k, cy = (y) => y - 0.02;
-    w.quad([ax + px, cy(at), az + pz], [ax + ux, cy(at), az + uz], [bx + ux, cy(bt), bz + uz], [bx + px, cy(bt), bz + pz], [0, 1, 0], [0, 0], [0, k / 4], [L / 4, k / 4], [L / 4, 0], BANK.quayCoping);
-    w.quad([bx + ux, cy(bt) - 3, bz + uz], [ax + ux, cy(at) - 3, az + uz], [ax + ux, cy(at), az + uz], [bx + ux, cy(bt), bz + uz], [-nx, 0, -nz], [0, 0], [L / 4, 0], [L / 4, 0.75], [0, 0.75], BANK.quayCoping);
+    // 手すり壁の内側から河岸の車道の縁までの歩道の板（淡い花崗岩。写真: 河岸の上の歩道。壁の裏の 1 マスの斜面と、並木の下の
+    // 航空写真の緑を隠す。上の段の地面より 2 cm 下なので、平らな所では地面の下に隠れる）。板の先の縁は 3 m 下まで垂らす
+    const cy = (y) => y - 0.02;
+    const uax = ax - aex * ka, uaz = az - aez * ka, ubx = bx - bex * kb, ubz = bz - bez * kb;
+    walk.quad([pax, cy(at), paz], [uax, cy(at), uaz], [ubx, cy(bt), ubz], [pbx, cy(bt), pbz], [0, 1, 0], [pax / 2.4, paz / 2.4], [uax / 2.4, uaz / 2.4], [ubx / 2.4, ubz / 2.4], [pbx / 2.4, pbz / 2.4], BANK.quayWalk);
+    walk.quad([ubx, cy(bt) - 3, ubz], [uax, cy(at) - 3, uaz], [uax, cy(at), uaz], [ubx, cy(bt), ubz], [-nx, 0, -nz], [0, 0], [L / 2.4, 0], [L / 2.4, 1.25], [0, 1.25], BANK.quayWalk);
   }
-  const m = new THREE.Mesh(w.toGeometry(), mats.quai);
-  m.castShadow = true;
-  m.receiveShadow = true;
-  m.name = 'quay-walls';
-  return m;
+  const g = new THREE.Group();
+  g.name = 'quay-walls';
+  for (const [writer, mat] of [[w, mats.quai], [walk, mats.quayWalk]]) {
+    const m = new THREE.Mesh(writer.toGeometry(), mat);
+    m.castShadow = writer === w;
+    m.receiveShadow = true;
+    g.add(m);
+  }
+  return g;
 }
 
 // 地面の板と水（エリア全体で 1 回だけ作る）。地形があるときは、平らな板の代わりに遠くの地面（読み込んだタイルの中は
@@ -493,7 +527,7 @@ export function buildGroundBase(parsed, rect, mats, terrain = FLAT_TERRAIN, layo
     orientRamps(T.metro, parsed.roads);
     fillMetroPits(T, T.metro);
     conditionRoads(T, parsed.roads, inWater);
-    T.quayWalls = sharpenQuays(T, parsed.proj ? parsed.proj.project(...QUAY_LATLON) : [-250, 0], QUAY_RADIUS + 150, { inWater, paths: parsed.roads });
+    T.setQuayWalls(sharpenQuays(T, parsed.proj ? parsed.proj.project(...QUAY_LATLON) : [-250, 0], QUAY_RADIUS + 150, { inWater, paths: parsed.roads }));
     despike(T);
   }
   if (!T.flat && T.quayWalls.length) group.add(buildQuayWalls(T.quayWalls, mats));

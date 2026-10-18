@@ -5,6 +5,8 @@
 //   カバニス:         3 つの外形をまとめた門の形（中央の大きな四角い開口）、テラコッタ色のルーバーと白い階の帯、屋上のガラスの庇
 //   オクシタン十字:   キャピトル広場の石畳に埋め込まれたブロンズの十字（12 の玉に星座のメダル）。地面に貼る薄い板
 //   雄鶏の像:         オリヴィエ広場。蹄鉄を溶接した暗い錆色の雄鶏（足元にラグビーボール）、赤い木の台（上面は黒）
+//   ファストフード店: Route de Bayonne のマクドナルド（ユーザーのストリートビューと航空写真）。暗い灰色の外壁と赤茶の帯の平屋、
+//                     道路側の大きなガラス、黄色の M の看板と道端の看板塔、道路との間の白い砂利の植え込み（赤茶の木のチップの島）
 import * as THREE from 'three';
 import { MeshWriter, triangulate } from './meshwriter.js';
 import { centroid, hash01, mulberry32, pointInPolygon, pointInRing, signedArea } from '../geo.js';
@@ -18,6 +20,14 @@ export const MONUMENTS = [
   { id: 'cabanis', kind: 'cabanis', lat: 43.61024, lon: 1.45576, r: 45, minHeight: 25, front: [43.6061, 1.4490] },
   { id: 'coq', kind: 'coq', lat: 43.59823, lon: 1.43445, plaza: /^Place Olivier$/i },
   { id: 'croix-occitane', kind: 'cross', plaza: /^Place du Capitole$/i, radius: 8 },
+  // front: 道路の側（ガラスの面と看板が向く先）。pylon: 道端の看板塔。gravel: 白い砂利の植え込み、mulch: その中の木のチップの島
+  // [緯度, 経度, 半径 m]（航空写真 2024 から）
+  {
+    id: 'mcdo-bayonne', kind: 'fastfood', lat: 43.60828, lon: 1.39535, r: 15, minArea: 150, maxArea: 900,
+    front: [43.60795, 1.39540], pylon: [43.60802, 1.39513],
+    gravel: [[43.608084, 1.394805], [43.608147, 1.3949], [43.608128, 1.39503], [43.608092, 1.39515], [43.607988, 1.39515], [43.607988, 1.394805]],
+    mulch: [[43.608150, 1.39489, 3.2], [43.608075, 1.39502, 3.6], [43.608032, 1.39509, 3.4]],
+  },
 ];
 
 // ---------------------------------------------------------------- 形を決める計算（DOM なし。単体テストあり）
@@ -301,6 +311,19 @@ export function findMonuments(proj, { buildings = [], areas = [], facade = null,
         }
       }
       out.push({ spec, kind: 'coq', x: p[0], z: p[1], angle, replaced: [] });
+    } else if (spec.kind === 'fastfood') {
+      let best = null;
+      for (const b of buildings) {
+        const [bx, bz] = centroid(b.outer), d = Math.hypot(bx - x, bz - z);
+        if (d > spec.r || b.info.area < spec.minArea || b.info.area > spec.maxArea) continue;
+        if (!best || d < best.d) best = { b, d };
+      }
+      if (!best) continue;
+      const ll = (p) => proj.project(p[0], p[1]);
+      out.push({
+        spec, kind: 'fastfood', outer: best.b.outer, height: Math.max(4.8, (best.b.info.height || 0) + 0.9), replaced: [best.b],
+        front: ll(spec.front), pylon: ll(spec.pylon), gravel: spec.gravel.map(ll), mulch: spec.mulch.map((m) => [...ll(m), m[2]]),
+      });
     } else if (spec.kind === 'cross') {
       const plaza = areas.find((a) => spec.plaza.test(a.name || ''));
       if (!plaza) continue;
@@ -915,7 +938,107 @@ function writeCross(m, W, groundAt) {
   });
 }
 
-const WRITERS = { chateau: writeChateau, stadium: writeStadium, cabanis: writeCabanis, coq: writeCoq, cross: writeCross };
+// ---- ファストフード店（Route de Bayonne のマクドナルド）
+// 黄色の M（2 つのアーチ。幅 2w・高さ h、中心 (0, 0) から下へ）の線
+function archM(w, h) {
+  const arch = (cx) => Array.from({ length: 13 }, (_, i) => {
+    const t = i / 12, a = Math.PI * t;
+    return [cx - Math.cos(a) * (w / 2), -h + Math.sin(a) ** 0.7 * h * (1 - 0.45 * Math.sin(a) ** 8)];
+  });
+  return [...arch(-w / 2), ...arch(w / 2).slice(1)];
+}
+function writeFastfood(m, W, groundAt, colliders) {
+  const w = W.main, ring = m.outer;
+  const [cx, cz] = centroid(ring);
+  const y0 = groundAt(cx, cz) - 0.05, H = m.height, Y = y0 + H;
+  const CLAD = col('#3f4144'), BAND = col('#7e3a2c'), GLASS = col('#27323a'), FRAME = col('#55595e'), WOOD = col('#9a6a45');
+  const ROOF = col('#5d5b59'), CAP = col('#d6d3cc'), RED = col('#c0262d'), YELLOW = col('#f7bf1a'), POLE = col('#6b6e72');
+  const s = signedArea(ring) > 0 ? 1 : -1;
+  const fx = m.front[0] - cx, fz = m.front[1] - cz, fl = Math.hypot(fx, fz) || 1;
+  let sign = null;
+  for (let i = 0; i < ring.length; i++) {
+    const a = ring[i], b = ring[(i + 1) % ring.length];
+    const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    if (L < 0.3) continue;
+    // 外向きの法線。壁の面は外から見て反時計回り（a → b を外から見て左から右）
+    const nx = ((b[1] - a[1]) / L) * s, nz = (-(b[0] - a[0]) / L) * s;
+    const [p, q] = s > 0 ? [b, a] : [a, b];
+    const n = [nx, 0, nz];
+    const front = (nx * fx + nz * fz) / fl > 0.55 && L > 3;
+    if (front) {
+      // 道路側: 床から 2.9 m まで大きなガラス（1.6 m ごとの細い枠）、その上に暗い外壁と赤茶の帯
+      wall(w, p, q, y0, y0 + 0.35, n, CELL.plain, 1e9, 1e9, CLAD);
+      wall(w, p, q, y0 + 0.35, y0 + 2.9, n, CELL.plain, 1e9, 1e9, GLASS);
+      const k = Math.max(1, Math.round(L / 1.6));
+      for (let j = 0; j <= k; j++) {
+        const t = j / k, x = p[0] + (q[0] - p[0]) * t + nx * 0.05, z = p[1] + (q[1] - p[1]) * t + nz * 0.05;
+        box(w, [x, y0 + 1.62, z], [0.05, 0, 0], [0, 1.28, 0], [0, 0, 0.05], FRAME);
+      }
+      wall(w, p, q, y0 + 2.9, Y - 0.8, n, CELL.plain, 1e9, 1e9, CLAD);
+      if (!sign || L > sign.L) sign = { p, q, n, L };
+    } else if (L > 6) {
+      // 横と裏: 暗い外壁の真ん中に木の縦の板張り（幅の 4 割）
+      const t0 = 0.3, t1 = 0.7, P = (t) => [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t];
+      wall(w, p, P(t0), y0, Y - 0.8, n, CELL.plain, 1e9, 1e9, CLAD);
+      wall(w, P(t0), P(t1), y0, Y - 0.8, n, CELL.plain, 1e9, 1e9, WOOD);
+      wall(w, P(t1), q, y0, Y - 0.8, n, CELL.plain, 1e9, 1e9, CLAD);
+      const k = Math.round((L * 0.4) / 0.25);
+      for (let j = 1; j < k; j++) {
+        const t = t0 + ((t1 - t0) * j) / k, x = p[0] + (q[0] - p[0]) * t + nx * 0.04, z = p[1] + (q[1] - p[1]) * t + nz * 0.04;
+        box(w, [x, (y0 + Y - 0.8) / 2, z], [0.02, 0, 0], [0, (Y - 0.8 - y0) / 2, 0], [0, 0, 0.02], col('#6e4a2f'));
+      }
+    } else wall(w, p, q, y0, Y - 0.8, n, CELL.plain, 1e9, 1e9, CLAD);
+    // 上の赤茶の帯（屋上の手すり壁）と白い笠
+    wall(w, p, q, Y - 0.8, Y, n, CELL.plain, 1e9, 1e9, BAND);
+  }
+  // 屋根（手すり壁の 0.6 m 下）と笠
+  const tri = triangulate(ring);
+  for (let i = 0; i < tri.indices.length; i += 3) {
+    const P = [0, 1, 2].map((k) => tri.points[tri.indices[i + k]]);
+    const [A, B, C] = (s > 0 ? [P[0], P[2], P[1]] : P).map((v) => [v[0], Y - 0.6, v[1]]);
+    w.tri(A, B, C, [0, 1, 0], PLAIN_UV, PLAIN_UV, PLAIN_UV, ROOF);
+  }
+  for (const q of strokeQuads(ring, true, -0.2 * s, 0.2)) w.quad(...q.map((v) => [v[0], Y + 0.01, v[1]]), [0, 1, 0], PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, CAP);
+  // 正面の赤茶の帯の上の黄色の M（帯から 0.12 m 前）
+  const letter = (o, ux, uz, nx, nz, size, back) => {
+    const pts = archM(size / 2, size * 0.85);
+    for (const q of strokeQuads(pts, false, 0, size * 0.065)) {
+      const V = q.map(([u, v]) => [o[0] + ux * u + nx * 0.02, o[1] + v + size * 0.42, o[2] + uz * u + nz * 0.02]);
+      w.quad(V[0], V[1], V[2], V[3], [nx, 0, nz], PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, YELLOW);
+      if (back) w.quad(V[3], V[2], V[1], V[0], [-nx, 0, -nz], PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, YELLOW);
+    }
+  };
+  if (sign) {
+    const { p, q, n, L } = sign, ux = (q[0] - p[0]) / L, uz = (q[1] - p[1]) / L;
+    const o = [(p[0] + q[0]) / 2 + n[0] * 0.12, Y - 1.5, (p[1] + q[1]) / 2 + n[2] * 0.12];
+    box(w, [o[0] - n[0] * 0.06, o[1], o[2] - n[2] * 0.06], [ux * 1.3, 0, uz * 1.3], [0, 1.25, 0], [n[0] * 0.08, 0, n[2] * 0.08], RED);
+    letter([o[0] + n[0] * 0.03, o[1] - 1.05, o[2] + n[2] * 0.03], ux, uz, n[0], n[2], 2.1, false);
+  }
+  // 道端の看板塔（高さ 9 m の灰色の柱の上に、赤い板と両面の黄色の M）
+  {
+    const [px, pz] = m.pylon, g = groundAt(px, pz), ux = -fz / fl, uz = fx / fl;
+    box(w, [px, g + 3.6, pz], [ux * 0.3, 0, uz * 0.3], [0, 3.6, 0], [(fx / fl) * 0.3, 0, (fz / fl) * 0.3], POLE);
+    const top = g + 7.2 + 1.4;
+    box(w, [px, top, pz], [ux * 1.4, 0, uz * 1.4], [0, 1.4, 0], [(fx / fl) * 0.2, 0, (fz / fl) * 0.2], RED);
+    letter([px + (fx / fl) * 0.21, top - 1.15, pz + (fz / fl) * 0.21], ux, uz, fx / fl, fz / fl, 2.2, false);
+    letter([px - (fx / fl) * 0.21, top - 1.15, pz - (fz / fl) * 0.21], -ux, -uz, -fx / fl, -fz / fl, 2.2, false);
+    colliders.push([px, pz, 0.6]);
+  }
+  // 白い砂利の植え込みと、赤茶の木のチップの島（地面に貼る板）
+  const flat = (poly, lift, color) => {
+    const t = triangulate(poly);
+    const sg = signedArea(poly) > 0 ? 1 : -1;
+    for (let i = 0; i < t.indices.length; i += 3) {
+      const P = [0, 1, 2].map((k) => t.points[t.indices[i + k]]);
+      const [A, B, C] = (sg > 0 ? [P[0], P[2], P[1]] : P).map((v) => [v[0], groundAt(v[0], v[1]) + lift, v[1]]);
+      W.inlay.tri(A, B, C, [0, 1, 0], PLAIN_UV, PLAIN_UV, PLAIN_UV, color);
+    }
+  };
+  flat(m.gravel, 0.03, col('#e4e1d9'));
+  for (const [x, z, r] of m.mulch) flat(circ(x, z, r, 0, Math.PI * 2, 16).slice(0, -1), 0.045, col('#8a5236'));
+}
+
+const WRITERS = { chateau: writeChateau, stadium: writeStadium, cabanis: writeCabanis, coq: writeCoq, cross: writeCross, fastfood: writeFastfood };
 
 // 名所のモデルを作る。colliders: 足す当たり判定の円 [x, z, r] か線分 [ax, az, bx, bz]、
 // keepOut: 街の小物を置かない円 [x, z, r]（像の台・シャトー・ドーの柵の内側。monumentSolid）

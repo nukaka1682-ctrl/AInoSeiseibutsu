@@ -8,7 +8,7 @@
 // - despike: 格子の 1 点だけの穴・とげ（測りの外れ）を近くの中央値に戻す
 // - cleanProfile / fitDeckEnds: 測った橋の縦断面の外れ値を捨て、両端を取り付ける道路の高さに合わせる
 import { CAR_ROADS } from './parse.js';
-import { closestOnSegment, hash01 } from '../geo.js';
+import { closestOnSegment, Grid, hash01 } from '../geo.js';
 
 const smooth01 = (t) => (t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t));
 
@@ -116,8 +116,9 @@ export function conditionRoads(terrain, roads, inWater = () => false, { window =
 // 高さが rampMin m 以上違う所）のまわりの格子点は触らず（元の坂のまま）、残った壁の線も道を横切るものは捨てる（自転車で通れるように）。
 // 斜面に沿って走る遊歩道（道に沿った勾配が地面の勾配の半分未満）のまわりは下の段にする（岸壁の下の船着き場。上の段の縁の近くは除く）。
 // 下の段は水面 + lowMin m より下げない。
-// 返り値: 壁の線分 [{ ax, az, at, ab, bx, bz, bt, bb, nx, nz }]（at/ab: 壁の上端・下端の y。n: 下の段に向く水平の向き）
-export function sharpenQuays(terrain, centre, radius, { win = 15, drop = 3, lowAbove = 4, near = 45, level = 0.12, inWater = () => false, roadW = terrain?.roadW, roadMax = 0.99, paths = [], rampSpan = 8, rampMin = 0.6, terraceGrad = 0.12, edgeKeep = 0.6, lowMin = 0.9 } = {}) {
+// 返り値: 壁の線分 [{ ax, az, at, ab, bx, bz, bt, bb, nx, nz, wa, wb }]（at/ab: 壁の上端・下端の y。n: 下の段に向く水平の向き。
+// wa/wb: 壁の上の歩道の板の幅 walkWidths）
+export function sharpenQuays(terrain, centre, radius, { win = 15, drop = 3, lowAbove = 4, near = 45, inWater = () => false, roadW = terrain?.roadW, roadMax = 0.99, paths = [], rampSpan = 8, rampMin = 0.6, crossLook = 3, crossDrop = 1.2, alongHigh = 4, terraceGrad = 0.12, edgeKeep = 0.6, lowMin = 0.9, roadNear = 2, curb = 0.15 } = {}) {
   if (!terrain || terrain.flat || !centre) return [];
   const g = terrain.near, D = g.data, cols = g.cols, rows = g.rows, DAT = terrain.datum;
   const c0 = Math.max(0, Math.floor(g.ax * (centre[0] - radius) + g.bx)), c1 = Math.min(cols - 1, Math.ceil(g.ax * (centre[0] + radius) + g.bx));
@@ -146,12 +147,18 @@ export function sharpenQuays(terrain, centre, radius, { win = 15, drop = 3, lowA
   const nearCells = near * g.ax;
   // 車道でない道の坂・階段のまわり（道の幅の半分 + 1 m、少なくとも 3/4 マス: 道が通るマスの角のどれかは必ず入る）
   const ramp = new Uint8Array(W * Hn), lowPath = new Uint8Array(W * Hn);
-  const lines = [];
+  const lines = [], steep = [], halfW = []; // steep[i]: 線分 i が坂・階段の所（壁を横切ってよい）、halfW[i]: 道の幅の半分
   const bx0 = centre[0] - radius - 50, bx1 = centre[0] + radius + 50, bz0 = centre[1] - radius - 50, bz1 = centre[1] + radius + 50;
   for (const p of paths) {
     if (CAR_ROADS.has(p.type) || p.bridge || p.tunnel || (p.layer || 0) < 0 || !p.pts || p.pts.length < 2) continue;
     if (!p.pts.some(([x, z]) => x > bx0 && x < bx1 && z > bz0 && z < bz1)) continue;
-    for (let i = 0; i + 1 < p.pts.length; i++) lines.push(p.pts[i][0], p.pts[i][1], p.pts[i + 1][0], p.pts[i + 1][1]);
+    const base = lines.length / 4, segS = [0];
+    for (let i = 0; i + 1 < p.pts.length; i++) {
+      lines.push(p.pts[i][0], p.pts[i][1], p.pts[i + 1][0], p.pts[i + 1][1]);
+      steep.push(p.type === 'steps');
+      halfW.push((p.width || 2.5) / 2);
+      segS.push(segS[i] + Math.hypot(p.pts[i + 1][0] - p.pts[i][0], p.pts[i + 1][1] - p.pts[i][1]));
+    }
     const S = samplePolyline(p.pts, 2);
     for (const q of S) q.h = terrain.h(q.x, q.z);
     const rr = Math.max((p.width || 2.5) / 2 + 1, 0.75 * Math.max(1 / g.ax, 1 / g.az));
@@ -184,6 +191,7 @@ export function sharpenQuays(terrain, centre, radius, { win = 15, drop = 3, lowA
       const grad = Math.hypot(terrain.h(q.x + 2.5, q.z) - terrain.h(q.x - 2.5, q.z), terrain.h(q.x, q.z + 2.5) - terrain.h(q.x, q.z - 2.5)) / 5;
       const terraceRun = grad > terraceGrad && along < 0.5 * grad;
       if (!terraceRun && !(hi - lo >= rampMin)) continue;
+      if (!terraceRun) for (let j = 0; j + 1 < segS.length; j++) if (q.s >= segS[j] - 1e-6 && q.s <= segS[j + 1] + 1e-6) steep[base + j] = true;
       const R = terraceRun ? rrLow : rr;
       const cc0 = Math.max(0, Math.ceil(g.ax * (q.x - R) + g.bx) - c0), cc1 = Math.min(W - 1, Math.floor(g.ax * (q.x + R) + g.bx) - c0);
       const rw0 = Math.max(0, Math.ceil(g.az * (q.z - R) + g.bz) - r0), rw1 = Math.min(Hn - 1, Math.floor(g.az * (q.z + R) + g.bz) - r0);
@@ -256,6 +264,25 @@ export function sharpenQuays(terrain, centre, radius, { win = 15, drop = 3, lowA
       }
     }
   }
+  // 車道の近く（roadNear マス以内に車道の芯の点がある）の上の段は、近くの車道の芯の高さ + curb m より上げない（地形モデルに
+  // 岸の手すり壁そのものが写っていて、近くの最大へ寄せると上の歩道が車道より 0.5〜1 m 高い台になっていた。ドラード河岸）
+  if (roadW) {
+    for (let r = 0; r < Hn; r++) {
+      for (let c = 0; c < W; c++) {
+        const k = r * W + c;
+        if (cls[k] !== 1) continue;
+        let rmax = -Infinity;
+        for (let dr = -roadNear; dr <= roadNear; dr++) {
+          for (let dc = -roadNear; dc <= roadNear; dc++) {
+            const rr = r + dr, cc = c + dc;
+            if (rr < 0 || cc < 0 || rr >= Hn || cc >= W || cls[rr * W + cc] >= 0) continue;
+            if (roadW[(rr + r0) * cols + cc + c0] > roadMax && !Number.isNaN(cur[rr * W + cc])) rmax = Math.max(rmax, cur[rr * W + cc]);
+          }
+        }
+        if (rmax > -Infinity) cur[k] = Math.min(cur[k], rmax + curb);
+      }
+    }
+  }
   // 下の段は水面 + lowMin m より下げない（最小へ寄せると水辺の点の高さまで下がり、遊歩道が水面すれすれになる）。
   // 水面の格子がないときは水面の高さが分からないので何もしない
   for (let r = 0; r < (terrain.level ? Hn : 0); r++) {
@@ -274,60 +301,138 @@ export function sharpenQuays(terrain, centre, radius, { win = 15, drop = 3, lowA
       terrain.quayMask[(r + r0) * cols + c + c0] = 1;
     }
   }
-  // 壁の線: 上の段と下の段の境（マス目の辺のうち、片方が上・片方が下）を、下の段寄り（差の level の高さ）で結ぶ（マーチングスクエア）。
-  // 辺の上の点は辺ごとに 1 回だけ決めるので、隣のマスの壁とすき間なくつながる
-  const at = (c, r) => cur[r * W + c];
-  const edgePt = (c, r, dc, dr) => {
-    const hiN = cls[r * W + c] === 1 ? [c, r] : [c + dc, r + dr], loN = cls[r * W + c] === 1 ? [c + dc, r + dr] : [c, r];
-    const top = at(...hiN), bot = at(...loN);
-    const t = 1 - level; // 上の点から下の点へ（下の段寄り）
-    const x = nodeX(g, hiN[0] + c0 + (loN[0] - hiN[0]) * t), z = nodeZ(g, hiN[1] + r0 + (loN[1] - hiN[1]) * t);
-    return { x, z, top: top - DAT, bot: bot - DAT };
-  };
-  const walls = [];
-  for (let r = 0; r + 1 < Hn; r++) {
-    for (let c = 0; c + 1 < W; c++) {
-      const q = [cls[r * W + c], cls[r * W + c + 1], cls[(r + 1) * W + c + 1], cls[(r + 1) * W + c]];
-      if (q.some((v) => v < 0)) continue;
-      // 辺: 0 上（c,r → c+1,r）、1 右（c+1,r → c+1,r+1）、2 下（c,r+1 → c+1,r+1）、3 左（c,r → c,r+1）
-      const E = [];
-      if (q[0] !== q[1]) E.push(edgePt(c, r, 1, 0));
-      if (q[1] !== q[2]) E.push(edgePt(c + 1, r, 0, 1));
-      if (q[3] !== q[2]) E.push(edgePt(c, r + 1, 1, 0));
-      if (q[0] !== q[3]) E.push(edgePt(c, r, 0, 1));
-      if (E.length !== 2 && E.length !== 4) continue;
-      const pairs = E.length === 2 ? [[E[0], E[1]]] : [[E[0], E[3]], [E[1], E[2]]];
-      // 下の段に向く向き: マスの中の下の段の点の平均の方へ
-      let lx = 0, lz = 0, n = 0;
-      [[c, r], [c + 1, r], [c + 1, r + 1], [c, r + 1]].forEach(([cc, rr], i) => {
-        if (q[i] === 0) {
-          lx += nodeX(g, cc + c0);
-          lz += nodeZ(g, rr + r0);
-          n++;
+  // 壁の線のための段の分け: 段に入らなかった点（車道の芯など）でも、隣の下の段の点より drop m 以上高ければ上の段とみなす
+  // （河岸の道が岸壁のすぐ上を走る所。車道の芯の点に接するマスで壁の線が切れて、手すり壁が点線のように途切れていた）
+  const wcls = cls.slice();
+  for (let r = 0; r < Hn; r++) {
+    for (let c = 0; c < W; c++) {
+      const k = r * W + c;
+      if (cls[k] >= 0 || wet[k] || ramp[k] || Number.isNaN(cur[k]) || !inside(c, r)) continue;
+      for (let dr = -1; dr <= 1 && wcls[k] < 0; dr++) {
+        for (let dc = -1; dc <= 1; dc++) {
+          const rr = r + dr, cc = c + dc;
+          if (rr < 0 || cc < 0 || rr >= Hn || cc >= W || cls[rr * W + cc] !== 0) continue;
+          if (cur[k] - cur[rr * W + cc] > drop) {
+            wcls[k] = 1;
+            break;
+          }
         }
-      });
-      lx /= n;
-      lz /= n;
-      for (const [A, B] of pairs) {
-        let nx = -(B.z - A.z), nz = B.x - A.x;
-        const l = Math.hypot(nx, nz);
-        if (l < 1e-3) continue;
-        nx /= l;
-        nz /= l;
-        if ((lx - (A.x + B.x) / 2) * nx + (lz - (A.z + B.z) / 2) * nz < 0) {
-          nx = -nx;
-          nz = -nz;
-        }
-        walls.push({ ax: A.x, az: A.z, at: A.top, ab: A.bot, bx: B.x, bz: B.z, bt: B.top, bb: B.bot, nx, nz });
       }
     }
   }
-  // 車道でない道を横切る壁は捨てる（壁にはぶつかる判定があるので、坂の判定から漏れた道もふさがない）
-  if (!lines.length) return walls;
-  return walls.filter((w) => {
-    for (let i = 0; i < lines.length; i += 4) if (segmentsCross(w.ax, w.az, w.bx, w.bz, lines[i], lines[i + 1], lines[i + 2], lines[i + 3])) return false;
+  // 壁の線: 地面の三角形（格子のマスを (c, r)–(c+1, r+1) の対角線で分けたもの。terrain.js の planar と同じ）の辺のうち、
+  // 両端が下の段で、片側の三角形の残りの頂点が上の段・反対側の三角形の残りの頂点が下の段のもの。壁は下の段の格子点を結ぶ
+  // 三角形の辺の上に立つので、壁の前の地面は必ず下の段の高さで平ら（壁の裏の 1 マスの斜面は、壁の上の歩道の板で隠す）。
+  // 壁の上端は、端の格子点と三角形を共にする上の段の点の高さの最大
+  const N6 = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1]];
+  const topOf = new Map();
+  const top = (c, r) => {
+    const k = r * W + c;
+    if (topOf.has(k)) return topOf.get(k);
+    let t = -Infinity;
+    for (const [dc, dr] of N6) {
+      const cc = c + dc, rr = r + dr;
+      if (cc >= 0 && rr >= 0 && cc < W && rr < Hn && wcls[rr * W + cc] === 1) t = Math.max(t, cur[rr * W + cc]);
+    }
+    topOf.set(k, t);
+    return t;
+  };
+  const cl = (c, r) => (c >= 0 && r >= 0 && c < W && r < Hn ? wcls[r * W + c] : -1);
+  // 辺の向き (dc, dr) と、辺の両側の三角形の残りの頂点（辺の始点からのずれ）
+  const EDGES = [[1, 0, [1, 1], [0, -1]], [0, 1, [1, 1], [-1, 0]], [1, 1, [1, 0], [0, 1]]];
+  const walls = [];
+  for (let r = 0; r < Hn; r++) {
+    for (let c = 0; c < W; c++) {
+      if (wcls[r * W + c] !== 0) continue;
+      for (const [dc, dr, o1, o2] of EDGES) {
+        if (cl(c + dc, r + dr) !== 0) continue;
+        const k1 = cl(c + o1[0], r + o1[1]), k2 = cl(c + o2[0], r + o2[1]);
+        if (!((k1 === 1 && k2 === 0) || (k1 === 0 && k2 === 1))) continue;
+        const lo = k1 === 0 ? o1 : o2; // 下の段（壁の前）の側の頂点
+        const ax = nodeX(g, c + c0), az = nodeZ(g, r + r0), bx = nodeX(g, c + dc + c0), bz = nodeZ(g, r + dr + r0);
+        let nx = -(bz - az), nz = bx - ax;
+        const l = Math.hypot(nx, nz);
+        nx /= l;
+        nz /= l;
+        if ((nodeX(g, c + lo[0] + c0) - ax) * nx + (nodeZ(g, r + lo[1] + r0) - az) * nz < 0) {
+          nx = -nx;
+          nz = -nz;
+        }
+        walls.push({ ax, az, at: top(c, r) - DAT, ab: cur[r * W + c] - DAT, bx, bz, bt: top(c + dc, r + dr) - DAT, bb: cur[(r + dr) * W + c + dc] - DAT, nx, nz });
+      }
+    }
+  }
+  // 車道でない道を横切る壁と、道の幅の中（中心線から幅の半分 + 0.6 m）に入る壁は捨てる（壁にはぶつかる判定があるので、
+  // 坂の判定から漏れた道もふさがない）。ただし道が壁の線に沿って走る所（ドラード河岸の下の遊歩道 Promenade Henri Martin は
+  // 岸壁の足元を通り、格子の階段状の壁の線と何度も交わる）は捨てない（捨てると手すり壁が点線のように途切れる）。
+  // 壁にいちばん近い道の上の点の前後 crossLook m の地面の高さが crossDrop m 以上違えば段を横切る道、違わなければ壁に沿う道と
+  // みなす（坂・階段の印の付いた道は必ず段を横切る道）。壁に沿う道でも、壁が alongHigh m より低ければ捨てる（公園の中の
+  // ゆるい段の低い壁が遊歩道をふさがないように。高い岸壁は本物で、道の線のほうが 1〜2 m ずれている）
+  const kept = !lines.length ? walls : walls.filter((w) => {
+    for (let i = 0; i < lines.length; i += 4) {
+      const cx = lines[i], cz = lines[i + 1], ex = lines[i + 2], ez = lines[i + 3], hw = halfW[i / 4] + 0.6;
+      if (Math.max(w.ax, w.bx) < Math.min(cx, ex) - hw || Math.min(w.ax, w.bx) > Math.max(cx, ex) + hw || Math.max(w.az, w.bz) < Math.min(cz, ez) - hw || Math.min(w.az, w.bz) > Math.max(cz, ez) + hw) continue;
+      // 壁と道の線のいちばん近い所（交われば交点）。P: 道の上の点
+      let d2 = Infinity, P = null;
+      if (segmentsCross(w.ax, w.az, w.bx, w.bz, cx, cz, ex, ez)) {
+        const wx = w.bx - w.ax, wz = w.bz - w.az, dx = ex - cx, dz = ez - cz, den = wx * dz - wz * dx;
+        const t = Math.abs(den) < 1e-9 ? 0 : ((cx - w.ax) * dz - (cz - w.az) * dx) / den;
+        d2 = 0;
+        P = [w.ax + wx * t, w.az + wz * t];
+      } else {
+        for (const [x, z] of [[w.ax, w.az], [w.bx, w.bz]]) {
+          const c = closestOnSegment(x, z, cx, cz, ex, ez);
+          if (c.d2 < d2) [d2, P] = [c.d2, [c.x, c.z]];
+        }
+        for (const [x, z] of [[cx, cz], [ex, ez]]) {
+          const c = closestOnSegment(x, z, w.ax, w.az, w.bx, w.bz);
+          if (c.d2 < d2) [d2, P] = [c.d2, [x, z]];
+        }
+      }
+      if (d2 > hw * hw) continue;
+      if (steep[i / 4] || Math.min(w.at - w.ab, w.bt - w.bb) < alongHigh) return false;
+      const dl = Math.hypot(ex - cx, ez - cz);
+      if (dl < 1e-6) continue;
+      const ux = ((ex - cx) / dl) * crossLook, uz = ((ez - cz) / dl) * crossLook;
+      if (Math.abs(terrain.h(P[0] + ux, P[1] + uz) - terrain.h(P[0] - ux, P[1] - uz)) > crossDrop) return false;
+    }
     return true;
   });
+  walkWidths(kept, paths);
+  return kept;
+}
+
+// 岸壁の上の歩道の板の幅: 手すり壁の内側から河岸の車道の縁まで（少なくとも WALK_MIN m、多くても WALK_MAX m。近くに車道が
+// なければ WALK_DEF m）。壁の端の点ごとに決め、壁に { wa, wb } として付ける（板の絵と、板の上を走る高さ terrain.js の h で使う）
+export const WALK_MIN = 6, WALK_MAX = 14, WALK_DEF = 7.5;
+export function walkWidths(walls, roads = []) {
+  const roadGrid = new Grid(30), segs = [];
+  for (const r of roads) {
+    if (!CAR_ROADS.has(r.type) || r.bridge || r.tunnel || !r.pts) continue;
+    for (let i = 0; i + 1 < r.pts.length; i++) {
+      roadGrid.insertSegment(r.pts[i][0], r.pts[i][1], r.pts[i + 1][0], r.pts[i + 1][1], segs.length);
+      segs.push([r.pts[i][0], r.pts[i][1], r.pts[i + 1][0], r.pts[i + 1][1], r.width / 2]);
+    }
+  }
+  const memo = new Map();
+  const widthAt = (x, z, nx, nz) => {
+    const key = `${Math.round(x * 100)},${Math.round(z * 100)}`;
+    if (memo.has(key)) return memo.get(key);
+    let d = Infinity;
+    roadGrid.queryPoint(x, z, WALK_MAX + 10, (i) => {
+      const [ax, az, bx, bz, hw] = segs[i], c = closestOnSegment(x, z, ax, az, bx, bz);
+      if ((c.x - x) * nx + (c.z - z) * nz > 0) return; // 下の段の側（下の遊歩道・川の上の道）
+      d = Math.min(d, Math.sqrt(c.d2) - hw - 0.3);
+    });
+    const k = d === Infinity || d > WALK_MAX + 5 ? WALK_DEF : Math.min(WALK_MAX, Math.max(WALK_MIN, d));
+    memo.set(key, k);
+    return k;
+  };
+  for (const w of walls) {
+    w.wa = widthAt(w.ax, w.az, w.nx, w.nz);
+    w.wb = widthAt(w.bx, w.bz, w.nx, w.nz);
+  }
+  return walls;
 }
 
 // 線分 AB と CD が交わるか（端が触れるだけも交わるとみなす）

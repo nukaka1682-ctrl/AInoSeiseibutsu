@@ -169,7 +169,11 @@ export function planStreets(parsed, inOld = notOld) {
     if (n.arms.length < 3) continue;
     const old = inOld(n.x, n.z);
     const mains = n.arms.filter((a) => MAIN.has(a.road.type));
-    const lights = mains.some((a) => mains.some((b) => !sameStreet(a, b)));
+    // 信号: 2 本の幹線道路が交わる交差点と、中心部で 2 車線以上の幹線道路に脇の車道が 2 本以上つながる交差点
+    // （ポン・ヌフの右岸の端: Rue de Metz に Quai de la Daurade と Quai de Tounis。ユーザーのストリートビュー）
+    const sides = n.arms.filter((a) => CAR_ROADS.has(a.road.type) && !MAIN.has(a.road.type) && !mains.some((b) => sameStreet(a, b)));
+    const lights = mains.some((a) => mains.some((b) => !sameStreet(a, b))) ||
+      (Math.hypot(n.x, n.z) < CENTRE_R && mains.some((a) => (a.road.lanes || 1) >= 2) && new Set(sides.map((a) => a.road.name || a.road)).size >= 2);
     if (!lights && !old) continue;
     const top = Math.max(...n.arms.map((a) => rankOf(a.road)));
     const centre = old || Math.hypot(n.x, n.z) < CENTRE_R;
@@ -194,7 +198,7 @@ export function planStreets(parsed, inOld = notOld) {
         const hp = strHash(`${Math.round(c.x * 10)},${Math.round(c.z * 10)}`);
         for (let k = 0; k < 4; k++) if (hash01(hp, 40 + k) < 0.6) posts |= 1 << k;
       }
-      crossings.push({ road: a.road, ...c, half: a.road.width / 2, len, stop, posts, lights, s: ia.cum[a.i] + a.dir * d, sNode: ia.cum[a.i], dir: a.dir });
+      crossings.push({ road: a.road, ...c, half: a.road.width / 2, len, stop, posts, lights, centre, room: a.len - d, s: ia.cum[a.i] + a.dir * d, sNode: ia.cum[a.i], dir: a.dir });
     }
   }
   // 車道の標示（markings.js）の並び（道ごとに 1 回、使う時に）と、線を止める区間（道の始点からの距離）:
@@ -1018,8 +1022,10 @@ export function* streetSteps(parsed, plan, clip, { buildings = [], walls = [], w
       const mid = (o0 + o1) / 2;
       // 交差点へ向かう向き（-u）の右は (uz, -ux) = -n
       rect(mark, sx - nx * mid, sz - nz * mid, nx, nz, (o1 - o0) / 2, 0.15, colors.white);
-      if (plan.layout(c.road).bike) {
-        // 自転車の待機ボックス（sas vélo、ユーザーの写真 12）: 停止線の後ろに 4 m の緑の帯と自転車マーク、その後ろに車の停止線
+      // 自転車の待機ボックス（sas vélo、ユーザーの写真 12）: 自転車レーンのある道と、中心部の信号のある交差点（トゥールーズの
+      // 中心部では信号の停止線の後ろにたいてい引いてある。ポン・ヌフの右岸の Quai de la Daurade。ユーザーのストリートビュー）。
+      // 停止線の後ろに 4 m の緑の帯と自転車マーク、その後ろに車の停止線
+      if ((plan.layout(c.road).bike || (c.lights && c.centre)) && c.room > c.len / 2 + 6) {
         const d0 = c.len / 2 + 1.3;
         const bx = c.x + c.ux * (d0 + 2) - nx * mid, bz = c.z + c.uz * (d0 + 2) - nz * mid;
         rect(mark, bx, bz, c.ux, c.uz, 2, (o1 - o0) / 2, colors.green);

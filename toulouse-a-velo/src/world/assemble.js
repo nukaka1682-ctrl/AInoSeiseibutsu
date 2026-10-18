@@ -111,6 +111,7 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   group.add(ground.group);
   for (const [x, z] of ground.posts) collision.addCircle(x, z, POST_HIT); // 横断歩道の脇の車止め
   for (const q of terrain.quayWalls || []) collision.addSegment(q.ax, q.az, q.bx, q.bz); // 岸壁（垂直のレンガの壁）
+  for (const q of terrain.abutments || []) collision.addSegment(q.ax, q.az, q.bx, q.bz); // 高架の下の擁壁
   for (const e of terrain.metro || []) for (const s of entranceWalls(e)) collision.addSegment(...s); // メトロの出入口の吹き抜け
   group.add(buildEnclosures(walls, buildingMats, collision, terrain));
 
@@ -150,7 +151,7 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   const trees = buildTrees(treePts, {
     isPlane: planeTreeTest(roadnet, inWater),
     canPlace: (x, z) => !roadnet.onRoad(x, z, 0.3) && !inWater(x, z) && !insideBuilding(x, z),
-    groundH: (x, z) => (terrain.treeGround ? terrain.treeGround(x, z) : terrain.h(x, z)),
+    groundH: (x, z) => terrain.top(x, z),
   });
   group.add(trees);
   // 木の幹は道路の上でなければ当たり判定を付ける（道路に張り出した枝の下は通れる）

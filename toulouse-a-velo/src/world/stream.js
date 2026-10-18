@@ -18,7 +18,7 @@ import { areaFrame, makeSurfaceAt } from './assemble.js';
 import { buildGroundBase, buildGroundDetailAsync, makeWaterTest } from './ground.js';
 import { POST_HIT, planStreets } from './streets.js';
 import { historicCoreTest, oldTownTest } from '../config.js';
-import { makeDeckTest, setupDecks } from './bridges.js';
+import { buildAbutments, makeDeckTest, setupDecks } from './bridges.js';
 import { FLAT_TERRAIN, surfaceFns, waterPass } from './terrain.js';
 import { buildTerrainTile } from './terrainmesh.js';
 import { buildCoverMesh } from './cover.js';
@@ -50,6 +50,7 @@ export async function assembleStreamWorld({ base, bbox, presetId, buildingMats, 
   const ground = buildGroundBase(parsed, rect, groundMats, terrain, layout);
   group.add(ground.group);
   setupDecks(terrain, parsed.roads, proj, ground.waterDepthAt); // 橋の縦断面
+  if (terrain.abutments?.length) group.add(buildAbutments(terrain.abutments, groundMats)); // 高架の下の擁壁
   const inWater = makeWaterTest(parsed.areas);
 
   progress('名所を探しています…', 0.7);
@@ -236,9 +237,9 @@ class TileStreamer {
     const cw = new CollisionWorld({ minX: B.minX - 80, maxX: B.maxX + 80, minZ: B.minZ - 80, maxZ: B.maxZ + 80 });
     group.add(buildEnclosures(walls, this.materials, cw, T));
     for (const [x, z] of ground.posts) cw.addCircle(x, z, POST_HIT); // 横断歩道の脇の車止め
-    for (const q of T.quayWalls || []) {
+    for (const q of [...(T.quayWalls || []), ...(T.abutments || [])]) {
       const mx = (q.ax + q.bx) / 2, mz = (q.az + q.bz) / 2;
-      if (mx >= B.minX && mx < B.maxX && mz >= B.minZ && mz < B.maxZ) cw.addSegment(q.ax, q.az, q.bx, q.bz); // 岸壁（タイルに中点が入る壁だけ）
+      if (mx >= B.minX && mx < B.maxX && mz >= B.minZ && mz < B.maxZ) cw.addSegment(q.ax, q.az, q.bx, q.bz); // 岸壁・高架の下の擁壁（タイルに中点が入る壁だけ）
     }
     for (const e of T.metro || []) {
       if (e.x >= B.minX && e.x < B.maxX && e.z >= B.minZ && e.z < B.maxZ) for (const s of entranceWalls(e)) cw.addSegment(...s); // メトロの出入口の吹き抜け
@@ -279,7 +280,7 @@ class TileStreamer {
     const trees = buildTrees(treePts, {
       isPlane: planeTreeTest(this.roadnet, this.inWater),
       canPlace: (x, z) => !this.roadnet.onRoad(x, z, 0.3) && !this.inWater(x, z) && !insideBuilding(x, z),
-      groundH: (x, z) => (T.treeGround ? T.treeGround(x, z) : T.h(x, z)),
+      groundH: (x, z) => T.top(x, z),
     });
     group.add(trees);
 
