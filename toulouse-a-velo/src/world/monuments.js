@@ -7,6 +7,7 @@
 //   雄鶏の像:         オリヴィエ広場。蹄鉄を溶接した暗い錆色の雄鶏（足元にラグビーボール）、赤い木の台（上面は黒）
 //   ファストフード店: Route de Bayonne のマクドナルド（ユーザーのストリートビューと航空写真）。ガラスの店先の平屋に外へ傾いた
 //                     オレンジ色の羽板の帯と濃い緑の寄棟の屋根、緑と赤の看板塔、道路との間の白い砂利と大きな石の植え込み
+//   オテル・デューの中庭: 刈り込んだ四角い木の列に挟まれた砂利の園路、芝の中の低いツゲの模様、北の端の丸い池（ストリートビュー）
 //   日本庭園:         コンパン・カファレリの Jardin japonais Pierre-Baudis（ユーザーの写真）。白い塀に囲まれた砂紋の枯山水と石組み、
 //                     池の西の茶屋（深い軒の苔むした寄棟）、池の南の入り江に架かる朱色の太鼓橋、白い玉石の州浜と石灯籠、玉作りの松
 import * as THREE from 'three';
@@ -29,6 +30,14 @@ export const MONUMENTS = [
     front: [43.60795, 1.39540], pylon: [43.60802, 1.39513],
     gravel: [[43.608084, 1.394805], [43.608147, 1.3949], [43.608128, 1.39503], [43.608092, 1.39515], [43.607988, 1.39515], [43.607988, 1.394805]],
     mulch: [[43.608150, 1.39489, 3.2], [43.608075, 1.39502, 3.6], [43.608032, 1.39509, 3.4]],
+  },
+  // オテル・デュー・サン・ジャックの中庭（航空写真 2024 とストリートビューから）: 中庭の外周、刈り込んだ木の列（左右）、芝の区画、池
+  {
+    id: 'hotel-dieu-parterre', kind: 'parterre', lat: 43.59969, lon: 1.436825,
+    outer: [[43.59981, 1.436675], [43.59985, 1.436775], [43.599844, 1.4369], [43.5998, 1.437], [43.59934, 1.43725], [43.599296, 1.437225], [43.599206, 1.43685], [43.59922, 1.4368]],
+    rows: [[[43.59976, 1.436695], [43.599224, 1.43683]], [[43.59978, 1.436995], [43.599328, 1.437235]]],
+    lawn: [[43.59963, 1.4367875], [43.59966, 1.4369125], [43.599344, 1.437195], [43.599264, 1.4369125]],
+    basin: [43.59969, 1.436825],
   },
   // 日本庭園（航空写真 2024 と写真から）: 茶屋の位置（データの建物を置き換える）、枯山水の砂利の面と白い塀（砂利の側から見て
   // 左から右へ）、茶屋へ渡る木の縁台、太鼓橋の両端、州浜、石灯籠、石組みと玉作りの松の位置 [緯度, 経度]
@@ -339,6 +348,11 @@ export function findMonuments(proj, { buildings = [], areas = [], facade = null,
         spec, kind: 'fastfood', outer: best.b.outer, height: Math.max(4.8, (best.b.info.height || 0) + 0.9), replaced: [best.b],
         front: ll(spec.front), pylon: ll(spec.pylon), gravel: spec.gravel.map(ll), mulch: spec.mulch.map((m) => [...ll(m), m[2]]),
       });
+    } else if (spec.kind === 'parterre') {
+      const ll = (p) => proj.project(p[0], p[1]);
+      const outer = spec.outer.map(ll), [cx, cz] = centroid(outer);
+      if (!inB(cx, cz)) continue;
+      out.push({ spec, kind: 'parterre', x: cx, z: cz, outer, rows: spec.rows.map((r) => r.map(ll)), lawn: spec.lawn.map(ll), basin: ll(spec.basin), replaced: [] });
     } else if (spec.kind === 'jgarden') {
       const ll = (p) => proj.project(p[0], p[1]);
       const gravel = spec.gravel.map(ll), [gx, gz] = centroid(gravel);
@@ -381,7 +395,9 @@ export function monumentClearance(list) {
     if (m.kind === 'chateau') circles.push([m.x, m.z, m.rBase + 9]); // 柵の外の歩道まで（交差点から塔が見えるように）
     if (m.kind === 'coq') circles.push([m.x, m.z, 3]);
   }
-  return (x, z) => circles.some(([cx, cz, r]) => Math.hypot(x - cx, z - cz) < r);
+  // 中庭の刈り込んだ木は専用の形で描くので、地形モデルの木（丸い樹冠）は植えない
+  const rings = list.filter((m) => m.kind === 'parterre').map((m) => m.outer);
+  return (x, z) => circles.some(([cx, cz, r]) => Math.hypot(x - cx, z - cz) < r) || rings.some((r) => pointInRing(x, z, r));
 }
 
 // 名所の台・柵の内側（街の小物 furniture.js を置かない所）。buildMonuments の keepOut の円 [x, z, r]
@@ -1094,6 +1110,57 @@ function writeFastfood(m, W, groundAt, colliders) {
   }
 }
 
+// ---- オテル・デューの中庭
+function writeParterre(m, W, groundAt) {
+  const w = W.main, HEDGE = col('#3c5a2b'), CLIP = [col('#41602f'), col('#3a5829'), col('#46653a')], TRUNK = col('#5a4a3c');
+  const flat = (poly, lift, color) => {
+    const t = triangulate(poly);
+    for (let i = 0; i < t.indices.length; i += 3) {
+      const [A, B, C] = [0, 1, 2].map((k) => t.points[t.indices[i + k]]).map((v) => [v[0], groundAt(v[0], v[1]) + lift, v[1]]);
+      W.inlay.tri(A, B, C, [0, 1, 0], PLAIN_UV, PLAIN_UV, PLAIN_UV, color);
+    }
+  };
+  // 砂利の園路の面と芝の区画
+  flat(m.outer, 0.03, col('#c9bca4'));
+  flat(m.lawn, 0.05, col('#5f803a'));
+  // 低いツゲ（高さ 0.5 m、幅 0.4 m）: 芝の区画の縁と、対角線、内側の菱形
+  const hedge = (a, b, h = 0.5, wd = 0.4, color = HEDGE) => {
+    const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    if (L < 0.2) return;
+    const ux = (b[0] - a[0]) / L, uz = (b[1] - a[1]) / L, g = Math.min(groundAt(...a), groundAt(...b));
+    box(w, [(a[0] + b[0]) / 2, g + h / 2, (a[1] + b[1]) / 2], [ux * L / 2, 0, uz * L / 2], [0, h / 2, 0], [-uz * wd / 2, 0, ux * wd / 2], color);
+  };
+  const lw = m.lawn, n = lw.length;
+  for (let i = 0; i < n; i++) hedge(lw[i], lw[(i + 1) % n]);
+  const mid = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+  const ms = lw.map((a, i) => mid(a, lw[(i + 1) % n]));
+  for (let i = 0; i < n; i++) hedge(ms[i], ms[(i + 1) % n]);
+  hedge(lw[0], lw[2]);
+  hedge(lw[1], lw[3]);
+  // 外周の北の丸い所の低い生け垣（高さ 1 m）
+  for (let i = 0; i < 4; i++) hedge(m.outer[i], m.outer[i + 1], 1.0, 0.8);
+  // 左右の刈り込んだ四角い木の列（幹 2 m、四角い樹冠 3 × 3 × 3 m、3.6 m おき）
+  for (const [a, b] of m.rows) {
+    const L = Math.hypot(b[0] - a[0], b[1] - a[1]), ux = (b[0] - a[0]) / L, uz = (b[1] - a[1]) / L, k = Math.floor(L / 3.6);
+    for (let j = 0; j <= k; j++) {
+      const x = a[0] + ux * (L * j) / k, z = a[1] + uz * (L * j) / k, g = groundAt(x, z);
+      box(w, [x, g + 1.1, z], [0.12, 0, 0], [0, 1.1, 0], [0, 0, 0.12], TRUNK);
+      box(w, [x, g + 3.6, z], [ux * 1.55, 0, uz * 1.55], [0, 1.5, 0], [-uz * 1.5, 0, ux * 1.5], CLIP[j % CLIP.length]);
+    }
+  }
+  // 北の端の丸い池（石の縁、水面、真ん中の小さな噴水の台）
+  const [bx, bz] = m.basin, g = groundAt(bx, bz);
+  const rim = circ(bx, bz, 3.6, 0, Math.PI * 2, 24).slice(0, -1);
+  for (const q of strokeQuads(rim, true, 0, 0.45)) w.quad(...q.map(([x, z]) => [x, g + 0.45, z]), [0, 1, 0], PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, col('#cfc6b6'));
+  for (let i = 0; i < rim.length; i++) {
+    const p = rim[i], q = rim[(i + 1) % rim.length], nx = (p[0] + q[0]) / 2 - bx, nz = (p[1] + q[1]) / 2 - bz;
+    const o = (pt) => [bx + (pt[0] - bx) * 1.06, bz + (pt[1] - bz) * 1.06];
+    wall(w, o(q), o(p), g, g + 0.45, [nx, 0, nz], CELL.plain, 1e9, 1e9, col('#c4bba9'));
+  }
+  flat(circ(bx, bz, 3.4, 0, Math.PI * 2, 24).slice(0, -1), 0.35, col('#5b6d6a'));
+  box(w, [bx, g + 0.6, bz], [0.35, 0, 0], [0, 0.6, 0], [0, 0, 0.35], col('#c4bba9'));
+}
+
 // ---- 日本庭園（Jardin japonais Pierre-Baudis）
 // 楕円体（x, z 方向の半径 rx, rz、高さの半径 ry）。石・刈り込みの植木に使う
 function ellipsoid(w, c, rx, ry, rz, color, seg = 8) {
@@ -1255,7 +1322,7 @@ function writeJgarden(m, W, groundAt, colliders, onRoad, keepOut) {
   keepOut.push([m.x, m.z, 14]);
 }
 
-const WRITERS = { chateau: writeChateau, stadium: writeStadium, cabanis: writeCabanis, coq: writeCoq, cross: writeCross, fastfood: writeFastfood, jgarden: writeJgarden };
+const WRITERS = { chateau: writeChateau, stadium: writeStadium, cabanis: writeCabanis, coq: writeCoq, cross: writeCross, fastfood: writeFastfood, jgarden: writeJgarden, parterre: writeParterre };
 
 // 名所のモデルを作る。colliders: 足す当たり判定の円 [x, z, r] か線分 [ax, az, bx, bz]、
 // keepOut: 街の小物を置かない円 [x, z, r]（像の台・シャトー・ドーの柵の内側。monumentSolid）

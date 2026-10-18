@@ -43,6 +43,7 @@ const KERB_OVER = 0.85; // 半分乗り上げた車の、縁石の車道側の�
 const KERB_MIN_E = 1.6; // 半分乗り上げて止める歩道の最小の幅
 const BOLLARD_STEP = 1.4;
 const CENTRE_R = 1500; // 広い歩道に車止めを並べる中心部（原点＝Pont Neuf からの距離）
+const NARROW_BOLLARD_R = 1100, NARROW_BOLLARD_STEP = 2.1; // 狭い歩道の縁にも車止めを並べる中心部（Saint-Cyprien を含む）と間隔（m）
 
 // 車の色（写真の路上駐車: 白・銀・灰・黒・紺が大半、赤やほかの色は少し）。[sRGB, 割合]
 // （ユーザーのストリートビュー: 白・銀・灰が多く、黒は少ない）
@@ -327,12 +328,18 @@ export function planFurniture({ parsed, plan, clip, curbs = [], inOldTown = () =
       }
     }
 
-    // ---- 花崗岩の車止め: 中心部の広い歩道（通りの片側ごとに半分。広場の縁は下で広場の外周から）
-    if (hash01(id * 2 + side, 52) < 0.5) {
+    // ---- 花崗岩の車止め: 中心部の広い歩道（通りの片側ごとに半分。広場の縁は下で広場の外周から）と、中心部の狭い歩道の縁
+    // （ユーザーのストリートビュー: Rue de la République・Place Esquirol・Rue Laganne は狭い歩道の縁にも黒い車止めが約 2 m おきに並ぶ。
+    // 大通りと、歩道に半分乗り上げて止める通りは除く）
+    const wideSide = hash01(id * 2 + side, 52) < 0.5;
+    {
+      let lastNarrow = -Infinity;
       for (const { s } of slotsAlong(...range(0.6), BOLLARD_STEP, 0.7)) {
         const p = curbAt(rows, s);
         const x = p.cx + p.nx * 0.3, z = p.cz + p.nz * 0.3;
-        if (p.e < 6.5 || Math.hypot(x, z) > CENTRE_R || ctx.plazaAt(x, z)) continue;
+        const narrow = p.e >= 1.2 && p.e < 6.5;
+        if (narrow ? Math.hypot(x, z) > NARROW_BOLLARD_R || s - lastNarrow < NARROW_BOLLARD_STEP || road.width >= 9 || parkMode(road, p.e) === 'kerb' : !wideSide || p.e < 6.5 || Math.hypot(x, z) > CENTRE_R) continue;
+        if (ctx.plazaAt(x, z)) continue;
         if (ctx.crossingZone(road, x, z, 2.3) || ctx.nearJunction(x, z, road.width / 2 + 1) || !clear(x, z, 0.14)) continue;
         const granite = GRANITE_STREETS.test(road.name || '');
         // 黒い細い車止めは一続きにせず、約 7 m の組ごとに 3 割ほど抜く（写真: 横断歩道の近く・切れ目ごとの組）
@@ -340,6 +347,7 @@ export function planFurniture({ parsed, plan, clip, curbs = [], inOldTown = () =
         // 歩道は黒い細い車止め（potelets。ユーザーの写真 7・8・17・21・23: 旧市街の Alsace-Lorraine・Lafayette も）。
         // 灰色の花崗岩の円柱は広場（下の広場の外周）と、石の柱の並ぶ通り（Rue de Metz、写真 13）だけ
         out.bollards.push({ x, z, y: heightAt(x, z), type: granite ? 'granite' : 'potelet', a: yaw(p.ux, p.uz) });
+        if (narrow) lastNarrow = s;
         take(x, z, 0.16);
         circle(x, z, 0.15);
       }
