@@ -132,9 +132,18 @@ for (const v of views) {
         const at = ([r, u, f]) => [b.x + fz * -r + fx * f, b.y + u, b.z + fx * r + fz * f];
         c.position.set(...at(cam.pos));
         c.lookAt(...at(cam.look));
+      } else if (cam.ground) {
+        // ground: y は地面（岸壁の上の歩道の板を含む）からの高さ（写真と同じ目の高さで撮る）
+        const T = s.world.terrain, g = (x, z) => (T?.top ? T.top(x, z) : T?.h ? T.h(x, z) : 0) + (s.world.liftAt ? s.world.liftAt(x, z) : 0);
+        c.position.set(cam.pos[0], cam.pos[1] + g(cam.pos[0], cam.pos[2]), cam.pos[2]);
+        c.lookAt(cam.look[0], cam.look[1] + g(cam.look[0], cam.look[2]), cam.look[2]);
       } else {
         c.position.set(...cam.pos);
         c.lookAt(...cam.look);
+      }
+      if (cam.fov) {
+        c.fov = cam.fov;
+        c.updateProjectionMatrix();
       }
     }, v.cam);
     for (let i = 0; i < 25; i++) {
