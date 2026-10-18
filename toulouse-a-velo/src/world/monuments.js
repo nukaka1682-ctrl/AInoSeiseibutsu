@@ -5,8 +5,10 @@
 //   カバニス:         3 つの外形をまとめた門の形（中央の大きな四角い開口）、テラコッタ色のルーバーと白い階の帯、屋上のガラスの庇
 //   オクシタン十字:   キャピトル広場の石畳に埋め込まれたブロンズの十字（12 の玉に星座のメダル）。地面に貼る薄い板
 //   雄鶏の像:         オリヴィエ広場。蹄鉄を溶接した暗い錆色の雄鶏（足元にラグビーボール）、赤い木の台（上面は黒）
-//   ファストフード店: Route de Bayonne のマクドナルド（ユーザーのストリートビューと航空写真）。暗い灰色の外壁と赤茶の帯の平屋、
-//                     道路側の大きなガラス、黄色の M の看板と道端の看板塔、道路との間の白い砂利の植え込み（赤茶の木のチップの島）
+//   ファストフード店: Route de Bayonne のマクドナルド（ユーザーのストリートビューと航空写真）。ガラスの店先の平屋に外へ傾いた
+//                     オレンジ色の羽板の帯と濃い緑の寄棟の屋根、緑と赤の看板塔、道路との間の白い砂利と大きな石の植え込み
+//   日本庭園:         コンパン・カファレリの Jardin japonais Pierre-Baudis（ユーザーの写真）。白い塀に囲まれた砂紋の枯山水と石組み、
+//                     池の西の茶屋（深い軒の苔むした寄棟）、池の南の入り江に架かる朱色の太鼓橋、白い玉石の州浜と石灯籠、玉作りの松
 import * as THREE from 'three';
 import { MeshWriter, triangulate } from './meshwriter.js';
 import { centroid, hash01, mulberry32, pointInPolygon, pointInRing, signedArea } from '../geo.js';
@@ -27,6 +29,19 @@ export const MONUMENTS = [
     front: [43.60795, 1.39540], pylon: [43.60802, 1.39513],
     gravel: [[43.608084, 1.394805], [43.608147, 1.3949], [43.608128, 1.39503], [43.608092, 1.39515], [43.607988, 1.39515], [43.607988, 1.394805]],
     mulch: [[43.608150, 1.39489, 3.2], [43.608075, 1.39502, 3.6], [43.608032, 1.39509, 3.4]],
+  },
+  // 日本庭園（航空写真 2024 と写真から）: 茶屋の位置（データの建物を置き換える）、枯山水の砂利の面と白い塀（砂利の側から見て
+  // 左から右へ）、茶屋へ渡る木の縁台、太鼓橋の両端、州浜、石灯籠、石組みと玉作りの松の位置 [緯度, 経度]
+  {
+    id: 'jardin-japonais', kind: 'jgarden', lat: 43.6119432, lon: 1.4318864, r: 12,
+    gravel: [[43.6121396, 1.4315433], [43.6121733, 1.4318014], [43.6121306, 1.4318168], [43.6119196, 1.4317349], [43.6119825, 1.4316468], [43.6120633, 1.4315402]],
+    wall: [[43.6120633, 1.4315402], [43.6121396, 1.4315433], [43.6121733, 1.4318014]],
+    deck: [[43.6120835, 1.4318276], [43.6120767, 1.4319358], [43.6120655, 1.4319343], [43.6120711, 1.4318261]],
+    bridge: [[43.6118467, 1.4320888], [43.6118691, 1.4321939]],
+    spit: [[43.6120992, 1.4319915], [43.6121306, 1.4320332], [43.6121194, 1.4321105], [43.6120947, 1.4321182], [43.6120633, 1.4320564], [43.6120689, 1.4320023]],
+    lantern: [43.6121059, 1.432044],
+    rocks: [[43.6121082, 1.4316082], [43.6120992, 1.4316236], [43.6121306, 1.4317318], [43.6121216, 1.4317442], [43.6120296, 1.4316855], [43.6120633, 1.43201], [43.6120296, 1.4319636], [43.6118725, 1.4321491], [43.6119286, 1.4322264], [43.6119174, 1.4322728], [43.6121194, 1.4321337], [43.6120633, 1.4322418]],
+    pines: [[43.6121172, 1.4315927], [43.6121351, 1.431755], [43.6120128, 1.4317009], [43.6120296, 1.4322032], [43.6119398, 1.4322805], [43.6118725, 1.4319636], [43.612097, 1.4322264], [43.6120633, 1.4323037]],
   },
 ];
 
@@ -323,6 +338,20 @@ export function findMonuments(proj, { buildings = [], areas = [], facade = null,
       out.push({
         spec, kind: 'fastfood', outer: best.b.outer, height: Math.max(4.8, (best.b.info.height || 0) + 0.9), replaced: [best.b],
         front: ll(spec.front), pylon: ll(spec.pylon), gravel: spec.gravel.map(ll), mulch: spec.mulch.map((m) => [...ll(m), m[2]]),
+      });
+    } else if (spec.kind === 'jgarden') {
+      const ll = (p) => proj.project(p[0], p[1]);
+      const gravel = spec.gravel.map(ll), [gx, gz] = centroid(gravel);
+      if (!inB(gx, gz)) continue;
+      // 茶屋: 近くの小さな建物（データでは 4 m の箱）を置き換える
+      let tea = null;
+      for (const b of buildings) {
+        const [bx, bz] = centroid(b.outer), d = Math.hypot(bx - x, bz - z);
+        if (d < spec.r && b.info.area < 400 && (!tea || d < tea.d)) tea = { b, d };
+      }
+      out.push({
+        spec, kind: 'jgarden', x: gx, z: gz, gravel, wall: spec.wall.map(ll), deck: spec.deck.map(ll), bridge: spec.bridge.map(ll), spit: spec.spit.map(ll),
+        lantern: ll(spec.lantern), rocks: spec.rocks.map(ll), pines: spec.pines.map(ll), tea: tea ? tea.b.outer : null, replaced: tea ? [tea.b] : [],
       });
     } else if (spec.kind === 'cross') {
       const plaza = areas.find((a) => spec.plaza.test(a.name || ''));
@@ -948,13 +977,16 @@ function archM(w, h) {
   return [...arch(-w / 2), ...arch(w / 2).slice(1)];
 }
 function writeFastfood(m, W, groundAt, colliders) {
+  // ユーザーのストリートビュー（22 Rte de Bayonne、2025 年 8 月）: 平屋。床から 3 m は大きなガラスの店先（横・裏は淡い黄土色の壁）、
+  // その上に外へ傾いたオレンジ色の縦の羽板の帯（白い店名）、帯の上に濃い緑の寄棟の屋根。道端の看板塔は濃い緑の板に黄色の M、下に赤い板
   const w = W.main, ring = m.outer;
   const [cx, cz] = centroid(ring);
-  const y0 = groundAt(cx, cz) - 0.05, H = m.height, Y = y0 + H;
-  const CLAD = col('#3f4144'), BAND = col('#7e3a2c'), GLASS = col('#27323a'), FRAME = col('#55595e'), WOOD = col('#9a6a45');
-  const ROOF = col('#5d5b59'), CAP = col('#d6d3cc'), RED = col('#c0262d'), YELLOW = col('#f7bf1a'), POLE = col('#6b6e72');
+  const y0 = groundAt(cx, cz) - 0.05, G = y0 + 3, F = y0 + 4.4, R = y0 + 5.8;
+  const GLASS = col('#2b3439'), FRAME = col('#3a3d3f'), WALL = col('#d8c79e'), SLAT = col('#c8652f'), SLAT_D = col('#93421f');
+  const ROOF = col('#3e5a47'), SOFFIT = col('#2f3a33'), RED = col('#bd2a24'), GREEN = col('#2c5a3a'), YELLOW = col('#f7bf1a'), POLE = col('#6b6e72');
   const s = signedArea(ring) > 0 ? 1 : -1;
   const fx = m.front[0] - cx, fz = m.front[1] - cz, fl = Math.hypot(fx, fz) || 1;
+  const OUT = 0.55; // 羽板の帯の上の縁の張り出し
   let sign = null;
   for (let i = 0; i < ring.length; i++) {
     const a = ring[i], b = ring[(i + 1) % ring.length];
@@ -964,81 +996,266 @@ function writeFastfood(m, W, groundAt, colliders) {
     const nx = ((b[1] - a[1]) / L) * s, nz = (-(b[0] - a[0]) / L) * s;
     const [p, q] = s > 0 ? [b, a] : [a, b];
     const n = [nx, 0, nz];
-    const front = (nx * fx + nz * fz) / fl > 0.55 && L > 3;
+    const front = (nx * fx + nz * fz) / fl > 0.3 && L > 3;
     if (front) {
-      // 道路側: 床から 2.9 m まで大きなガラス（1.6 m ごとの細い枠）、その上に暗い外壁と赤茶の帯
-      wall(w, p, q, y0, y0 + 0.35, n, CELL.plain, 1e9, 1e9, CLAD);
-      wall(w, p, q, y0 + 0.35, y0 + 2.9, n, CELL.plain, 1e9, 1e9, GLASS);
-      const k = Math.max(1, Math.round(L / 1.6));
+      // 店先: 足元の帯と大きなガラス（1.5 m ごとの細い枠）
+      wall(w, p, q, y0, y0 + 0.3, n, CELL.plain, 1e9, 1e9, FRAME);
+      wall(w, p, q, y0 + 0.3, G, n, CELL.plain, 1e9, 1e9, GLASS);
+      const k = Math.max(1, Math.round(L / 1.5));
       for (let j = 0; j <= k; j++) {
         const t = j / k, x = p[0] + (q[0] - p[0]) * t + nx * 0.05, z = p[1] + (q[1] - p[1]) * t + nz * 0.05;
-        box(w, [x, y0 + 1.62, z], [0.05, 0, 0], [0, 1.28, 0], [0, 0, 0.05], FRAME);
+        box(w, [x, (y0 + G) / 2, z], [0.05, 0, 0], [0, (G - y0) / 2, 0], [0, 0, 0.05], FRAME);
       }
-      wall(w, p, q, y0 + 2.9, Y - 0.8, n, CELL.plain, 1e9, 1e9, CLAD);
       if (!sign || L > sign.L) sign = { p, q, n, L };
-    } else if (L > 6) {
-      // 横と裏: 暗い外壁の真ん中に木の縦の板張り（幅の 4 割）
-      const t0 = 0.3, t1 = 0.7, P = (t) => [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t];
-      wall(w, p, P(t0), y0, Y - 0.8, n, CELL.plain, 1e9, 1e9, CLAD);
-      wall(w, P(t0), P(t1), y0, Y - 0.8, n, CELL.plain, 1e9, 1e9, WOOD);
-      wall(w, P(t1), q, y0, Y - 0.8, n, CELL.plain, 1e9, 1e9, CLAD);
-      const k = Math.round((L * 0.4) / 0.25);
-      for (let j = 1; j < k; j++) {
-        const t = t0 + ((t1 - t0) * j) / k, x = p[0] + (q[0] - p[0]) * t + nx * 0.04, z = p[1] + (q[1] - p[1]) * t + nz * 0.04;
-        box(w, [x, (y0 + Y - 0.8) / 2, z], [0.02, 0, 0], [0, (Y - 0.8 - y0) / 2, 0], [0, 0, 0.02], col('#6e4a2f'));
-      }
-    } else wall(w, p, q, y0, Y - 0.8, n, CELL.plain, 1e9, 1e9, CLAD);
-    // 上の赤茶の帯（屋上の手すり壁）と白い笠
-    wall(w, p, q, Y - 0.8, Y, n, CELL.plain, 1e9, 1e9, BAND);
+    } else wall(w, p, q, y0, G, n, CELL.plain, 1e9, 1e9, WALL);
+    // 外へ傾いたオレンジ色の羽板の帯（G → F、上の縁は OUT m 外）と、縦の羽板の影の線（0.4 m ごと）
+    const P = (pt, y, o) => [pt[0] + nx * o, y, pt[1] + nz * o];
+    const nn = [nx * 0.93, 0.37, nz * 0.93];
+    w.quad(P(p, G, 0), P(q, G, 0), P(q, F, OUT), P(p, F, OUT), nn, PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, SLAT);
+    const ks = Math.floor(L / 0.4);
+    for (let j = 1; j < ks; j++) {
+      const t = j / ks, x0 = p[0] + (q[0] - p[0]) * t, z0 = p[1] + (q[1] - p[1]) * t, ux = ((q[0] - p[0]) / L) * 0.05, uz = ((q[1] - p[1]) / L) * 0.05;
+      const A = [x0 - ux + nx * 0.02, G, z0 - uz + nz * 0.02], B = [x0 + ux + nx * 0.02, G, z0 + uz + nz * 0.02];
+      const C = [x0 + ux + nx * (OUT + 0.02), F, z0 + uz + nz * (OUT + 0.02)], D = [x0 - ux + nx * (OUT + 0.02), F, z0 - uz + nz * (OUT + 0.02)];
+      w.quad(A, B, C, D, nn, PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, SLAT_D);
+    }
   }
-  // 屋根（手すり壁の 0.6 m 下）と笠
-  const tri = triangulate(ring);
+  // 濃い緑の寄棟の屋根: 羽板の帯の上の縁（外へ OUT m）から、外形を中心へ 0.45 倍に縮めた輪（R）まで。上は平ら。帯の上の軒裏
+  const out = ring.map(([x, z], i) => {
+    const pv = ring[(i - 1 + ring.length) % ring.length], nx2 = ring[(i + 1) % ring.length];
+    let ex = 0, ez = 0;
+    for (const [a, b] of [[pv, [x, z]], [[x, z], nx2]]) {
+      const L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+      ex += ((b[1] - a[1]) / L) * s;
+      ez += (-(b[0] - a[0]) / L) * s;
+    }
+    const l = Math.hypot(ex, ez) || 1;
+    return [x + (ex / l) * OUT, z + (ez / l) * OUT];
+  });
+  const inner = ring.map(([x, z]) => [cx + (x - cx) * 0.45, cz + (z - cz) * 0.45]);
+  for (let i = 0; i < ring.length; i++) {
+    const j = (i + 1) % ring.length;
+    const [A, B] = s > 0 ? [out[j], out[i]] : [out[i], out[j]], [C, D] = s > 0 ? [inner[i], inner[j]] : [inner[j], inner[i]];
+    w.quad([A[0], F, A[1]], [B[0], F, B[1]], [C[0], R, C[1]], [D[0], R, D[1]], [0, 1, 0], PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, ROOF);
+    const [E, H] = s > 0 ? [ring[j], ring[i]] : [ring[i], ring[j]];
+    w.quad([B[0], F - 0.02, B[1]], [A[0], F - 0.02, A[1]], [E[0], F - 0.02, E[1]], [H[0], F - 0.02, H[1]], [0, -1, 0], PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, SOFFIT);
+  }
+  const tri = triangulate(inner);
   for (let i = 0; i < tri.indices.length; i += 3) {
-    const P = [0, 1, 2].map((k) => tri.points[tri.indices[i + k]]);
-    const [A, B, C] = (s > 0 ? [P[0], P[2], P[1]] : P).map((v) => [v[0], Y - 0.6, v[1]]);
+    const P3 = [0, 1, 2].map((k) => tri.points[tri.indices[i + k]]);
+    const [A, B, C] = (s > 0 ? [P3[0], P3[2], P3[1]] : P3).map((v) => [v[0], R, v[1]]);
     w.tri(A, B, C, [0, 1, 0], PLAIN_UV, PLAIN_UV, PLAIN_UV, ROOF);
   }
-  for (const q of strokeQuads(ring, true, -0.2 * s, 0.2)) w.quad(...q.map((v) => [v[0], Y + 0.01, v[1]]), [0, 1, 0], PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, CAP);
-  // 正面の赤茶の帯の上の黄色の M（帯から 0.12 m 前）
-  const letter = (o, ux, uz, nx, nz, size, back) => {
+  // 黄色の M（2 つのアーチ）
+  const letter = (o, ux, uz, nx, nz, size) => {
     const pts = archM(size / 2, size * 0.85);
     for (const q of strokeQuads(pts, false, 0, size * 0.065)) {
       const V = q.map(([u, v]) => [o[0] + ux * u + nx * 0.02, o[1] + v + size * 0.42, o[2] + uz * u + nz * 0.02]);
       w.quad(V[0], V[1], V[2], V[3], [nx, 0, nz], PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, YELLOW);
-      if (back) w.quad(V[3], V[2], V[1], V[0], [-nx, 0, -nz], PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, YELLOW);
     }
   };
   if (sign) {
+    // 羽板の帯の端に黄色の M（帯の上に白い店名があるが、文字は描かない）
     const { p, q, n, L } = sign, ux = (q[0] - p[0]) / L, uz = (q[1] - p[1]) / L;
-    const o = [(p[0] + q[0]) / 2 + n[0] * 0.12, Y - 1.5, (p[1] + q[1]) / 2 + n[2] * 0.12];
-    box(w, [o[0] - n[0] * 0.06, o[1], o[2] - n[2] * 0.06], [ux * 1.3, 0, uz * 1.3], [0, 1.25, 0], [n[0] * 0.08, 0, n[2] * 0.08], RED);
-    letter([o[0] + n[0] * 0.03, o[1] - 1.05, o[2] + n[2] * 0.03], ux, uz, n[0], n[2], 2.1, false);
+    const o = [p[0] + ux * 1.2 + n[0] * (OUT + 0.15), F - 0.95, p[1] + uz * 1.2 + n[2] * (OUT + 0.15)];
+    letter(o, ux, uz, n[0], n[2], 1.1);
   }
-  // 道端の看板塔（高さ 9 m の灰色の柱の上に、赤い板と両面の黄色の M）
+  // 道端の看板塔（高さ約 8 m: 灰色の柱の上に濃い緑の板と黄色の M、その下に赤い板）
   {
-    const [px, pz] = m.pylon, g = groundAt(px, pz), ux = -fz / fl, uz = fx / fl;
-    box(w, [px, g + 3.6, pz], [ux * 0.3, 0, uz * 0.3], [0, 3.6, 0], [(fx / fl) * 0.3, 0, (fz / fl) * 0.3], POLE);
-    const top = g + 7.2 + 1.4;
-    box(w, [px, top, pz], [ux * 1.4, 0, uz * 1.4], [0, 1.4, 0], [(fx / fl) * 0.2, 0, (fz / fl) * 0.2], RED);
-    letter([px + (fx / fl) * 0.21, top - 1.15, pz + (fz / fl) * 0.21], ux, uz, fx / fl, fz / fl, 2.2, false);
-    letter([px - (fx / fl) * 0.21, top - 1.15, pz - (fz / fl) * 0.21], -ux, -uz, -fx / fl, -fz / fl, 2.2, false);
+    const [px, pz] = m.pylon, g = groundAt(px, pz), ux = -fz / fl, uz = fx / fl, ex = fx / fl, ez = fz / fl;
+    box(w, [px, g + 2.4, pz], [ux * 0.25, 0, uz * 0.25], [0, 2.4, 0], [ex * 0.25, 0, ez * 0.25], POLE);
+    box(w, [px, g + 5.6, pz], [ux * 0.95, 0, uz * 0.95], [0, 0.8, 0], [ex * 0.18, 0, ez * 0.18], RED);
+    const top = g + 6.4 + 1.0;
+    box(w, [px, top, pz], [ux * 0.95, 0, uz * 0.95], [0, 1.0, 0], [ex * 0.18, 0, ez * 0.18], GREEN);
+    letter([px + ex * 0.19, top - 0.85, pz + ez * 0.19], ux, uz, ex, ez, 1.6);
+    letter([px - ex * 0.19, top - 0.85, pz - ez * 0.19], -ux, -uz, -ex, -ez, 1.6);
     colliders.push([px, pz, 0.6]);
   }
-  // 白い砂利の植え込みと、赤茶の木のチップの島（地面に貼る板）
+  // 白い砂利の植え込みと、赤茶の木のチップの島（地面に貼る板）、砂利の上の淡い色の大きな石
   const flat = (poly, lift, color) => {
     const t = triangulate(poly);
     const sg = signedArea(poly) > 0 ? 1 : -1;
     for (let i = 0; i < t.indices.length; i += 3) {
-      const P = [0, 1, 2].map((k) => t.points[t.indices[i + k]]);
-      const [A, B, C] = (sg > 0 ? [P[0], P[2], P[1]] : P).map((v) => [v[0], groundAt(v[0], v[1]) + lift, v[1]]);
+      const P3 = [0, 1, 2].map((k) => t.points[t.indices[i + k]]);
+      const [A, B, C] = (sg > 0 ? [P3[0], P3[2], P3[1]] : P3).map((v) => [v[0], groundAt(v[0], v[1]) + lift, v[1]]);
       W.inlay.tri(A, B, C, [0, 1, 0], PLAIN_UV, PLAIN_UV, PLAIN_UV, color);
     }
   };
-  flat(m.gravel, 0.03, col('#e4e1d9'));
-  for (const [x, z, r] of m.mulch) flat(circ(x, z, r, 0, Math.PI * 2, 16).slice(0, -1), 0.045, col('#8a5236'));
+  flat(m.gravel, 0.03, col('#ecebe6'));
+  for (const [x, z, r] of m.mulch) flat(circ(x, z, r, 0, Math.PI * 2, 16).slice(0, -1), 0.045, col('#8a4a36'));
+  const rnd = mulberry32(911);
+  const gx = m.gravel.map((p) => p[0]), gz = m.gravel.map((p) => p[1]);
+  for (let k = 0, placed = 0; k < 80 && placed < 9; k++) {
+    const x = Math.min(...gx) + rnd() * (Math.max(...gx) - Math.min(...gx)), z = Math.min(...gz) + rnd() * (Math.max(...gz) - Math.min(...gz));
+    if (!pointInRing(x, z, m.gravel) || m.mulch.some(([mx, mz, r]) => Math.hypot(x - mx, z - mz) < r)) continue;
+    const a = rnd() * Math.PI, sx = 0.5 + rnd() * 0.4, sz = 0.4 + rnd() * 0.3, sy = 0.3 + rnd() * 0.25;
+    box(w, [x, groundAt(x, z) + sy * 0.8, z], [Math.cos(a) * sx, 0, Math.sin(a) * sx], [0, sy, 0], [-Math.sin(a) * sz, 0, Math.cos(a) * sz], col(rnd() < 0.5 ? '#cfc8bc' : '#bdb5a8'));
+    placed++;
+  }
 }
 
-const WRITERS = { chateau: writeChateau, stadium: writeStadium, cabanis: writeCabanis, coq: writeCoq, cross: writeCross, fastfood: writeFastfood };
+// ---- 日本庭園（Jardin japonais Pierre-Baudis）
+// 楕円体（x, z 方向の半径 rx, rz、高さの半径 ry）。石・刈り込みの植木に使う
+function ellipsoid(w, c, rx, ry, rz, color, seg = 8) {
+  const P = (i, j) => {
+    const th = (i / seg) * Math.PI * 2, ph = (j / (seg / 2)) * Math.PI - Math.PI / 2;
+    return [Math.cos(ph) * Math.cos(th), Math.sin(ph), Math.cos(ph) * Math.sin(th)];
+  };
+  for (let i = 0; i < seg; i++) {
+    for (let j = 0; j < seg / 2; j++) {
+      const q = [P(i, j), P(i + 1, j), P(i + 1, j + 1), P(i, j + 1)];
+      const V = q.map(([x, y, z]) => [c[0] + x * rx, c[1] + y * ry, c[2] + z * rz]);
+      const n = q.reduce((a, v) => [a[0] + v[0], a[1] + v[1], a[2] + v[2]], [0, 0, 0]);
+      w.quad(V[0], V[1], V[2], V[3], n, PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, color);
+    }
+  }
+}
+function writeJgarden(m, W, groundAt, colliders, onRoad, keepOut) {
+  const w = W.main, rnd = mulberry32(1983);
+  const GRAVEL = col('#b5b4b0'), RAKE = col('#8f8e8a'), WALL = col('#ebe4d3'), TILE = col('#55574f'), ROCK = [col('#8f8d88'), col('#a19e97'), col('#7f7d78')];
+  const PINE = [col('#2e4a2a'), col('#35532f'), col('#2a4426')], TRUNK = col('#5a4636'), WOOD = col('#8d7f72'), RED = col('#d9432a'), STONE = col('#9a978f');
+  const flat = (poly, lift, color) => {
+    const t = triangulate(poly);
+    for (let i = 0; i < t.indices.length; i += 3) {
+      const [A, B, C] = [0, 1, 2].map((k) => t.points[t.indices[i + k]]).map((v) => [v[0], groundAt(v[0], v[1]) + lift, v[1]]);
+      W.inlay.tri(A, B, C, [0, 1, 0], PLAIN_UV, PLAIN_UV, PLAIN_UV, color);
+    }
+  };
+  // 枯山水: 灰白色の砂利の面に、塀と平行に 0.5 m おきの波の砂紋（面の中だけ）と、石組みのまわりの同心円
+  flat(m.gravel, 0.04, GRAVEL);
+  const [w0, w1] = [m.wall[m.wall.length - 2], m.wall[m.wall.length - 1]];
+  const L0 = Math.hypot(w1[0] - w0[0], w1[1] - w0[1]), ux = (w1[0] - w0[0]) / L0, uz = (w1[1] - w0[1]) / L0;
+  const inG = (x, z) => pointInRing(x, z, m.gravel);
+  const inRock = (x, z) => m.rocks.some(([rx, rz]) => Math.hypot(x - rx, z - rz) < 2.2);
+  const [gx, gz] = centroid(m.gravel);
+  for (let off = -30; off <= 30; off += 0.5) {
+    let run = [];
+    const flush = () => {
+      if (run.length > 1) for (const q of strokeQuads(run, false, 0, 0.035)) W.inlay.quad(...q.map(([x, z]) => [x, groundAt(x, z) + 0.05, z]), [0, 1, 0], PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, RAKE);
+      run = [];
+    };
+    for (let t = -30; t <= 30; t += 0.6) {
+      const wv = Math.sin(t * 0.9 + off) * 0.12, x = gx + ux * t - uz * (off + wv), z = gz + uz * t + ux * (off + wv);
+      if (inG(x, z) && !inRock(x, z)) run.push([x, z]);
+      else flush();
+    }
+    flush();
+  }
+  for (const [rx, rz] of m.rocks) {
+    if (!inG(rx, rz)) continue;
+    for (const r of [1.5, 2.0]) for (const q of strokeQuads(circ(rx, rz, r, 0, Math.PI * 2, 20).slice(0, -1), true, 0, 0.035)) W.inlay.quad(...q.map(([x, z]) => [x, groundAt(x, z) + 0.05, z]), [0, 1, 0], PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, RAKE);
+  }
+  // 白い塀（高さ 2 m、厚さ 0.35 m）と、少し張り出した暗い瓦の笠
+  for (let i = 0; i + 1 < m.wall.length; i++) {
+    const a = m.wall[i], b = m.wall[i + 1], L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    const nx = -(b[1] - a[1]) / L, nz = (b[0] - a[0]) / L, y0 = Math.min(groundAt(...a), groundAt(...b)) - 0.1, y1 = y0 + 2.1;
+    const o = 0.175;
+    for (const sd of [1, -1]) wall(w, [a[0] + nx * o * sd, a[1] + nz * o * sd], [b[0] + nx * o * sd, b[1] + nz * o * sd], y0, y1, [nx * sd, 0, nz * sd], CELL.plain, 1e9, 1e9, WALL);
+    const mid = [(a[0] + b[0]) / 2, y1 + 0.12, (a[1] + b[1]) / 2], e = [((b[0] - a[0]) / 2) * 1.01, 0, ((b[1] - a[1]) / 2) * 1.01];
+    box(w, mid, e, [0, 0.12, 0], [nx * 0.42, 0, nz * 0.42], TILE);
+    colliders.push([a[0], a[1], b[0], b[1]]);
+  }
+  // 石組み: 丸い灰色の石（0.5〜1.4 m）を 2〜4 個ずつ
+  for (const [rx, rz] of m.rocks) {
+    const n = 2 + Math.floor(rnd() * 3);
+    for (let k = 0; k < n; k++) {
+      const x = rx + (rnd() - 0.5) * 2, z = rz + (rnd() - 0.5) * 2, r = 0.35 + rnd() * 0.45;
+      ellipsoid(w, [x, groundAt(x, z) + r * 0.35, z], r * (1 + rnd() * 0.5), r * 0.7, r, ROCK[k % ROCK.length], 8);
+    }
+  }
+  // 玉作りの松: 細い幹に平たい葉の玉を 3〜4 段
+  for (const [px, pz] of m.pines) {
+    const g = groundAt(px, pz), h = 2.2 + rnd() * 1.6;
+    box(w, [px, g + h / 2, pz], [0.09, 0, 0], [0, h / 2, 0], [0, 0, 0.09], TRUNK);
+    const n = 3 + Math.floor(rnd() * 2);
+    for (let k = 0; k < n; k++) {
+      const t = (k + 1) / n, a = rnd() * Math.PI * 2, d = (1 - t) * 0.8, r = 0.9 - t * 0.35 + rnd() * 0.3;
+      ellipsoid(w, [px + Math.cos(a) * d, g + h * t + 0.1, pz + Math.sin(a) * d], r * 1.2, r * 0.45, r, PINE[k % PINE.length], 8);
+    }
+  }
+  // 州浜（白い玉石）と石灯籠
+  flat(m.spit, 0.05, col('#e8e6df'));
+  {
+    const [lx, lz] = m.lantern, g = groundAt(lx, lz);
+    box(w, [lx, g + 0.15, lz], [0.4, 0, 0], [0, 0.15, 0], [0, 0, 0.4], STONE);
+    box(w, [lx, g + 0.75, lz], [0.12, 0, 0], [0, 0.45, 0], [0, 0, 0.12], STONE);
+    box(w, [lx, g + 1.35, lz], [0.3, 0, 0], [0, 0.18, 0], [0, 0, 0.3], col('#b2aea5'));
+    box(w, [lx, g + 1.6, lz], [0.45, 0, 0], [0, 0.07, 0], [0, 0, 0.45], STONE);
+    ellipsoid(w, [lx, g + 1.7, lz], 0.18, 0.15, 0.18, STONE, 6);
+  }
+  // 茶屋へ渡る木の縁台（0.4 m の高さ、手すり）
+  {
+    const t = triangulate(m.deck);
+    for (let i = 0; i < t.indices.length; i += 3) {
+      const [A, B, C] = [0, 1, 2].map((k) => t.points[t.indices[i + k]]).map((v) => [v[0], groundAt(v[0], v[1]) + 0.4, v[1]]);
+      w.tri(A, B, C, [0, 1, 0], PLAIN_UV, PLAIN_UV, PLAIN_UV, WOOD);
+    }
+    for (const [x, z] of m.deck) box(w, [x, groundAt(x, z) + 0.6, z], [0.06, 0, 0], [0, 0.6, 0], [0, 0, 0.06], col('#7a6a58'));
+  }
+  // 朱色の太鼓橋（長さ L、幅 1.8 m、中ほどの高さ 1.5 m）: 反った床と、低い欄干（柱と 2 本の横木）
+  {
+    const [A, B] = m.bridge, L = Math.hypot(B[0] - A[0], B[1] - A[1]), bx = (B[0] - A[0]) / L, bz = (B[1] - A[1]) / L, nx = -bz, nz = bx;
+    const ga = groundAt(...A), gb = groundAt(...B), n = 14;
+    const at = (t) => [A[0] + bx * L * t, ga + (gb - ga) * t + 1.5 * Math.sin(Math.PI * t), A[1] + bz * L * t];
+    for (let k = 0; k < n; k++) {
+      const p = at(k / n), q = at((k + 1) / n), c = [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2, (p[2] + q[2]) / 2];
+      const e = [(q[0] - p[0]) / 2 * 1.05, (q[1] - p[1]) / 2, (q[2] - p[2]) / 2 * 1.05];
+      box(w, c, e, [0, 0.08, 0], [nx * 0.9, 0, nz * 0.9], RED, { top: col('#a86a4a') });
+      for (const sd of [1, -1]) {
+        for (const hh of [0.5, 0.9]) box(w, [c[0] + nx * 0.85 * sd, c[1] + hh, c[2] + nz * 0.85 * sd], e, [0, 0.04, 0], [nx * 0.05, 0, nz * 0.05], RED);
+      }
+    }
+    for (let k = 0; k <= n; k += 2) {
+      const p = at(k / n);
+      for (const sd of [1, -1]) box(w, [p[0] + nx * 0.85 * sd, p[1] + 0.47, p[2] + nz * 0.85 * sd], [0.06, 0, 0], [0, 0.5, 0], [0, 0, 0.06], RED);
+    }
+    // 橋の下の支え（両端と中の 2 本の柱）
+    for (const t of [0.3, 0.7]) {
+      const p = at(t);
+      for (const sd of [1, -1]) box(w, [p[0] + nx * 0.7 * sd, (p[1] + Math.min(ga, gb) - 1) / 2, p[2] + nz * 0.7 * sd], [0.08, 0, 0], [0, (p[1] - Math.min(ga, gb) + 1) / 2, 0], [0, 0, 0.08], RED);
+    }
+  }
+  // 茶屋: 0.5 m の木の床、細い柱、腰の低い板壁と障子の帯、深い軒（0.9 m）の苔むした寄棟の屋根
+  if (m.tea) {
+    const ring = m.tea, [cx, cz] = centroid(ring), g = Math.min(...ring.map(([x, z]) => groundAt(x, z)));
+    const y0 = g + 0.5, y1 = y0 + 2.5, ROOF = col('#4b5544'), POST = col('#4a3a2c'), SHOJI = col('#e9e2cf');
+    const sgn = signedArea(ring) > 0 ? 1 : -1;
+    const flr = triangulate(ring);
+    for (let i = 0; i < flr.indices.length; i += 3) {
+      const [A, B, C] = [0, 1, 2].map((k) => flr.points[flr.indices[i + k]]).map((v) => [v[0], y0, v[1]]);
+      w.tri(A, B, C, [0, 1, 0], PLAIN_UV, PLAIN_UV, PLAIN_UV, col('#7a6450'));
+    }
+    const ext = ring.map(([x, z]) => {
+      const dx = x - cx, dz = z - cz, l = Math.hypot(dx, dz) || 1;
+      return [x + (dx / l) * 1.2, z + (dz / l) * 1.2];
+    });
+    const ridge = ring.map(([x, z]) => [cx + (x - cx) * 0.25, cz + (z - cz) * 0.25]);
+    for (let i = 0; i < ring.length; i++) {
+      const j = (i + 1) % ring.length, a = ring[i], b = ring[j], L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (L < 0.5) continue;
+      const nx = ((b[1] - a[1]) / L) * sgn, nz = (-(b[0] - a[0]) / L) * sgn;
+      wall(w, a, b, g - 0.2, y0, [nx, 0, nz], CELL.plain, 1e9, 1e9, col('#6e5a48'));
+      wall(w, a, b, y0, y0 + 0.8, [nx, 0, nz], CELL.plain, 1e9, 1e9, col('#8a7058'));
+      if (i % 2 === 0) wall(w, [a[0] - nx * 0.4, a[1] - nz * 0.4], [b[0] - nx * 0.4, b[1] - nz * 0.4], y0 + 0.8, y1 - 0.3, [nx, 0, nz], CELL.plain, 1e9, 1e9, SHOJI);
+      const k = Math.max(1, Math.round(L / 2));
+      for (let s2 = 0; s2 <= k; s2++) {
+        const x = a[0] + (b[0] - a[0]) * (s2 / k), z = a[1] + (b[1] - a[1]) * (s2 / k);
+        box(w, [x, (y0 + y1) / 2, z], [0.09, 0, 0], [0, (y1 - y0) / 2, 0], [0, 0, 0.09], POST);
+      }
+      const E1 = ext[i], E2 = ext[j], R1 = ridge[i], R2 = ridge[j];
+      w.quad([E1[0], y1 - 0.25, E1[1]], [E2[0], y1 - 0.25, E2[1]], [R2[0], y1 + 1.9, R2[1]], [R1[0], y1 + 1.9, R1[1]], [nx, 1.4, nz], PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, ROOF);
+      w.quad([E1[0], y1 - 0.27, E1[1]], [E2[0], y1 - 0.27, E2[1]], [b[0], y1, b[1]], [a[0], y1, a[1]], [0, -1, 0], PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, col('#5b4a3a'));
+    }
+    const top = triangulate(ridge);
+    for (let i = 0; i < top.indices.length; i += 3) {
+      const [A, B, C] = [0, 1, 2].map((k) => top.points[top.indices[i + k]]).map((v) => [v[0], y1 + 1.9, v[1]]);
+      w.tri(A, B, C, [0, 1, 0], PLAIN_UV, PLAIN_UV, PLAIN_UV, ROOF);
+    }
+  }
+  keepOut.push([m.x, m.z, 14]);
+}
+
+const WRITERS = { chateau: writeChateau, stadium: writeStadium, cabanis: writeCabanis, coq: writeCoq, cross: writeCross, fastfood: writeFastfood, jgarden: writeJgarden };
 
 // 名所のモデルを作る。colliders: 足す当たり判定の円 [x, z, r] か線分 [ax, az, bx, bz]、
 // keepOut: 街の小物を置かない円 [x, z, r]（像の台・シャトー・ドーの柵の内側。monumentSolid）
