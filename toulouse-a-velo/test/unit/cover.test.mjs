@@ -174,7 +174,7 @@ test('地面の覆い: 広場の中の敷地は公道（芝生・木の下は残
   };
   const stamps = coverStamps(parsed);
   assert.equal(stamps, coverStamps(parsed)); // parsed ごとに 1 回
-  assert.equal(stamps.length, 6);
+  assert.equal(stamps.length, 7);
   stampCover(grid, rect, stamps);
   assert.equal(at(0, 215), COVER.public); // 広場の中の敷地
   assert.equal(at(-35, 215), COVER.lawn);
@@ -197,6 +197,24 @@ test('地面の覆い: 広場の中の敷地は公道（芝生・木の下は残
   stampCover(g2, rect, stamps);
   assert.equal(g2.data[25 * cols + 5], COVER.public);
   assert.equal(g2.data[56 * cols + 41], COVER.lawn);
+});
+
+test('地面の覆い: 旧市街の通りの中心線から 道幅の半分 + 7 m 以内の木の下は公道（歩道のプラタナスの根元まで石畳）', () => {
+  const cols = 60, rows = 60, rect = { minX: 0, minZ: 0, maxX: 60, maxZ: 60 };
+  const parsed = {
+    areas: [{ type: 'grass', name: 'Square', outer: [[40, 0], [60, 0], [60, 60], [40, 60]], holes: [] }],
+    roads: [{ type: 'secondary', name: 'Rue de Metz', width: 10, pts: [[0, 30], [60, 30]] }],
+  };
+  const make = () => ({ cols, rows, data: new Uint8Array(cols * rows).fill(COVER.trees) });
+  const at = (g, x, z) => g.data[z * cols + x];
+  const old = make();
+  stampCover(old, rect, coverStamps(parsed), null, () => true);
+  assert.equal(at(old, 10, 30 + 11), COVER.public); // 5 + 7 m 以内
+  assert.equal(at(old, 10, 30 + 13), COVER.trees); // それより外
+  assert.equal(at(old, 50, 30), COVER.trees); // 公園の中はそのまま
+  const out = make();
+  stampCover(out, rect, coverStamps(parsed), null, () => false);
+  assert.equal(at(out, 10, 30), COVER.trees); // 旧市街の外は変えない
 });
 
 test('矩形から矩形を除いた残り（地面の覆いのない所にだけ緑地を描く）', () => {

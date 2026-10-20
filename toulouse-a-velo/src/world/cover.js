@@ -159,7 +159,7 @@ export function buildCoverMesh(cover, bounds, shared, inOldTown = () => false, p
   g.setAttribute('oldTown', new THREE.BufferAttribute(old, 1));
   // 旧市街にかかる板だけ、広場の中の印（公道を花崗岩の石畳にする所）を作る
   const mask = parsed && anyOld ? new Uint8Array(grid.cols * grid.rows) : null;
-  if (parsed) stampCover(grid, bounds, coverStamps(parsed), mask);
+  if (parsed) stampCover(grid, bounds, coverStamps(parsed), mask, inOldTown);
   paveAllees(grid);
   const map = coverTexture(grid);
   const plaza = mask ? maskTexture(mask, grid.cols, grid.rows) : NO_PLAZA;

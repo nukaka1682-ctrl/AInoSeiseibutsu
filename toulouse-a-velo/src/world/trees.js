@@ -3,7 +3,7 @@
 // 樹冠は木ごとに違うこぶのある形（シェーダーで作る）、幹は途中で 2 本に分かれ、街路・運河沿いのプラタナスはまだらな樹皮。
 import * as THREE from 'three';
 import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { Grid, hash01, mulberry32, pointInPolygon } from '../geo.js';
+import { Grid, hash01, mulberry32, pointInPolygon, pointInRing } from '../geo.js';
 import { CAR_ROADS } from './parse.js';
 import { makeBarkTexture } from './textures.js';
 
@@ -74,13 +74,20 @@ export function planeTreeTest(roadnet, inWater) {
   };
 }
 
+// 木のない広場（利用者の写真: キャピトル広場には木がない。LiDAR が街灯・日よけ・パラソルを木と見てしまう）
+const TREELESS_PLAZAS = /^Place du Capitole$/i;
+export function treelessTest(areas) {
+  const rings = areas.filter((a) => a.type === 'plaza' && TREELESS_PLAZAS.test(a.name || '')).map((a) => a.outer);
+  return (x, z) => rings.some((r) => pointInRing(x, z, r));
+}
+
 // ---------------------------------------------------------------- 木の形
 // LiDAR の「木」は、数本の木の樹冠がつながった塊のことがある（半径 9 m・高さ 6 m など）。そのまま作ると平たい板になるので、
-// 樹冠は「高さ（半分）が半径の CROWN_ASPECT 倍以上」の形に限り、その形が木の高さ（幹の下枝の高さより上）に収まる
+// 樹冠は「高さ（半分）が半径の CROWN_ASPECT 倍以上」（写真の街路のプラタナスは幅と同じくらいの高さの樹冠）の形に限り、その形が木の高さ（幹の下枝の高さより上）に収まる
 // 半径まで抑える（crownLimit）。抑えた半径の 1.4 倍より横に広い塊は、塊の向き（分からないので種から決める）に沿って
 // 2〜3 本の木に分ける。canPlace(x, z) が false の場所（道路・水・建物）には分けた木を置かない。
 // 返す木: { x, z, y, r: 樹冠の半径, crownH: 樹冠の高さの半分, crownY: 樹冠の中心の高さ, trunkH, seed }
-export const CROWN_ASPECT = 0.75;
+export const CROWN_ASPECT = 1;
 
 // 高さ h の木の、下枝の高さ（bottom）と樹冠の半径の上限（rmax）
 export function crownLimit(h) {
@@ -98,7 +105,7 @@ export function shapeTrees(points, canPlace = () => true, groundH = null) {
       // 大きさの分からない木（OSM・並木道・公園に補った木）
       const r = 2.4 + hash01(seed, 1) * 2.4;
       const trunkH = 2.6 + hash01(seed, 2) * 2.2;
-      const crownH = r * (0.85 + hash01(seed, 4) * 0.3);
+      const crownH = r * (1 + hash01(seed, 4) * 0.25);
       out.push({ x, z, y, r, crownH, crownY: trunkH + crownH * 0.9, trunkH, seed });
       continue;
     }
@@ -191,7 +198,7 @@ const LUMPS_GLSL = `
       float az = lumpHash(sd, fi + 2.0) * 6.2832;
       float el = mix(-0.25, 1.0, lumpHash(sd, fi + 9.0));
       vec3 d = vec3(cos(az) * cos(el), sin(el), sin(az) * cos(el));
-      float a = mix(0.07, 0.17, lumpHash(sd, fi + 17.0));
+      float a = mix(0.09, 0.22, lumpHash(sd, fi + 17.0));
       float c = max(0.0, dot(n, d));
       f += a * c * c;
       g += a * 2.0 * c * (d - dot(n, d) * n);
@@ -239,7 +246,7 @@ function lumpyDepthMaterial() {
 
 // 葉の色: プラタナス（街路・運河・河岸）は黄みのオリーブ色、公園などの木はいろいろな緑（写真の樹冠は #414c1f〜#645731）
 const LEAF = {
-  plane: ['#6a7535', '#737d3a', '#626e31', '#7a823f', '#6e7a38'],
+  plane: ['#667a38', '#6f823e', '#5e7233', '#768a44', '#6a7e3b'],
   other: ['#5b7034', '#667a3a', '#52682f', '#6d7c3d', '#587036', '#5f7440', '#737c37', '#4f6033'],
 };
 // 幹の色（樹皮の模様に掛ける）: プラタナスはまだらな樹皮をそのまま、ほかの木は暗い灰褐色

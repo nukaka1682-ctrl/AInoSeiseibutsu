@@ -108,12 +108,52 @@ export function markBrickSites(proj, buildings, areas = []) {
     }
   }
   // キャピトル広場を囲む建物は、そろいのレンガ造り（1 階はアーケード）
+  // 利用者の写真: 1 階がアーケードなのは西側の一続きの建物（Galerie des Arcades）だけ。北と南は 1 階が店のレンガ造り
   const square = areas.find((a) => /^Place du Capitole$/i.test(a.name || ''));
   if (square) {
     for (const b of facingSquare(square, buildings)) {
       b.tags['building:material'] = 'brick';
-      b.style = STYLE.arcade;
+      b.style = b.inside[0] < square.bounds.minX + 6 ? STYLE.arcade : STYLE.brickStone;
     }
+  }
+}
+
+// 19 世紀末に切り開かれた通り（利用者の写真: Rue d'Alsace-Lorraine・Rue de Metz・Esquirol）に面した建物は、
+// 砂色の切り石の建物（STYLE.haussmann）と灰色の亜鉛の屋根。通りの中心線から 道幅の半分 + HAUSS_REACH m 以内に、
+// 通りに沿った（向きの差 35° 以内）長さ 4 m 以上の壁が通りの方を向いている建物
+const HAUSS_STREETS = /^(Rue d'Alsace[- ]Lorraine|Rue de Metz|Place [EÉ]tienne[- ]Esquirol|Rue du Languedoc)$/i;
+const HAUSS_REACH = 10;
+export function markHaussmann(buildings, roads) {
+  const segs = [];
+  for (const r of roads) {
+    if (r.tunnel || r.bridge || !HAUSS_STREETS.test(r.name || '')) continue;
+    for (let i = 0; i + 1 < r.pts.length; i++) segs.push([r.pts[i], r.pts[i + 1], r.width / 2 + HAUSS_REACH]);
+  }
+  if (!segs.length) return;
+  for (const b of buildings) {
+    if (b.style === STYLE.arcade || b.info.height < 10 || b.info.isChurch) continue;
+    const bb = b.bounds;
+    const s = signedArea(b.outer) > 0 ? 1 : -1;
+    let hit = false;
+    for (const [p, q, reach] of segs) {
+      if (Math.max(p[0], q[0]) + reach < bb.minX || Math.min(p[0], q[0]) - reach > bb.maxX || Math.max(p[1], q[1]) + reach < bb.minZ || Math.min(p[1], q[1]) - reach > bb.maxZ) continue;
+      const sl = Math.hypot(q[0] - p[0], q[1] - p[1]) || 1, ux = (q[0] - p[0]) / sl, uz = (q[1] - p[1]) / sl;
+      for (let i = 0; i < b.outer.length && !hit; i++) {
+        const a = b.outer[i], c = b.outer[(i + 1) % b.outer.length];
+        const L = Math.hypot(c[0] - a[0], c[1] - a[1]);
+        if (L < 4 || Math.abs(((c[0] - a[0]) * ux + (c[1] - a[1]) * uz) / L) < 0.82) continue;
+        const mx = (a[0] + c[0]) / 2, mz = (a[1] + c[1]) / 2;
+        const hit2 = closestOnSegment(mx, mz, p[0], p[1], q[0], q[1]);
+        if (hit2.d2 > reach * reach) continue;
+        const nx = ((c[1] - a[1]) / L) * s, nz = (-(c[0] - a[0]) / L) * s;
+        if (nx * (hit2.x - mx) + nz * (hit2.z - mz) > 0) hit = true;
+      }
+      if (hit) break;
+    }
+    if (!hit) continue;
+    b.style = STYLE.haussmann;
+    b.tags['roof:material'] = 'slate';
+    b.tags['roof:colour'] ||= '#6c6e72';
   }
 }
 

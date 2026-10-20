@@ -29,6 +29,7 @@ const OVERSHOOT = 0.3; // 壁の中まで少し延ばして、壁際のすき間
 const SHARED_EXTRA = 6; // 旧市街の通りの石畳を、車道の外へ延ばす最大の幅
 const SETT_TILE = 2.56; // 小舗石のテクスチャ 1 枚の大きさ（m）
 const SLAB_TILE = 2.4;
+const ALSACE_TILE = 6; // Rue d'Alsace-Lorraine の石の板のテクスチャ 1 枚（m）
 const PROBE = 1.5; // 歩道の外の端を横へ調べる間隔（m）。境目は二分法で詰める
 const RAIL_HALF = 1.5; // 線路（1 本の軌道）の中心からこの幅には歩道を敷かない
 const ANCHOR = 20; // 道の始点からこの間隔ごとに断面を必ず残す（タイルの境の両側で同じ間引きになる）
@@ -60,7 +61,9 @@ export function classifyStreet(road, old) {
   if (old && (t === 'pedestrian' || t === 'living_street') && road.width > 6.5) {
     // 旧市街の広い歩行者の通り（Rue d'Alsace-Lorraine・Rue de la Pomme の広い所）: 壁から壁まで段差のない石の板、
     // 真ん中に 2 列の石の側溝
-    return { kind: 'shared', slabs: true, band: road.width / 2 + 1.2, gutter: 0, near };
+    // Rue d'Alsace-Lorraine（利用者の写真）: 暗い灰色の花崗岩の細長い板に、ばら色の花崗岩の横縞（textures.js の makeAlsaceTexture）
+    const alsace = /^Rue d'Alsace[- ]Lorraine$/i.test(road.name || '');
+    return { kind: 'shared', slabs: true, alsace, band: road.width / 2 + 1.2, gutter: alsace ? null : 0, near };
   }
   if (old && OLD_MINOR.has(t) && road.width <= (t === 'tertiary' ? 5 : 6.5)) {
     // 旧市街の細い通り（IGN の幅は車道だけなので、壁から壁は広い）。車の通れる通りの 3 割は Rue du Taur 型
@@ -73,7 +76,9 @@ export function classifyStreet(road, old) {
     // 歩道の舗装: 中心部はえんじ色（赤茶）の舗装が多く、外は灰色のアスファルトが多い（通りの両側で違うこともある）
     const p = old ? 0.55 : 0.2;
     // 縁石の足元の 2 列の小舗石の側溝は、中心部と幹線道路だけ（郊外の住宅街はアスファルトのまま）
-    return { kind: 'curb', band: road.width / 2, red: [hash01(h, 34) < p, hash01(h, 35) < p], gutter: old || MAIN.has(t), near };
+    // Esquirol と Rue de Metz（利用者の Street View）: 両側とも赤茶色の小舗石の歩道
+    const esq = /^(Place [EÉ]tienne[- ]Esquirol|Rue de Metz)$/i.test(road.name || '');
+    return { kind: 'curb', band: road.width / 2, red: esq ? [true, true] : [hash01(h, 34) < p, hash01(h, 35) < p], gutter: old || MAIN.has(t), near };
   }
   return { kind: 'plain', band: road.width / 2, near };
 }
@@ -903,12 +908,13 @@ export function* streetSteps(parsed, plan, clip, { buildings = [], walls = [], w
       band(slabs, (e) => Math.min(c + GUTTER_W, e.fL), (e) => (room(e.fL) ? e.fL : capL(e, c + GUTTER_W)), SLAB_TILE, colors.slab);
       band(slabs, (e) => (room(e.fR) ? -e.fR : -capR(e, c + GUTTER_W)), (e) => -Math.min(c + GUTTER_W, e.fR), SLAB_TILE, colors.slab);
     } else {
-      if (inf.slabs) band(out('slabs'), (e) => -e.fR, (e) => e.fL, SLAB_TILE, colors.slabWide);
+      if (inf.alsace) band(out('alsace'), (e) => -e.fR, (e) => e.fL, ALSACE_TILE, colors.white);
+      else if (inf.slabs) band(out('slabs'), (e) => -e.fR, (e) => e.fL, SLAB_TILE, colors.slabWide);
       else band(setts, (e) => -e.fR, (e) => e.fL, SETT_TILE, colors.setts);
       // 側溝の線: ほかの車道の中には引かない
       const g = inf.gutter, gut = out('gutter');
       const G = (d) => () => g + d;
-      for (let m = 0; m + 1 < K.length; m++) {
+      for (let m = 0; g != null && m + 1 < K.length; m++) {
         const A = K[m], B = K[m + 1];
         const pi = at(A, G(0)), pj = at(B, G(0));
         const mx = (pi[0] + pj[0]) / 2, mz = (pi[1] + pj[1]) / 2;
@@ -925,8 +931,8 @@ export function* streetSteps(parsed, plan, clip, { buildings = [], walls = [], w
       const r = inf.kind === 'taur' ? Math.min(2.1, Math.max(1.75, half)) : Math.min(Math.max(e.fL, e.fR), half + 2);
       const rim = discRim(st.x, st.z, r, 12, soft);
       if (!rim) continue;
-      const tile = inf.slabs ? SLAB_TILE : SETT_TILE;
-      const w = inf.slabs ? out('slabs') : setts, col = inf.slabs ? colors.slabWide : colors.setts;
+      const tile = inf.alsace ? ALSACE_TILE : inf.slabs ? SLAB_TILE : SETT_TILE;
+      const w = inf.alsace ? out('alsace') : inf.slabs ? out('slabs') : setts, col = inf.alsace ? colors.white : inf.slabs ? colors.slabWide : colors.setts;
       const uv = (q) => [((q[0] - st.x) * st.nx + (q[1] - st.z) * st.nz) / tile, (st.s + (q[0] - st.x) * st.ux + (q[1] - st.z) * st.uz) / tile];
       for (let i = 0; i < rim.length; i++) {
         const q0 = rim[i], q1 = rim[(i + 1) % rim.length];

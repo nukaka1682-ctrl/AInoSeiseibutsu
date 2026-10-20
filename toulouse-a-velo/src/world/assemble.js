@@ -12,12 +12,12 @@ import { FLAT_TERRAIN, surfaceFns } from './terrain.js';
 import { buildTerrainTile } from './terrainmesh.js';
 import { buildCoverMesh } from './cover.js';
 import { tileBounds, tileLayout } from '../data/tiles.js';
-import { buildTrees, fillParkTrees, planeTreeTest, streetTrees } from './trees.js';
+import { buildTrees, fillParkTrees, planeTreeTest, streetTrees, treelessTest } from './trees.js';
 import { buildEnclosures, clearRoads, projectTrees, projectWalls, tameWalls } from './enclosures.js';
 import { clearEntrances, entranceWalls, inEntrance, projectEntrances } from './metro.js';
 import { findTowers } from './towers.js';
 import { buildMonuments, findMonuments, monumentClearance, monumentSolid } from './monuments.js';
-import { findCapitoleFacade, markBrickSites } from './landmarkfacades.js';
+import { findCapitoleFacade, markBrickSites, markHaussmann } from './landmarkfacades.js';
 import { historicCoreTest, oldTownTest } from '../config.js';
 import { POST_HIT, planStreets } from './streets.js';
 import { buildFurniture } from './furniture.js';
@@ -134,8 +134,10 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   treePts = treePts.concat(ground.bankTrees || []); // 街の外れの川岸の土手の木
   const towers = findTowers(proj, parsed.buildings); // 八角形の鐘楼は専用のモデル
   markBrickSites(proj, parsed.buildings, parsed.areas);
+  markHaussmann(parsed.buildings, parsed.roads);
   const clear = monumentClearance(monuments);
-  treePts = treePts.filter((p) => !clear(p.x ?? p[0], p.z ?? p[1])); // 像・塔のまわりには植えない
+  const treeless = treelessTest(parsed.areas);
+  treePts = treePts.filter((p) => !clear(p.x ?? p[0], p.z ?? p[1]) && !treeless(p.x ?? p[0], p.z ?? p[1])); // 像・塔のまわり・木のない広場には植えない
   const skip = new Set(monuments.flatMap((m) => m.replaced));
   const buildings = await buildBuildings(parsed, buildingMats, (p) => progress(`建物を建てています… ${Math.round(p * 100)}%`, 0.3 + p * 0.6), facade, { towers, groundAt: liftAt, skip, terrain });
   group.add(buildings.group);

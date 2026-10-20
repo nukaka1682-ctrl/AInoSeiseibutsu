@@ -12,8 +12,10 @@
 import * as THREE from 'three';
 import { mulberry32 } from '../geo.js';
 
-export const FACADE_STYLES = 9;
-export const STYLE = { brickStone: 0, brickShutters: 1, ochre: 2, taupe: 3, salmon: 4, cream: 5, modern: 6, rose: 7, arcade: 8 };
+export const FACADE_STYLES = 11;
+// haussmann: 19 世紀末の切り石の建物（Rue d'Alsace-Lorraine・Rue de Metz）。2 階と 5 階（上の階の 2 段目と 5 段目）は
+// 通しのバルコニーのセル（haussmannFilant。シェーダーで差し替える。様式としては選ばない）
+export const STYLE = { brickStone: 0, brickShutters: 1, ochre: 2, taupe: 3, salmon: 4, cream: 5, modern: 6, rose: 7, arcade: 8, haussmann: 9, haussmannFilant: 10 };
 
 const W = 1024, CELL = 256, BAYW = 256;
 
@@ -27,6 +29,10 @@ const STYLES = [
   { wall: 'plaster', plaster: '#d3ccc0', trim: 'none', shutters: null, panes: 1, balcony: [0, 1, 0, 1], band: 'none', modern: true, door: '#555b60', shop: '#3a4046' },
   { wall: 'plaster', plaster: '#cfa594', trim: 'brick', shutters: null, panes: 3, balcony: [0, 0, 0, 0], band: 'brick', arched: true, door: '#4b3a2c', shop: '#5c2c28' },
   { wall: 'brick', bricks: ['#bf7454', '#b66d4f', '#c47e5e', '#ad684b', '#c17a59', '#b97250'], mortar: '#d6c3a8', trim: 'brick', shutters: null, panes: 3, balcony: [0, 0, 0, 0], balustrade: true, band: 'brick', arcade: true, door: '#3a3632', shop: '#2b2826' },
+  // 利用者の写真（Rue d'Alsace-Lorraine・Rue de Metz・Esquirol）: 砂色の切り石 #c9b394〜#cbb595、鎧戸なし、窓ごとの鉄の手すり、
+  // 1 階は全部が背の高い店（石の付け柱のあいだ）。filant: 通しの鉄のバルコニー（石の床板つき）
+  { wall: 'stone', plaster: '#cdb798', trim: 'molded', shutters: null, panes: 3, balcony: [1, 1, 1, 1], lintel: true, band: 'stone', shops: true, door: '#2c3a44', shop: '#24313a' },
+  { wall: 'stone', plaster: '#cdb798', trim: 'molded', shutters: null, panes: 3, balcony: [0, 0, 0, 0], filant: true, lintel: true, band: 'stone', shops: true, door: '#2c3a44', shop: '#24313a' },
 ];
 
 function canvas(w, h) {
@@ -351,6 +357,16 @@ function drawUpper(ctx, st, rnd) {
     // 窓台の両端からの雨だれ
     rainStreaks(ctx, x - 14, x + ww + 14, top + wh + 9, rnd);
   }
+  if (st.filant) {
+    // 通しのバルコニー: 石の床板（下に持ち送りの影）と、壁の端から端までの黒い鉄の手すり
+    const y = 44 + 178 - 60;
+    ctx.fillStyle = STONE;
+    ctx.fillRect(0, y + 58, W, 12);
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.fillRect(0, y + 70, W, 5);
+    for (let x = 30; x < W; x += 64) ctx.fillRect(x, y + 70, 10, 14);
+    railing(ctx, 6, y, W - 12, rnd, true);
+  }
 }
 
 // 足元の腰壁（soubassement、約 0.8 m）: レンガの家は暗い灰褐色の切り石、漆喰の家は漆喰より暗い色。下ほど泥はねで暗い
@@ -432,6 +448,35 @@ function arcade(ctx, st, rnd) {
   }
 }
 
+// 1 階が全部店の建物（Rue d'Alsace-Lorraine）: 石の付け柱のあいだに背の高いショーウィンドウ、上に看板の帯と布のひさし
+const AWNINGS = ['#2f4f7a', '#24344a', '#7a2a2a', '#3a4a3a'];
+function shopRow(ctx, st, rnd) {
+  for (let b = 0; b < 4; b++) {
+    const x0 = b * BAYW;
+    ctx.fillStyle = STONE_DARK;
+    ctx.fillRect(x0, 8, 26, CELL - 8);
+    ctx.fillStyle = 'rgba(0,0,0,0.12)';
+    for (let y = 30; y < CELL; y += 36) ctx.fillRect(x0, y, 26, 2);
+    const x = x0 + 32, w = BAYW - 44;
+    ctx.fillStyle = st.shop;
+    ctx.fillRect(x, 18, w, CELL - 18);
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    for (let i = 0; i < 7; i++) ctx.fillRect(x + 30 + i * 18, 30, 12, 10);
+    glass(ctx, x + 8, 56, w - 16, CELL - 56 - 6, rnd, false);
+    ctx.fillStyle = 'rgba(240,225,190,0.22)';
+    ctx.fillRect(x + 14, CELL - 100, w - 28, 60);
+    ctx.fillStyle = st.shop;
+    ctx.fillRect(x + w * 0.62, 56, 5, CELL - 56);
+    if (rnd() < 0.6) {
+      // 布のひさし（斜めに張り出した帯）
+      ctx.fillStyle = AWNINGS[Math.floor(rnd() * AWNINGS.length)];
+      ctx.fillRect(x - 4, 46, w + 8, 18);
+      ctx.fillStyle = 'rgba(0,0,0,0.25)';
+      ctx.fillRect(x - 4, 64, w + 8, 4);
+    }
+  }
+}
+
 // 1 階（地上階）のセル: 馬車門・店・格子の窓・玄関
 function drawGround(ctx, st, rnd) {
   wallFill(ctx, 0, 0, W, CELL, st, rnd);
@@ -444,6 +489,10 @@ function drawGround(ctx, st, rnd) {
     return;
   }
   const trimStone = st.trim === 'stone' || st.trim === 'molded' || st.trim === 'none';
+  if (st.shops) {
+    shopRow(ctx, st, rnd);
+    return;
+  }
 
   // ベイ 0: 半円アーチの馬車門（porte cochère）
   {
@@ -630,6 +679,8 @@ export function useFacadeAtlas(material) {
       `#ifdef USE_MAP
         float facadeStyle = floor((vMapUv.y + 100.0) / 1000.0);
         vec2 facadeUv = vec2(vMapUv.x, vMapUv.y - facadeStyle * 1000.0);
+        float facadeFloor = floor(facadeUv.y);
+        if (facadeStyle == ${STYLE.haussmann}.0 && (facadeFloor == 1.0 || facadeFloor == 4.0)) facadeStyle = ${STYLE.haussmannFilant}.0;
         const float FN = ${FACADE_STYLES}.0;
         vec2 atlasUv = vec2(facadeUv.x, (facadeStyle + 0.015 + fract(facadeUv.y) * 0.97) / FN);
         vec2 gScale = vec2(1.0, 0.97 / FN);

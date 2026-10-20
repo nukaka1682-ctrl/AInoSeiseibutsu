@@ -54,6 +54,8 @@ const GREEN_COLOR = {
 // 写真 #a07f62 前後。砂利のテクスチャの平均 #c7b898 に掛けてその色になる色）
 const PLAZA_SURFACES = [
   { match: /^Place Olivier$/i, tex: 'gravel', uv: 3, color: c3('#cdb0a4') },
+  // キャピトル広場: 灰色の小舗石に淡い石の斜めの帯（textures.js の makeCapitoleSquareTexture）
+  { match: /^Place du Capitole$/i, tex: 'capitole', uv: 8, color: c3('#ffffff') },
 ];
 const namedSurface = (area) => PLAZA_SURFACES.find((p) => p.match.test(area.name || ''));
 export function plazaSurface(area, inOldTown = () => false) {
@@ -77,9 +79,11 @@ export function createGroundMaterials(tex) {
       // 旧市街の地面の下地: 地面と同じく水面の穴（ステンシル）には描かない
       settsBase: flat(tex.setts, { stencilWrite: true, stencilRef: 1, stencilFunc: THREE.NotEqualStencilFunc, stencilFail: THREE.KeepStencilOp, stencilZFail: THREE.KeepStencilOp, stencilZPass: THREE.KeepStencilOp }),
       slabs: flat(tex.slabs),
+      alsace: flat(tex.alsace),
       gutter: flat(tex.gutter),
       grass: flat(tex.grass),
       gravel: flat(tex.gravel),
+      capitole: flat(tex.capitoleSquare),
       plain: flat(null),
       marks: flat(tex.marks, { alphaTest: 0.5 }), // 路面の絵（自転車・矢印・BUS・30）のアトラス
     },
@@ -1007,6 +1011,7 @@ function* groundDetailSteps(parsed, clip, mats, waterDepthAt, opts) {
   const OUT = {
     setts: () => W(ORDER.road - 0.6, 'setts'),
     slabs: () => W(ORDER.road - 0.5, 'slabs'),
+    alsace: () => W(ORDER.road - 0.5, 'alsace'),
     gutter: () => W(ORDER.road + 0.5, 'gutter'),
     marking: () => W(ORDER.marking, 'plain'),
     marks: () => W(ORDER.marking + 0.5, 'marks'),

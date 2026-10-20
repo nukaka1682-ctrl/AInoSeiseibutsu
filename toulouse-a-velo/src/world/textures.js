@@ -460,6 +460,95 @@ export function makeSlabTexture() {
   return toTexture(c);
 }
 
+// キャピトル広場の舗装（利用者の写真 NCM_0097・NCM_0098・Street View）: 灰色〜ふじ色がかった花崗岩の小舗石（約 11 cm、
+// 日なた #938c8b〜#95939a）をまっすぐな列に敷き、淡いばら色がかった石の帯（幅約 0.5 m、#b8aca6〜#c6b5b0）が斜めの
+// 格子に走る。1 枚 8 m 四方（両方の対角線に帯。並べると約 5.7 m 間隔の斜めの格子になる）
+export function makeCapitoleSquareTexture() {
+  const S = 1024, ppm = S / 8;
+  const [c, ctx] = canvas(S, S);
+  const rnd = mulberry32(31);
+  ctx.fillStyle = '#5e5859';
+  ctx.fillRect(0, 0, S, S);
+  const stones = ['#9a9392', '#a29b99', '#948d8d', '#a8a19f', '#9d9697', '#8f8889', '#a59d9b', '#999295'];
+  const rowH = S / Math.round(8 / 0.11);
+  for (let y = 0; y < S - 1; y += rowH) {
+    let x = -rnd() * 0.1 * ppm;
+    while (x < S) {
+      const w = (0.09 + rnd() * 0.05) * ppm;
+      ctx.fillStyle = shadeSrgb(stones[Math.floor(rnd() * stones.length)], 0.92 + rnd() * 0.14);
+      for (const dx of [-S, 0, S]) ctx.fillRect(x + dx + 1, y + 1, w - 2, rowH - 2);
+      x += w;
+    }
+  }
+  // 斜めの淡い石の帯（約 0.6 m ごとに目地）
+  const band = 0.5 * ppm, slab = 0.6 * ppm;
+  const pale = ['#c4b8b1', '#c9bcb4', '#bfb3ad', '#ccc0b8', '#c2b5ae'];
+  for (const dir of [1, -1]) {
+    ctx.save();
+    ctx.translate(S / 2, S / 2);
+    ctx.rotate(dir * Math.PI / 4);
+    const L = S * Math.SQRT2;
+    for (const off of [0, -L / 2, L / 2]) {
+      for (let t = -L / 2 - slab; t < L / 2 + slab; t += slab) {
+        ctx.fillStyle = shadeSrgb(pale[Math.floor(rnd() * pale.length)], 0.96 + rnd() * 0.06);
+        ctx.fillRect(t + 1, off - band / 2, slab - 2, band);
+      }
+    }
+    ctx.restore();
+  }
+  // 雨の跡のムラ
+  for (let i = 0; i < 18; i++) {
+    const r = 40 + rnd() * 140, x = rnd() * S, y = rnd() * S;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, rnd() < 0.5 ? 'rgba(40,36,38,0.10)' : 'rgba(200,192,190,0.08)');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    for (const dx of [-S, 0, S]) for (const dy of [-S, 0, S]) ctx.fillRect(x + dx - r, y + dy - r, r * 2, r * 2);
+  }
+  return toTexture(c);
+}
+
+// Rue d'Alsace-Lorraine の舗装（利用者の Street View）: 暗い灰色の花崗岩の細長い板（約 1.0 × 0.25 m、日陰 #6e6a6a・
+// 日なた #807a78）を通りを横切る向きに並べ、ばら色の花崗岩（#9b877f〜#a07a6a、幅 0.25 m・長さ 3〜5 m）の横縞が
+// 約 3 m ごとに互い違いに入る。u = 横方向、v = 通りの向き（6 m で 1 周）
+export function makeAlsaceTexture() {
+  const S = 1024, ppm = S / 6;
+  const [c, ctx] = canvas(S, S);
+  const rnd = mulberry32(37);
+  ctx.fillStyle = '#4c4849';
+  ctx.fillRect(0, 0, S, S);
+  const greys = ['#8a8584', '#858080', '#8f8a88', '#807b7b', '#928c89', '#878282'];
+  const pinks = ['#b09a90', '#ab9286', '#b4a095', '#a88c7f'];
+  const rowH = 0.25 * ppm, rows = Math.round(S / rowH);
+  // 横縞の段（6 m に 2 本、約 3 m おき）と、その段の中のばら色の区間（u の範囲、互い違い）
+  const stripes = { 3: [0.05, 0.62], [rows / 2 + 1 | 0]: [0.4, 0.98] };
+  for (let r = 0; r < rows; r++) {
+    const y = r * rowH;
+    let x = -rnd() * 0.5 * ppm;
+    const st = stripes[r];
+    while (x < S) {
+      const w = (0.8 + rnd() * 0.4) * ppm;
+      const mid = (x + w / 2) / S;
+      const pink = st && mid > st[0] && mid < st[1];
+      ctx.fillStyle = shadeSrgb((pink ? pinks : greys)[Math.floor(rnd() * (pink ? pinks : greys).length)], 0.95 + rnd() * 0.08);
+      for (const dx of [-S, 0, S]) {
+        ctx.fillRect(x + dx + 1.5, y + 1.5, w - 3, rowH - 3);
+        stoneGrain(ctx, rnd, x + dx + 1.5, y + 1.5, w - 3, rowH - 3, 40, 0.1, false);
+      }
+      x += w;
+    }
+  }
+  for (let i = 0; i < 16; i++) {
+    const r = 50 + rnd() * 150, x = rnd() * S, y = rnd() * S;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, rnd() < 0.5 ? 'rgba(30,28,30,0.10)' : 'rgba(190,184,182,0.07)');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    for (const dx of [-S, 0, S]) for (const dy of [-S, 0, S]) ctx.fillRect(x + dx - r, y + dy - r, r * 2, r * 2);
+  }
+  return toTexture(c);
+}
+
 // ポン・ヌフの歩道の淡い花崗岩の板（写真 10・11）: 1.2 × 0.6 m の板（u = 橋の向き、1 枚 2.4 m 四方）、細い目地
 export function makeGraniteSlabTexture() {
   const S = 512, ppm = S / 2.4;
@@ -795,5 +884,7 @@ export function makeTextures() {
     contact: makeContactTexture(),
     marks: makeMarkingTexture(),
     granite: makeGraniteSlabTexture(),
+    capitoleSquare: makeCapitoleSquareTexture(),
+    alsace: makeAlsaceTexture(),
   };
 }

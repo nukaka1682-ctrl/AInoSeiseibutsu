@@ -168,17 +168,22 @@ export function paveAllees({ cols, rows, data }) {
 //   中心線から 道幅の半分 + ALLEE_REACH m 以内の木の下と公道は舗石（利用者の写真: 灰色のコンクリートの舗石を全面に
 //   敷いたプラタナスの並木道。樹冠の縁の下は焼くときに公道になっているので、そこも同じ舗石に）。芝生の帯・敷地と、
 //   公園・林・墓地の多角形の中（Jardin des Plantes など並木道に面した公園の木立）はそのまま
+// - 旧市街の通り（車道・歩行者の通り）の中心線から 道幅の半分 + STREET_REACH m 以内の木の下は公道（利用者の写真:
+//   Rue de Metz の歩道のプラタナスの列は、根元まで石畳。樹冠が重なって地面が写真に写らないので、焼くときは木の下の土になる）
 // - 並木道の広場（PAVED_PLAZAS: François Verdier の並木道の、戦没者記念碑の前の広場）は、芝生のほかは全部舗石
 // 種類の付け替えの表（元の種類 → 新しい種類。添字 0〜3 と PAVED）
 const ALLEE_NAME = /^All[ée]es\s/i;
 const ALLEE_REACH = 24; // 両側の車道の中心線から（Allées Jules Guesde は車道のあいだが約 50 m）
 export const PAVED_PLAZAS = /^Esplanade (du 19 Août 1944|des Parachutistes)$/i;
+const STREET_ROADS = new Set(['trunk', 'primary', 'secondary', 'tertiary', 'residential', 'unclassified', 'living_street', 'pedestrian']);
+const STREET_REACH = 7;
 const remap = (m) => Uint8Array.from([0, 1, 2, 3, 4, PAVED], (v) => (v in m ? m[v] : v));
 const PLAZA_GREEN_MIN = 0.06;
 const MAP_PLAZA = remap({ [COVER.private]: COVER.public });
 const MAP_PLAZA_MINERAL = remap({ [COVER.private]: COVER.public, [COVER.lawn]: COVER.public, [COVER.trees]: COVER.public });
 const MAP_PAVED_PLAZA = remap({ [COVER.public]: PAVED, [COVER.private]: PAVED, [COVER.trees]: PAVED });
 const MAP_ALLEE = remap({ [COVER.public]: PAVED, [COVER.trees]: PAVED });
+const MAP_STREET = remap({ [COVER.trees]: COVER.public });
 
 // parsed（world/parse.js の結果）から、覆いに描き込む多角形と線を集める（parsed ごとに 1 回）
 const stampCache = new WeakMap();
@@ -199,6 +204,11 @@ export function coverStamps(parsed) {
     const half = r.width / 2 + ALLEE_REACH;
     s.push({ line: r.pts, half, bounds: ringBounds(r.pts, half), map: MAP_ALLEE });
   }
+  for (const r of parsed.roads || []) {
+    if (r.tunnel || r.bridge || !STREET_ROADS.has(r.type) || ALLEE_NAME.test(r.name || '')) continue;
+    const half = r.width / 2 + STREET_REACH;
+    s.push({ line: r.pts, half, bounds: ringBounds(r.pts, half), map: MAP_STREET, old: true });
+  }
   stampCache.set(parsed, s);
   return s;
 }
@@ -216,8 +226,9 @@ function ringBounds(pts, pad) {
 
 // 種類の格子 grid（rect: ローカル座標の範囲、行 0 = minZ）に stamps を描き込む。マスの中心が多角形の中（偶奇規則、
 // 穴あり）・線から half 以内なら、種類を map で付け替える（多角形の中の芝生と木の下が PLAZA_GREEN_MIN に足りなければ
-// mineral で）。keepOut の多角形の中は線では変えない。data を書き換えて返す。plazaMask（cols × rows）があれば広場の中を 255 にする
-export function stampCover(grid, rect, stamps, plazaMask = null) {
+// mineral で）。keepOut の多角形の中は線では変えない。old の付いた線は、区間の中点が旧市街（inOld）の区間だけ。
+// data を書き換えて返す。plazaMask（cols × rows）があれば広場の中を 255 にする
+export function stampCover(grid, rect, stamps, plazaMask = null, inOld = null) {
   const { cols, rows, data } = grid;
   const sx = (rect.maxX - rect.minX) / cols, sz = (rect.maxZ - rect.minZ) / rows;
   const xs = [];
@@ -266,6 +277,7 @@ export function stampCover(grid, rect, stamps, plazaMask = null) {
       const pts = st.line, h2 = st.half * st.half;
       for (let k = 0; k + 1 < pts.length; k++) {
         const [ax, az] = pts[k], [bx, bz] = pts[k + 1];
+        if (st.old && !(inOld && inOld((ax + bx) / 2, (az + bz) / 2))) continue;
         const dx = bx - ax, dz = bz - az, L2 = dx * dx + dz * dz || 1;
         const ca = Math.max(0, Math.floor((Math.min(ax, bx) - st.half - rect.minX) / sx)), cb = Math.min(cols - 1, Math.floor((Math.max(ax, bx) + st.half - rect.minX) / sx));
         const ra = Math.max(r0, Math.floor((Math.min(az, bz) - st.half - rect.minZ) / sz)), rb = Math.min(r1, Math.floor((Math.max(az, bz) + st.half - rect.minZ) / sz));

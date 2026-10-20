@@ -8,10 +8,10 @@ import { Grid, pointInRing } from '../geo.js';
 import { CAR_ROADS, parseOsm } from './parse.js';
 import { loadTileData, tileAt, tileBounds, tileLayout } from '../data/tiles.js';
 import { buildBuildings } from './buildings.js';
-import { buildTrees, fillParkTrees, planeTreeTest, streetTrees } from './trees.js';
+import { buildTrees, fillParkTrees, planeTreeTest, streetTrees, treelessTest } from './trees.js';
 import { buildEnclosures, clearRoads, projectTrees, projectWalls, tameWalls } from './enclosures.js';
 import { clearEntrances, entranceWalls, inEntrance } from './metro.js';
-import { findCapitoleFacade, markBrickSites } from './landmarkfacades.js';
+import { findCapitoleFacade, markBrickSites, markHaussmann } from './landmarkfacades.js';
 import { findTowers } from './towers.js';
 import { buildMonuments, findMonuments, monumentClearance, monumentSolid } from './monuments.js';
 import { areaFrame, makeSurfaceAt } from './assemble.js';
@@ -221,6 +221,7 @@ class TileStreamer {
     const facade = findCapitoleFacade({ areas: this.parsed.areas, buildings });
     const towers = findTowers(this.proj, buildings);
     markBrickSites(this.proj, buildings, this.parsed.areas);
+    markHaussmann(buildings, this.parsed.roads);
     // 名所の専用モデル（シャトー・ドー・スタディアム・カバニス・雄鶏の像・オクシタン十字）。置き換える外形は描かない
     // （当たり判定は元の外形のまま。カバニスの中央の開口の下だけは通り抜けられる）
     const onCarRoad = (x, z) => this.roadnet.onRoad(x, z, 0.3);
@@ -275,7 +276,8 @@ class TileStreamer {
     }
     treePts = treePts.concat(this.bankTrees.filter((t) => inB(t.x, t.z))); // 街の外れの川岸の土手の木
     const clear = monumentClearance(monuments);
-    treePts = treePts.filter((p) => !clear(p.x ?? p[0], p.z ?? p[1])); // 像・塔のまわりには植えない
+    this.treeless ||= treelessTest(this.parsed.areas);
+    treePts = treePts.filter((p) => !clear(p.x ?? p[0], p.z ?? p[1]) && !this.treeless(p.x ?? p[0], p.z ?? p[1])); // 像・塔のまわり・木のない広場には植えない
     // 街路・運河沿いはプラタナス。横に広い LiDAR の塊を分けた木は、道路・水・建物の上には置かない
     const trees = buildTrees(treePts, {
       isPlane: planeTreeTest(this.roadnet, this.inWater),
