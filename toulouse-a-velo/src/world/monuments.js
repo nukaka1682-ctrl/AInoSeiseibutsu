@@ -26,6 +26,12 @@ export const MONUMENTS = [
   // ラ・グラーヴの円屋根（Chapelle Saint-Joseph de la Grave。利用者の写真 NCM_0102・0105・0107）: 礼拝堂の建物の上に、
   // 直径約 19 m のレンガのドラム（高さ約 25 m まで）と鉛色のドーム（約 38 m）、頂塔と十字架（約 44 m）
   { id: 'grave-dome', kind: 'dome', lat: 43.60082, lon: 1.43301, r: 25 },
+  // パット・ドワのロータリーの島（利用者の Street View 210522）: 直径約 18 m の、ばら色のレンガの低い擁壁（0.6 m）に
+  // 囲まれた植え込み（低木と小さな木）と、暗い青灰色の鋼の門の形の彫刻（高さ約 6 m・幅約 7 m）
+  // サン・シプリアンの Place Intérieure（利用者の Street View 210226）: 2 本の車道のあいだの、ベージュの石灰岩の板の
+  // 一段高い歩行者の島（約 45 × 10 m、東の端は丸い）と淡い石の縁石、平らな暗い鉄の格子。line: 島の芯線の東端・西端
+  { id: 'st-cyprien-island', kind: 'island', line: [[43.598026, 1.432008], [43.597945, 1.431499]], half: 4.6 },
+  { id: 'patte-oie', kind: 'roundabout', lat: 43.59640, lon: 1.42303, radius: 9 },
   // ノートルダム・ド・ラ・ドラード大聖堂の川側の正面（利用者の写真 NCM_0110・0112）: 灰色の石の 6 本の円柱（約 12 m）と
   // 三角の破風の柱廊。教会の建物の、川（facing）の方を向いたいちばん長い壁の前に建てる
   { id: 'daurade', kind: 'portico', lat: 43.60097, lon: 1.43983, r: 30, facing: [43.60097, 1.43876] },
@@ -353,6 +359,13 @@ export function findMonuments(proj, { buildings = [], areas = [], facade = null,
       }
       if (!face) continue;
       out.push({ spec, kind: 'portico', mid: [(face.a[0] + face.c[0]) / 2, (face.a[1] + face.c[1]) / 2], t: [(face.c[0] - face.a[0]) / face.L, (face.c[1] - face.a[1]) / face.L], n: face.n, width: Math.min(22, face.L - 2), replaced: [] });
+    } else if (spec.kind === 'island') {
+      const [a, b] = spec.line.map((ll) => proj.project(...ll));
+      if (!inB((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)) continue;
+      out.push({ spec, kind: 'island', a, b, half: spec.half, replaced: [] });
+    } else if (spec.kind === 'roundabout') {
+      if (!inB(x, z)) continue;
+      out.push({ spec, kind: 'roundabout', x, z, radius: spec.radius, replaced: [] });
     } else if (spec.kind === 'statue') {
       if (!inB(x, z)) continue;
       const [fx, fz] = proj.project(...spec.facing);
@@ -455,6 +468,8 @@ export function monumentClearance(list) {
   for (const m of list) {
     if (m.kind === 'chateau') circles.push([m.x, m.z, m.rBase + 9]); // 柵の外の歩道まで（交差点から塔が見えるように）
     if (m.kind === 'coq') circles.push([m.x, m.z, 3]);
+    if (m.kind === 'roundabout') circles.push([m.x, m.z, m.radius + 0.5]); // 島の木は島のモデルで描く
+    if (m.kind === 'statue') circles.push([m.x, m.z, 6]);
   }
   // 中庭の刈り込んだ木は専用の形で描くので、地形モデルの木（丸い樹冠）は植えない
   const rings = list.filter((m) => m.kind === 'parterre').map((m) => m.outer);
@@ -1572,6 +1587,68 @@ function writeDonjon(m, W, groundAt, colliders) {
   for (const [p, q] of [[P(-a, -b, 0), P(a, -b, 0)], [P(a, -b, 0), P(a, b, 0)], [P(a, b, 0), P(-a, b, 0)], [P(-a, b, 0), P(-a, -b, 0)]]) colliders.push([p[0], p[2], q[0], q[2]]);
 }
 
+// ---- 歩行者の島: 東の端（a）が丸く、西の端（b）が四角い、高さ 0.2 m の石の板の島と縁石、鉄の格子 2 枚
+function writeIsland(m, W, groundAt) {
+  const { a, b, half } = m;
+  const L = Math.hypot(b[0] - a[0], b[1] - a[1]), u = [(b[0] - a[0]) / L, (b[1] - a[1]) / L], v = [-u[1], u[0]];
+  const ring = [];
+  for (let k = 0; k <= 12; k++) {
+    const t = Math.PI / 2 + (k / 12) * Math.PI; // a の側の半円
+    ring.push([a[0] + (u[0] * Math.cos(t) + v[0] * Math.sin(t)) * half, a[1] + (u[1] * Math.cos(t) + v[1] * Math.sin(t)) * half]);
+  }
+  ring.push([b[0] - v[0] * half, b[1] - v[1] * half], [b[0] + v[0] * half, b[1] + v[1] * half]);
+  const y0 = groundAt((a[0] + b[0]) / 2, (a[1] + b[1]) / 2), yt = y0 + 0.2;
+  const w = W.main, KERB = col('#ccb696'), TOP = col('#c5b9a6'), GRATE = col('#6f6e64');
+  for (let i = 0; i < ring.length; i++) {
+    const p = ring[i], q = ring[(i + 1) % ring.length], dx = q[0] - p[0], dz = q[1] - p[1], l = Math.hypot(dx, dz) || 1;
+    const sg = signedArea(ring) > 0 ? 1 : -1;
+    w.quad([p[0], y0 - 0.2, p[1]], [q[0], y0 - 0.2, q[1]], [q[0], yt, q[1]], [p[0], yt, p[1]], [(dz / l) * sg, 0, (-dx / l) * sg], PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, KERB);
+  }
+  const tr = triangulate(ring);
+  for (let i = 0; i < tr.indices.length; i += 3) {
+    const [A, B, C] = [0, 1, 2].map((k) => tr.points[tr.indices[i + k]]).map((p) => [p[0], yt, p[1]]);
+    w.tri(A, B, C, [0, 1, 0], PLAIN_UV, PLAIN_UV, PLAIN_UV, TOP);
+  }
+  for (const f of [0.35, 0.65]) {
+    const c = [a[0] + u[0] * L * f, a[1] + u[1] * L * f];
+    box(w, [c[0], yt + 0.005, c[1]], [u[0] * 2, 0, u[1] * 2], [0, 0.005, 0], [v[0] * 1, 0, v[1] * 1], GRATE);
+  }
+}
+
+// ---- ロータリーの島: 白いコンクリートの縁石、ばら色のレンガの低い擁壁、盛り土の植え込み（低木・小さな木）、鋼の門の彫刻
+function writeRoundabout(m, W, groundAt, colliders, onRoad, keepOut) {
+  const { x, z, radius: R } = m;
+  const y0 = groundAt(x, z);
+  const w = W.main, mt = W.metal;
+  const KERB = col('#d8d6d0'), SOIL = col('#4a3c2c'), SHRUB = [col('#333a1b'), col('#3d4622'), col('#2c3418')], STEEL = col('#737d83');
+  cylinder(w, x, z, R + 0.35, R + 0.35, y0 - 0.2, y0 + 0.15, { seg: 40, color: KERB });
+  annulus(w, x, z, R, R + 0.35, y0 + 0.15, 40, KERB);
+  cylinder(w, x, z, R, R, y0 + 0.15, y0 + 0.75, { seg: 40, cell: CELL.brick, cw: BRICK_CW, ch: BRICK_CW, color: col('#d6a088') });
+  annulus(w, x, z, R - 0.25, R, y0 + 0.75, 40, col('#b98a72'));
+  annulus(w, x, z, 0, R - 0.25, y0 + 0.65, 40, SOIL);
+  // 低木の塊（縁に沿って 2 重の輪）と小さな木 3 本
+  const rnd = mulberry32(4711);
+  for (const [rr, n] of [[R - 1.2, 18], [R - 3.4, 11]]) {
+    for (let k = 0; k < n; k++) {
+      const a = ((k + rnd() * 0.5) / n) * Math.PI * 2, r = rr + (rnd() - 0.5) * 0.8;
+      const sz = 0.8 + rnd() * 0.5;
+      blob(w, [x + Math.cos(a) * r, y0 + 0.65 + sz * 0.7, z + Math.sin(a) * r], [sz * 1.2, sz * 0.9, sz * 1.1], rnd() * 6, 8, 5, () => SHRUB[Math.floor(rnd() * 3)]);
+    }
+  }
+  for (let k = 0; k < 3; k++) {
+    const a = (k / 3) * Math.PI * 2 + 0.6, r = R * 0.5;
+    const tx = x + Math.cos(a) * r, tz = z + Math.sin(a) * r;
+    cylinder(w, tx, tz, 0.13, 0.1, y0 + 0.65, y0 + 3.4, { seg: 6, color: col('#5a4e44') });
+    blob(w, [tx, y0 + 5.0, tz], [2.0, 2.0, 2.0], rnd() * 6, 10, 6, () => col(['#4d5f2c', '#566a31', '#465a28'][Math.floor(rnd() * 3)]));
+  }
+  // 鋼の門の形の彫刻（2 本の柱と梁、断面 0.4 m 角）。向きは島の南北
+  const hw = 3.5, H = 6;
+  for (const sg of [-1, 1]) box(mt, [x + sg * hw, y0 + 0.65 + H / 2, z], [0.2, 0, 0], [0, H / 2, 0], [0, 0, 0.2], STEEL);
+  box(mt, [x, y0 + 0.65 + H - 0.2, z], [hw + 0.2, 0, 0], [0, 0.2, 0], [0, 0, 0.2], STEEL);
+  colliders.push([x, z, R + 0.35]);
+  keepOut.push([x, z, R + 0.6]);
+}
+
 // ---- 台座の上の立像（リケの像）: 花崗岩の島、2 段の台、モールディングの付いた台座、白い大理石のマントの立像
 function writeStatue(m, W, groundAt, colliders, onRoad, keepOut) {
   const { x, z } = m;
@@ -1604,7 +1681,7 @@ function writeStatue(m, W, groundAt, colliders, onRoad, keepOut) {
   keepOut.push([x, z, 6]);
 }
 
-const WRITERS = { portico: writePortico, donjon: writeDonjon, statue: writeStatue, dome: writeDome, chateau: writeChateau, stadium: writeStadium, cabanis: writeCabanis, coq: writeCoq, cross: writeCross, fastfood: writeFastfood, jgarden: writeJgarden, parterre: writeParterre };
+const WRITERS = { island: writeIsland, roundabout: writeRoundabout, portico: writePortico, donjon: writeDonjon, statue: writeStatue, dome: writeDome, chateau: writeChateau, stadium: writeStadium, cabanis: writeCabanis, coq: writeCoq, cross: writeCross, fastfood: writeFastfood, jgarden: writeJgarden, parterre: writeParterre };
 
 // 名所のモデルを作る。colliders: 足す当たり判定の円 [x, z, r] か線分 [ax, az, bx, bz]、
 // keepOut: 街の小物を置かない円 [x, z, r]（像の台・シャトー・ドーの柵の内側。monumentSolid）

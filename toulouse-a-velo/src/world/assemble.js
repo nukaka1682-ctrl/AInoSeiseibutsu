@@ -13,7 +13,7 @@ import { buildTerrainTile } from './terrainmesh.js';
 import { buildCoverMesh } from './cover.js';
 import { tileBounds, tileLayout } from '../data/tiles.js';
 import { buildTrees, fillParkTrees, planeTreeTest, streetTrees, treelessTest, magnoliaTest, liftQuayTrees } from './trees.js';
-import { buildEnclosures, clearRoads, projectTrees, projectWalls, tameWalls } from './enclosures.js';
+import { buildEnclosures, clearRoads, fixedWalls, projectTrees, projectWalls, tameWalls } from './enclosures.js';
 import { clearEntrances, entranceWalls, inEntrance, projectEntrances } from './metro.js';
 import { findTowers } from './towers.js';
 import { buildMonuments, findMonuments, monumentClearance, monumentSolid } from './monuments.js';
@@ -84,12 +84,13 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   progress('道路と川を作成中…', 0.15);
   await pause();
   // 塀（地籍の敷地の境界と LiDAR から見つけたもの）。歩道は建物の壁・塀まで延ばすので、地面より先に用意する
-  const walls = clearEntrances(clearRoads(tameWalls(projectWalls(data.walls || [], proj), parsed.buildings), (x, z) => roadnet.onRoad(x, z, 0.3)), projectEntrances(terrain.metroRaw || [], proj)); // 出入口の腰壁は塀にしない（地形の手直しはまだなので緯度経度から）
+  const walls = clearEntrances(clearRoads(tameWalls(projectWalls(data.walls || [], proj), parsed.buildings), (x, z) => roadnet.onRoad(x, z, 0.3)), projectEntrances(terrain.metroRaw || [], proj)).concat(fixedWalls(proj, rect)); // 出入口の腰壁は塀にしない（地形の手直しはまだなので緯度経度から）
   // 地面の覆い（500 m のブロックごと。fetch-data の bakeSite と同じ区切り）。覆いのある所の緑地は覆いにまかせる
   const layout = tileLayout(rect);
   const covers = (data.cover || []).map((c) => ({ c, b: tileBounds(layout, c.i, c.j) }));
   const inOldTown = oldTownTest(proj);
-  const ground = buildGround(parsed, rect, groundMats, { buildings: parsed.buildings, walls, inOldTown, covered: covers.map(({ b }) => b), terrain, layout, proj });
+  const inCore = historicCoreTest(proj); // 通りの石畳は右岸の歴史的な中心だけ（stream.js と同じ）
+  const ground = buildGround(parsed, rect, groundMats, { buildings: parsed.buildings, walls, inOldTown, inStreetOld: inCore, covered: covers.map(({ b }) => b), terrain, layout, proj });
   if (terrain.flat) {
     for (const { c, b } of covers) ground.group.add(buildCoverMesh(c, b, groundMats.cover, inOldTown, parsed));
   } else {
@@ -167,8 +168,8 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   const pad = 120;
   const onMonument = monumentSolid(mon.keepOut); // 雄鶏の像の台・シャトー・ドーの柵の内側には置かない
   const furniture = buildFurniture({
-    parsed, plan: planStreets(parsed, inOldTown), clip: { minX: rect.minX - pad, minZ: rect.minZ - pad, maxX: rect.maxX + pad, maxZ: rect.maxZ + pad },
-    curbs: ground.curbs, inOldTown: historicCoreTest(proj), heightAt: liftAt, terrain, onRoad: (x, z, m) => roadnet.onRoad(x, z, m),
+    parsed, plan: planStreets(parsed, inCore), clip: { minX: rect.minX - pad, minZ: rect.minZ - pad, maxX: rect.maxX + pad, maxZ: rect.maxZ + pad },
+    curbs: ground.curbs, inOldTown: inCore, heightAt: liftAt, terrain, onRoad: (x, z, m) => roadnet.onRoad(x, z, m),
     solid: (x, z) => insideBuilding(x, z) || inWater(x, z) || onMonument(x, z), trunks: trees.userData.trunks,
   }, collision);
   group.add(furniture.group);

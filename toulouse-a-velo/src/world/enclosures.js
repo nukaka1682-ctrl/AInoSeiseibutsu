@@ -107,6 +107,25 @@ export function projectTrees(trees, proj) {
   });
 }
 
+// 写真で決まる塀（データにない擁壁など）: [緯度, 経度] の折れ線と高さ・面。利用者の写真 225015・224901:
+// Rue Laganne の東の歩道沿いの、Cours Dillon を支える高さ約 3.2 m の漆喰の擁壁（上に Cours Dillon のプラタナス）
+const FIXED_WALLS = [
+  { pts: [[43.595281, 1.435751], [43.5945, 1.435416], [43.594186, 1.43528], [43.593359, 1.434932], [43.593153, 1.434846]], h: 3.2, kind: 'render' },
+];
+// 範囲 bounds に中点が入る区間を [ax, az, bx, bz, h, kind] にして返す
+export function fixedWalls(proj, bounds = null) {
+  const out = [];
+  for (const w of FIXED_WALLS) {
+    const p = w.pts.map(([lat, lon]) => proj.project(lat, lon));
+    for (let i = 0; i + 1 < p.length; i++) {
+      const mx = (p[i][0] + p[i + 1][0]) / 2, mz = (p[i][1] + p[i + 1][1]) / 2;
+      if (bounds && !(mx >= bounds.minX && mx < bounds.maxX && mz >= bounds.minZ && mz < bounds.maxZ)) continue;
+      out.push([p[i][0], p[i][1], p[i + 1][0], p[i + 1][1], w.h, w.kind]);
+    }
+  }
+  return out;
+}
+
 // 塀のメッシュ（materials は buildings.js の enclosureBrick・enclosureRender）。collision があれば当たり判定を足す
 // terrain: 地形（塀を地面に沿わせる。y は地面からの高さ）
 export function buildEnclosures(segs, materials, collision = null, terrain = null) {
@@ -114,21 +133,23 @@ export function buildEnclosures(segs, materials, collision = null, terrain = nul
   const brick = new MeshWriter(o), render = new MeshWriter(o), cap = new MeshWriter(o);
   const sloped = terrain && !terrain.flat;
   const plain = sloped ? { brick: new MeshWriter(), render: new MeshWriter(), cap: new MeshWriter(), fill: new MeshWriter() } : null;
-  for (const [ax, az, bx, bz, h] of segs) {
+  for (const [ax, az, bx, bz, h, kind] of segs) {
     const L = Math.hypot(bx - ax, bz - az);
     if (L < 0.5) continue;
+    // 塀の面: kind（'render' | 'brick'）が決まっていなければ 4 本に 3 本はレンガ
+    const pick = (seed) => (kind ? kind === 'render' : hash01(seed, 1) >= 0.75);
     if (sloped) {
       // 地形の上: 地面にそのまま沿わせると、段差（河岸・土手）を斜めに横切る塀の上端が 5 m の格子ごとにのこぎりの歯になる。
       // 上端はなめらかな線（wallProfile）、下端は地面より下まで（地面に隠れる）の普通の面で作る
       const seed = Math.floor(ax * 3.1) * 7919 + Math.floor(az * 2.3);
-      writeSlopedWall(hash01(seed, 1) < 0.75 ? plain.brick : plain.render, plain.cap, wallProfile(terrain, ax, az, bx, bz, h), seed, plain.fill);
+      writeSlopedWall(pick(seed) ? plain.render : plain.brick, plain.cap, wallProfile(terrain, ax, az, bx, bz, h), seed, plain.fill);
       if (collision) collision.addSegment(ax, az, bx, bz);
       continue;
     }
     const ux = (bx - ax) / L, uz = (bz - az) / L;
     const nx = -uz * (THICK / 2), nz = ux * (THICK / 2);
     const seed = Math.floor(ax * 3.1) * 7919 + Math.floor(az * 2.3);
-    const w = hash01(seed, 1) < 0.75 ? brick : render;
+    const w = pick(seed) ? render : brick;
     const k = 0.9 + hash01(seed, 2) * 0.15;
     const color = [k, k * (0.97 + hash01(seed, 3) * 0.03), k * (0.94 + hash01(seed, 4) * 0.06)];
     const u0 = hash01(seed, 5) * 4; // 塀ごとにテクスチャの位置をずらす

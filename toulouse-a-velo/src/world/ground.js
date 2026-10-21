@@ -964,7 +964,7 @@ function* groundDetailSteps(parsed, clip, mats, waterDepthAt, opts) {
     if (!w) writers.set(k, (w = { order, tex, set, w: new MeshWriter({ drape: terrain, lift: set === 'flat' ? DRAPE_LIFT : 0.03 }) }));
     return w.w;
   };
-  const plan = planStreets(parsed, opts.inOldTown);
+  const plan = planStreets(parsed, opts.inStreetOld || opts.inOldTown); // 通りの石畳（右岸の歴史的な中心）
   const clipRect = [clip.minX, clip.minZ, clip.maxX, clip.maxZ];
   const overlaps = (b) => b.maxX > clip.minX && b.minX < clip.maxX && b.maxZ > clip.minZ && b.minZ < clip.maxZ;
 

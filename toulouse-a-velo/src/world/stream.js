@@ -9,7 +9,7 @@ import { CAR_ROADS, parseOsm } from './parse.js';
 import { loadTileData, tileAt, tileBounds, tileLayout } from '../data/tiles.js';
 import { buildBuildings } from './buildings.js';
 import { buildTrees, fillParkTrees, planeTreeTest, streetTrees, treelessTest, magnoliaTest, liftQuayTrees } from './trees.js';
-import { buildEnclosures, clearRoads, projectTrees, projectWalls, tameWalls } from './enclosures.js';
+import { buildEnclosures, clearRoads, fixedWalls, projectTrees, projectWalls, tameWalls } from './enclosures.js';
 import { clearEntrances, entranceWalls, inEntrance } from './metro.js';
 import { findCapitoleFacade, markBrickSites, markStreetStyles } from './landmarkfacades.js';
 import { findTowers } from './towers.js';
@@ -60,12 +60,14 @@ export async function assembleStreamWorld({ base, bbox, presetId, buildingMats, 
   const onDeck = makeDeckTest(parsed.roads); // 橋の上は欄干まで走れる
   const collision = new StreamCollision(rect, inWater, (x, z) => onRoad(x, z) || onDeck(x, z));
   const inOldTown = oldTownTest(proj);
-  planStreets(parsed, inOldTown); // 通りの種類・交差点・横断歩道（エリアで 1 回）
+  // 通りの石畳・段差のない通りは右岸の歴史的な中心だけ（利用者の写真: 左岸のサン・シプリアンの通りはアスファルト）
+  const inCore = historicCoreTest(proj);
+  planStreets(parsed, inCore); // 通りの種類・交差点・横断歩道（エリアで 1 回）
   // 並木道（IGN のデータには個々の木がないので、LiDAR の木がないタイルで使う）
   const avenues = parsed.roads.filter((r) => CAR_ROADS.has(r.type) || r.type === 'pedestrian');
 
   const streamer = new TileStreamer({
-    presetId, bbox, rect, proj, layout, parsed, roadnet, inWater, onRoad, avenues, inOldTown, inCore: historicCoreTest(proj),
+    presetId, bbox, rect, proj, layout, parsed, roadnet, inWater, onRoad, avenues, inOldTown, inCore,
     materials: buildingMats, groundMats, waterDepthAt: ground.waterDepthAt, bankTrees: ground.bankTrees || [], collision, group,
     terrain, far: ground.far, quayCentre: proj.project(43.5994, 1.4364),
   });
@@ -203,12 +205,12 @@ class TileStreamer {
     const context = parseOsm(data.ctx, this.proj, this.rect, []).buildings;
     const group = new THREE.Group();
     group.name = `tile-${t.key}`;
-    const walls = clearEntrances(clearRoads(tameWalls(projectWalls(data.walls, this.proj), buildings.concat(context)), (x, z) => this.roadnet.onRoad(x, z, 0.3)), this.terrain.metro || []);
+    const walls = clearEntrances(clearRoads(tameWalls(projectWalls(data.walls, this.proj), buildings.concat(context)), (x, z) => this.roadnet.onRoad(x, z, 0.3)), this.terrain.metro || []).concat(fixedWalls(this.proj, B));
 
     // 地面（地面の覆い・緑地・道路・歩道・線路・橋）。覆いのあるタイルでは、緑地は覆い（芝生・木の下）にまかせる。
     // 歩道はこのタイルと隣のタイルの境近くの建物・塀の壁まで延ばす。歩道の計算は重いので、道ごとに区切ってフレームに譲りながら作る
     const T = this.terrain;
-    const ground = await buildGroundDetailAsync(this.parsed, B, this.groundMats, this.waterDepthAt, { buildings: buildings.concat(context), walls, inOldTown: this.inOldTown, covered: data.cover ? [B] : [], terrain: T }, pause);
+    const ground = await buildGroundDetailAsync(this.parsed, B, this.groundMats, this.waterDepthAt, { buildings: buildings.concat(context), walls, inOldTown: this.inOldTown, inStreetOld: this.inCore, covered: data.cover ? [B] : [], terrain: T }, pause);
     // 地形: タイルの地面（地面の覆いは同じ三角形に描く）
     const tile = T.flat ? null : buildTerrainTile(T, B, this.groundMats, { quayCentre: this.quayCentre, inWater: this.inWater });
     if (tile) ground.group.add(tile.group);
@@ -305,7 +307,7 @@ class TileStreamer {
     // 雄鶏の像の台・シャトー・ドーの柵の内側、隣のタイルの建物（タイルの境の歩道）には置かない
     const onMonument = monumentSolid(mon.keepOut);
     const furniture = buildFurniture({
-      parsed: this.parsed, plan: planStreets(this.parsed, this.inOldTown), clip: B, curbs: ground.streetStats.curbs, inOldTown: this.inCore,
+      parsed: this.parsed, plan: planStreets(this.parsed, this.inCore), clip: B, curbs: ground.streetStats.curbs, inOldTown: this.inCore,
       heightAt: ground.heightAt, terrain: T, onRoad: (x, z, m) => this.roadnet.onRoad(x, z, m), solid: (x, z) => insideBuilding(x, z) || insideContext(x, z) || this.inWater(x, z) || onMonument(x, z), trunks: trees.userData.trunks,
     }, cw);
     furniture.cull(this.focus[0], this.focus[1], true);
