@@ -74,6 +74,24 @@ export function planeTreeTest(roadnet, inWater) {
   };
 }
 
+// 常緑のタイサンボク（Magnolia grandiflora）の並木（利用者の Street View: Allées Roosevelt の 2 列）。通りの中心線から
+// MAGNOLIA_REACH m 以内の木。樹冠は低く（下枝 2.5 m 前後）、密で、つやのある暗い緑。幹は細く滑らかな灰色
+const MAGNOLIA_STREETS = /^All[ée]es du Pr[ée]sident Franklin Roosevelt$/i;
+const MAGNOLIA_REACH = 16;
+export function magnoliaTest(roads) {
+  const segs = [];
+  for (const r of roads) {
+    if (!MAGNOLIA_STREETS.test(r.name || '')) continue;
+    for (let i = 0; i + 1 < r.pts.length; i++) segs.push([...r.pts[i], ...r.pts[i + 1]]);
+  }
+  if (!segs.length) return () => false;
+  return (x, z) => segs.some(([ax, az, bx, bz]) => {
+    const dx = bx - ax, dz = bz - az, L2 = dx * dx + dz * dz || 1;
+    const t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / L2));
+    return (ax + dx * t - x) ** 2 + (az + dz * t - z) ** 2 < MAGNOLIA_REACH ** 2;
+  });
+}
+
 // 木のない広場（利用者の写真: キャピトル広場には木がない。LiDAR が街灯・日よけ・パラソルを木と見てしまう）
 const TREELESS_PLAZAS = /^Place du Capitole$/i;
 export function treelessTest(areas) {
@@ -249,16 +267,17 @@ function lumpyDepthMaterial() {
 const LEAF = {
   plane: ['#667a38', '#6f823e', '#5e7233', '#768a44', '#6a7e3b'],
   other: ['#5b7034', '#667a3a', '#52682f', '#6d7c3d', '#587036', '#5f7440', '#737c37', '#4f6033'],
+  magnolia: ['#46552a', '#4f5e2c', '#5a6630', '#4a5928'], // 写真 #4f5a2a〜#7e784d（日なたの上は黄緑）
 };
 // 幹の色（樹皮の模様に掛ける）: プラタナスはまだらな樹皮をそのまま、ほかの木は暗い灰褐色
-const BARK_TINT = { plane: '#ffffff', other: '#7a6c5e' };
+const BARK_TINT = { plane: '#ffffff', other: '#7a6c5e', magnolia: '#85837e' };
 
 let barkTexture = null;
 
 // points: [x, z]（大きさは推定）か { x, z, y, h, r }（LiDAR で測った高さと枝の広がり）。
 // isPlane(x, z): プラタナス（まだらな樹皮・オリーブ色の葉）にする場所、canPlace(x, z): 塊を分けた木を置ける場所。
 // group.userData.trunks に、実際に幹を立てた位置（当たり判定用）を入れる
-export function buildTrees(points, { isPlane = () => false, canPlace = () => true, groundH = null } = {}) {
+export function buildTrees(points, { isPlane = () => false, isMagnolia = () => false, canPlace = () => true, groundH = null } = {}) {
   const src = points.length > MAX_TREES ? points.filter((_, i) => i % Math.ceil(points.length / MAX_TREES) === 0) : points;
   const trees = shapeTrees(src, canPlace, groundH);
   const n = trees.length;
@@ -283,11 +302,19 @@ export function buildTrees(points, { isPlane = () => false, canPlace = () => tru
   const Y = new THREE.Vector3(0, 1, 0);
   for (let i = 0; i < n; i++) {
     const t = trees[i];
-    const kind = isPlane(t.x, t.z) ? 'plane' : 'other';
+    const kind = isMagnolia(t.x, t.z) ? 'magnolia' : isPlane(t.x, t.z) ? 'plane' : 'other';
+    if (kind === 'magnolia') {
+      // 低い下枝（2.6 m）から木の高さまでの、細めの卵形の樹冠
+      const top = t.crownY + t.crownH;
+      t.r = Math.min(t.r, 3.4);
+      t.crownH = Math.max(t.r, (top - 2.6) / 2);
+      t.crownY = top - t.crownH;
+      t.trunkH = Math.max(1.2, t.crownY - t.crownH * 0.6);
+    }
     q.setFromAxisAngle(Y, hash01(t.seed, 3) * Math.PI * 2);
     // 幹は分かれ目が樹冠の中に隠れる高さまで。太さは木ごとに少し変える
     const th = t.trunkH + t.crownH * 0.55;
-    const thick = (0.85 + hash01(t.seed, 6) * 0.4) * (kind === 'plane' ? 1.15 : 1);
+    const thick = (0.85 + hash01(t.seed, 6) * 0.4) * (kind === 'plane' ? 1.15 : kind === 'magnolia' ? 0.75 : 1);
     m.compose(p.set(t.x, t.y, t.z), q, s.set(th * thick, th, th * thick));
     trunks.setMatrixAt(i, m);
     trunks.setColorAt(i, col.set(BARK_TINT[kind]));

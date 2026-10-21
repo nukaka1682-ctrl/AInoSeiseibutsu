@@ -26,6 +26,13 @@ export const MONUMENTS = [
   // ラ・グラーヴの円屋根（Chapelle Saint-Joseph de la Grave。利用者の写真 NCM_0102・0105・0107）: 礼拝堂の建物の上に、
   // 直径約 19 m のレンガのドラム（高さ約 25 m まで）と鉛色のドーム（約 38 m）、頂塔と十字架（約 44 m）
   { id: 'grave-dome', kind: 'dome', lat: 43.60082, lon: 1.43301, r: 25 },
+  // キャピトルの主塔（Donjon du Capitole。利用者の Street View 211806）: 淡いクリーム色の壁（約 18 m）、出し狭間の帯と
+  // 狭間のある胸壁、急なスレートの寄棟屋根に時計の屋根窓、正面の角に円錐の屋根の小塔 2 つ、真ん中に八角形の鐘楼と尖塔（約 40 m）。
+  // front: 正面（時計）が向く先（Square Charles-de-Gaulle）
+  { id: 'donjon', kind: 'donjon', lat: 43.60442, lon: 1.44478, r: 12, front: [43.60448, 1.44508] },
+  // リケの像（Monument à Pierre-Paul Riquet。利用者の写真 212520）: ジャン・ジョレス通りの北東の端、運河の手前。
+  // 淡い灰色の花崗岩の島に、2 段の台・石灰岩の台座（3 m 角・4.5 m）と白い大理石の立像（約 3.5 m）
+  { id: 'riquet', kind: 'statue', lat: 43.60906, lon: 1.45389, facing: [43.6061, 1.4490] },
   // front: 道路の側（ガラスの面と看板が向く先）。pylon: 道端の看板塔。gravel: 白い砂利の植え込み、mulch: その中の木のチップの島
   // [緯度, 経度, 半径 m]（航空写真 2024 から）
   {
@@ -309,6 +316,22 @@ export function findMonuments(proj, { buildings = [], areas = [], facade = null,
       }
       if (!best) continue;
       out.push({ spec, kind: 'dome', x, z, base: best.b.info.height || 14, replaced: [] });
+    } else if (spec.kind === 'donjon') {
+      let best = null;
+      for (const b of buildings) {
+        const d = Math.hypot(b.inside[0] - x, b.inside[1] - z);
+        if (d > spec.r || b.info.area < 80 || b.info.area > 500) continue;
+        if (!best || d < best.d) best = { b, d };
+      }
+      if (!best) continue;
+      const ob = orientedBox(best.b.outer);
+      const [fx, fz] = proj.project(...spec.front);
+      const fl = Math.hypot(fx - ob.cx, fz - ob.cz) || 1;
+      out.push({ spec, kind: 'donjon', ...ob, front: [(fx - ob.cx) / fl, (fz - ob.cz) / fl], replaced: [best.b] });
+    } else if (spec.kind === 'statue') {
+      if (!inB(x, z)) continue;
+      const [fx, fz] = proj.project(...spec.facing);
+      out.push({ spec, kind: 'statue', x, z, angle: Math.atan2(fz - z, fx - x), replaced: [] });
     } else if (spec.kind === 'stadium') {
       const b = buildings.find((q) => q.info.area > 5000 && Math.hypot(centroid(q.outer)[0] - x, centroid(q.outer)[1] - z) < spec.r);
       if (!b) continue;
@@ -1405,7 +1428,122 @@ function writeDome(m, W, groundAt) {
   box(mt, [x, yc + 1.4, z], [0.45, 0, 0], [0, 0.07, 0], [0, 0, 0.07], col('#3a3a38'));
 }
 
-const WRITERS = { dome: writeDome, chateau: writeChateau, stadium: writeStadium, cabanis: writeCabanis, coq: writeCoq, cross: writeCross, fastfood: writeFastfood, jgarden: writeJgarden, parterre: writeParterre };
+// ---- キャピトルの主塔
+function writeDonjon(m, W, groundAt, colliders) {
+  const { cx, cz, e1, e2, a, b } = m;
+  const y0 = groundAt(cx, cz) - 0.3, H = 18, yM = y0 + H, yP = yM + 1.4;
+  const w = W.main, mt = W.metal;
+  const STONE = col('#e8dfd0'), SHADE = col('#cfc5b4'), DARK = col('#2c2826'), SLATE = col('#64666a'), WHITE_C = col('#f4f1ea');
+  const P = (u, v, y) => [cx + e1[0] * u + e2[0] * v, y, cz + e1[1] * u + e2[1] * v];
+  const E1 = (h) => [e1[0] * h, 0, e1[1] * h], E2 = (h) => [e2[0] * h, 0, e2[1] * h], EY = (h) => [0, h, 0];
+  // 塔の体と、少し張り出した出し狭間の帯、狭間のある胸壁
+  box(w, [cx, (y0 + yM) / 2, cz], E1(a), EY((yM - y0) / 2), E2(b), STONE);
+  box(w, [cx, yM + 0.7, cz], E1(a + 0.4), EY(0.7), E2(b + 0.4), SHADE);
+  // 四つの面: 外向きの法線 n・面に沿った向き t・面の半分の幅 hw・中心からの距離 d
+  const sides = [[e1, e2, b, a], [[-e1[0], -e1[1]], e2, b, a], [e2, e1, a, b], [[-e2[0], -e2[1]], e1, a, b]];
+  for (const [n, t, hw, d] of sides) {
+    const N = [n[0], 0, n[1]];
+    // 出し狭間の持ち送りのあいだの暗いすき間
+    for (let o = -hw - 0.2; o <= hw + 0.2; o += 0.9) {
+      vpoly(w, [cx + n[0] * (d + 0.41) + t[0] * o, cz + n[1] * (d + 0.41) + t[1] * o], t, [[-0.25, yM], [0.25, yM], [0.25, yM + 0.5], [-0.25, yM + 0.5]], N, DARK);
+    }
+    // 胸壁の凸部
+    for (let o = -hw; o <= hw + 0.01; o += 1.6) {
+      const q = [cx + n[0] * (d + 0.25) + t[0] * o, cz + n[1] * (d + 0.25) + t[1] * o];
+      box(w, [q[0], yP + 0.5, q[1]], [t[0] * 0.4, 0, t[1] * 0.4], EY(0.5), [n[0] * 0.15, 0, n[1] * 0.15], STONE);
+    }
+    // 小さな窓（2 つずつ、4 段）
+    for (const yw of [y0 + 4.5, y0 + 8.5, y0 + 12.5, y0 + 15.5]) {
+      for (const o of [-hw * 0.45, hw * 0.45]) {
+        for (const dx of [-0.45, 0.45]) {
+          vpoly(w, [cx + n[0] * (d + 0.05) + t[0] * (o + dx), cz + n[1] * (d + 0.05) + t[1] * (o + dx)], t, [[-0.3, yw], [0.3, yw], [0.3, yw + 1.3], [-0.3, yw + 1.3]], N, DARK);
+        }
+      }
+    }
+  }
+  // 急なスレートの寄棟屋根（棟は長い辺の向き）
+  const A = a - 0.15, B = b - 0.15, yR = yP + B * 1.45, ra = Math.max(0.5, A - B);
+  const face = (pts, n) => {
+    for (let i = 1; i + 1 < pts.length; i++) mt.tri(pts[0], pts[i], pts[i + 1], n, PLAIN_UV, PLAIN_UV, PLAIN_UV, SLATE);
+  };
+  const nrm = (p, q, r) => {
+    const u = [q[0] - p[0], q[1] - p[1], q[2] - p[2]], v = [r[0] - p[0], r[1] - p[1], r[2] - p[2]];
+    const c = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+    const l = Math.hypot(...c) || 1;
+    return c[1] < 0 ? [-c[0] / l, -c[1] / l, -c[2] / l] : [c[0] / l, c[1] / l, c[2] / l];
+  };
+  const c00 = P(-A, -B, yP), c10 = P(A, -B, yP), c11 = P(A, B, yP), c01 = P(-A, B, yP), r0 = P(-ra, 0, yR), r1 = P(ra, 0, yR);
+  for (const f of [[c00, c10, r1, r0], [c11, c01, r0, r1], [c10, c11, r1], [c01, c00, r0]]) face(f, nrm(f[0], f[1], f[2]));
+  // 時計の屋根窓（正面の側の屋根の真ん中）
+  const fs = sides.reduce((best, sd) => (sd[0][0] * m.front[0] + sd[0][1] * m.front[1] > best[0][0] * m.front[0] + best[0][1] * m.front[1] ? sd : best));
+  {
+    const [n, t, , d] = fs;
+    const N = [n[0], 0, n[1]];
+    const q = [cx + n[0] * (d - 0.6), cz + n[1] * (d - 0.6)];
+    box(w, [q[0], yP + 1.3, q[1]], [t[0] * 1.3, 0, t[1] * 1.3], EY(1.3), [n[0] * 0.6, 0, n[1] * 0.6], STONE);
+    vpoly(mt, [q[0] + n[0] * 0.61, q[1] + n[1] * 0.61], t, [[-1.45, yP + 2.6], [1.45, yP + 2.6], [0, yP + 4.0]], N, SLATE);
+    for (let k = 0; k < 16; k++) {
+      const a0 = (k / 16) * Math.PI * 2, a1 = ((k + 1) / 16) * Math.PI * 2;
+      vpoly(w, [q[0] + n[0] * 0.62, q[1] + n[1] * 0.62], t, [[0, yP + 1.35], [Math.cos(a0) * 0.85, yP + 1.35 + Math.sin(a0) * 0.85], [Math.cos(a1) * 0.85, yP + 1.35 + Math.sin(a1) * 0.85]], N, k % 4 === 0 ? DARK : WHITE_C);
+    }
+  }
+  // 正面の角の小塔（持ち送りの上の円筒と円錐の屋根）
+  for (const sv of [-1, 1]) {
+    const [n, t, hw, d] = fs;
+    const q = [cx + n[0] * (d + 0.3) + t[0] * (hw + 0.3) * sv, cz + n[1] * (d + 0.3) + t[1] * (hw + 0.3) * sv];
+    cylinder(w, q[0], q[1], 0.3, 1.25, yM - 4.5, yM - 2.5, { seg: 12, color: STONE });
+    cylinder(w, q[0], q[1], 1.25, 1.25, yM - 2.5, yP + 1.0, { seg: 12, color: STONE });
+    cylinder(mt, q[0], q[1], 1.45, 0.02, yP + 1.0, yP + 6.0, { seg: 12, color: SLATE });
+  }
+  // 真ん中の八角形の鐘楼（アーチの開口）と尖塔、頂の飾り
+  const yb = yR - 0.8;
+  cylinder(w, cx, cz, 1.7, 1.7, yb, yb + 4.2, { seg: 8, color: STONE });
+  for (let k = 0; k < 8; k++) {
+    const an = ((k + 0.5) / 8) * Math.PI * 2;
+    const n = [Math.cos(an), 0, Math.sin(an)], t = [-Math.sin(an), Math.cos(an)];
+    const rr = 1.7 * Math.cos(Math.PI / 8) + 0.03;
+    vpoly(w, [cx + n[0] * rr, cz + n[2] * rr], t, archShape(0.8, 2.2, yb + 1.3, 6), n, DARK);
+  }
+  annulus(w, cx, cz, 0, 1.95, yb + 4.2, 8, SHADE, false);
+  cylinder(w, cx, cz, 1.95, 1.95, yb + 4.2, yb + 4.5, { seg: 8, color: SHADE });
+  cylinder(mt, cx, cz, 1.85, 0.03, yb + 4.5, yb + 11.5, { seg: 8, color: SLATE });
+  box(mt, [cx, yb + 12.2, cz], [0.05, 0, 0], [0, 0.8, 0], [0, 0, 0.05], DARK);
+  for (const [p, q] of [[P(-a, -b, 0), P(a, -b, 0)], [P(a, -b, 0), P(a, b, 0)], [P(a, b, 0), P(-a, b, 0)], [P(-a, b, 0), P(-a, -b, 0)]]) colliders.push([p[0], p[2], q[0], q[2]]);
+}
+
+// ---- 台座の上の立像（リケの像）: 花崗岩の島、2 段の台、モールディングの付いた台座、白い大理石のマントの立像
+function writeStatue(m, W, groundAt, colliders, onRoad, keepOut) {
+  const { x, z } = m;
+  const y0 = groundAt(x, z);
+  const w = W.main;
+  const GRANITE = col('#acacac'), LIME = col('#d3cbbd'), LIME_D = col('#bdb4a5'), MARBLE = col('#e2ded6');
+  const c = Math.cos(m.angle), s = Math.sin(m.angle);
+  const ex = (h) => [c * h, 0, s * h], ez = (h) => [-s * h, 0, c * h], ey = (h) => [0, h, 0];
+  // 花崗岩の島（低い円）
+  cylinder(w, x, z, 6, 6, y0 - 0.3, y0 + 0.12, { seg: 28, color: GRANITE });
+  annulus(w, x, z, 0, 6, y0 + 0.12, 28, GRANITE);
+  // 2 段の台と台座
+  const step = (half, y1, y2, color) => box(w, [x, (y1 + y2) / 2, z], ex(half), ey((y2 - y1) / 2), ez(half), color);
+  step(2.1, y0 + 0.12, y0 + 0.5, LIME_D);
+  step(1.8, y0 + 0.5, y0 + 0.9, LIME_D);
+  step(1.55, y0 + 0.9, y0 + 1.5, LIME);
+  step(1.35, y0 + 1.5, y0 + 4.6, LIME);
+  step(1.55, y0 + 4.6, y0 + 5.0, LIME); // 軒のモールディング
+  step(1.3, y0 + 5.0, y0 + 5.4, LIME_D);
+  // 正面の銘板（暗い石）
+  box(w, [x + c * 1.37, y0 + 3.0, z + s * 1.37], ex(0.03), ey(0.8), ez(0.9), col('#8d857a'));
+  // 立像: 足元の台、マントの体（だ円体を 2 つ）、頭、前に出した腕
+  const yb = y0 + 5.4;
+  box(w, [x, yb + 0.15, z], ex(0.7), ey(0.15), ez(0.7), MARBLE);
+  blob(w, [x, yb + 1.25, z], [0.55, 1.15, 0.5], -m.angle, 10, 6, () => MARBLE);
+  blob(w, [x, yb + 2.35, z], [0.5, 0.55, 0.42], -m.angle, 10, 6, () => MARBLE);
+  blob(w, [x, yb + 3.15, z], [0.2, 0.25, 0.2], 0, 8, 5, () => MARBLE);
+  blob(w, [x + c * 0.45 + -s * 0.3, yb + 2.45, z + s * 0.45 + c * 0.3], [0.45, 0.13, 0.13], -m.angle, 8, 4, () => MARBLE);
+  colliders.push([x, z, 2.3]);
+  keepOut.push([x, z, 6]);
+}
+
+const WRITERS = { donjon: writeDonjon, statue: writeStatue, dome: writeDome, chateau: writeChateau, stadium: writeStadium, cabanis: writeCabanis, coq: writeCoq, cross: writeCross, fastfood: writeFastfood, jgarden: writeJgarden, parterre: writeParterre };
 
 // 名所のモデルを作る。colliders: 足す当たり判定の円 [x, z, r] か線分 [ax, az, bx, bz]、
 // keepOut: 街の小物を置かない円 [x, z, r]（像の台・シャトー・ドーの柵の内側。monumentSolid）

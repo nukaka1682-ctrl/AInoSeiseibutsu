@@ -58,6 +58,9 @@ const PLAZA_SURFACES = [
   { match: /^Place du Capitole$/i, tex: 'capitole', uv: 8, color: c3('#ffffff') },
 ];
 const namedSurface = (area) => PLAZA_SURFACES.find((p) => p.match.test(area.name || ''));
+// 壁から壁まで石の板の並木道（利用者の Street View 212222・212248: Allées Roosevelt は車の通らない、淡いばら色がかった
+// ベージュの石の板 #d8c8bb〜#e8dfd6 の広場。真ん中の道は streets.js で同じ石の板）。中心線から half m の帯
+const SLAB_ALLEES = [{ name: /^All[ée]es du Pr[ée]sident Franklin Roosevelt$/i, half: 14, color: c3('#f0e2d8') }];
 export function plazaSurface(area, inOldTown = () => false) {
   const s = namedSurface(area);
   if (s) return s;
@@ -990,6 +993,17 @@ function* groundDetailSteps(parsed, clip, mats, waterDepthAt, opts) {
         writeFlatPolygon(W(ORDER.plaza, s.tex), outer, holes, 0, s.uv, s.color);
       } else if (a.type === 'parking') writeFlatPolygon(W(ORDER.parking, 'asphalt'), outer, holes, 0, 4, c3('#d0d0d0'));
       else writeFlatPolygon(W(ORDER.green, 'grass'), outer, holes, 0, 6, GREEN_COLOR[a.type] || GREEN_COLOR.grass);
+    }
+  }
+  // ---- 石の板の並木道 ----
+  for (const road of parsed.roads) {
+    const sa = !road.tunnel && !road.bridge && SLAB_ALLEES.find((a) => a.name.test(road.name || ''));
+    if (!sa) continue;
+    for (const pts of clipPolylineToRect(road.pts, ...clipRect)) {
+      const w = W(ORDER.plaza, 'slabs');
+      writeRibbon(w, pts, sa.half, 0, sa.color, 2.4);
+      writeDisc(w, pts[0], sa.half, 0, sa.color, 2.4, 16);
+      writeDisc(w, pts[pts.length - 1], sa.half, 0, sa.color, 2.4, 16);
     }
   }
   // ---- 道路 ----

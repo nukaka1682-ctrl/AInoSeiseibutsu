@@ -58,6 +58,8 @@ export function classifyStreet(road, old) {
   const h = strHash(road.name || `#${road.id}`);
   const near = NEAR_TYPES.has(t) || road.bridge;
   if (road.bridge) return { kind: 'bridge', band: road.width / 2 + (car ? 2 : 0.3), near };
+  // 車の通らない石の板の並木道（Allées Roosevelt。ground.js の SLAB_ALLEES）: 真ん中の道も段差のない石の板
+  if (/^All[ée]es du Pr[ée]sident Franklin Roosevelt$/i.test(road.name || '')) return { kind: 'shared', slabs: true, band: road.width / 2 + 1.2, gutter: null, near };
   if (old && (t === 'pedestrian' || t === 'living_street') && road.width > 6.5) {
     // 旧市街の広い歩行者の通り（Rue d'Alsace-Lorraine・Rue de la Pomme の広い所）: 壁から壁まで段差のない石の板、
     // 真ん中に 2 列の石の側溝

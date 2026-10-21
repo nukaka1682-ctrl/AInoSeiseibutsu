@@ -12,7 +12,7 @@ import { FLAT_TERRAIN, surfaceFns } from './terrain.js';
 import { buildTerrainTile } from './terrainmesh.js';
 import { buildCoverMesh } from './cover.js';
 import { tileBounds, tileLayout } from '../data/tiles.js';
-import { buildTrees, fillParkTrees, planeTreeTest, streetTrees, treelessTest } from './trees.js';
+import { buildTrees, fillParkTrees, planeTreeTest, streetTrees, treelessTest, magnoliaTest } from './trees.js';
 import { buildEnclosures, clearRoads, projectTrees, projectWalls, tameWalls } from './enclosures.js';
 import { clearEntrances, entranceWalls, inEntrance, projectEntrances } from './metro.js';
 import { findTowers } from './towers.js';
@@ -152,6 +152,7 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   // 街路・運河沿いはプラタナス。横に広い LiDAR の塊を分けた木は、道路・水・建物の上には置かない
   const trees = buildTrees(treePts, {
     isPlane: planeTreeTest(roadnet, inWater),
+    isMagnolia: magnoliaTest(parsed.roads),
     canPlace: (x, z) => !roadnet.onRoad(x, z, 0.3) && !inWater(x, z) && !insideBuilding(x, z),
     groundH: (x, z) => terrain.top(x, z),
   });
