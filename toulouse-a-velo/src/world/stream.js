@@ -11,7 +11,7 @@ import { buildBuildings } from './buildings.js';
 import { buildTrees, fillParkTrees, planeTreeTest, streetTrees, treelessTest } from './trees.js';
 import { buildEnclosures, clearRoads, projectTrees, projectWalls, tameWalls } from './enclosures.js';
 import { clearEntrances, entranceWalls, inEntrance } from './metro.js';
-import { findCapitoleFacade, markBrickSites, markHaussmann } from './landmarkfacades.js';
+import { findCapitoleFacade, markBrickSites, markStreetStyles } from './landmarkfacades.js';
 import { findTowers } from './towers.js';
 import { buildMonuments, findMonuments, monumentClearance, monumentSolid } from './monuments.js';
 import { areaFrame, makeSurfaceAt } from './assemble.js';
@@ -221,7 +221,7 @@ class TileStreamer {
     const facade = findCapitoleFacade({ areas: this.parsed.areas, buildings });
     const towers = findTowers(this.proj, buildings);
     markBrickSites(this.proj, buildings, this.parsed.areas);
-    markHaussmann(buildings, this.parsed.roads);
+    markStreetStyles(buildings, this.parsed.roads);
     // 名所の専用モデル（シャトー・ドー・スタディアム・カバニス・雄鶏の像・オクシタン十字）。置き換える外形は描かない
     // （当たり判定は元の外形のまま。カバニスの中央の開口の下だけは通り抜けられる）
     const onCarRoad = (x, z) => this.roadnet.onRoad(x, z, 0.3);

@@ -17,7 +17,7 @@ import { buildEnclosures, clearRoads, projectTrees, projectWalls, tameWalls } fr
 import { clearEntrances, entranceWalls, inEntrance, projectEntrances } from './metro.js';
 import { findTowers } from './towers.js';
 import { buildMonuments, findMonuments, monumentClearance, monumentSolid } from './monuments.js';
-import { findCapitoleFacade, markBrickSites, markHaussmann } from './landmarkfacades.js';
+import { findCapitoleFacade, markBrickSites, markStreetStyles } from './landmarkfacades.js';
 import { historicCoreTest, oldTownTest } from '../config.js';
 import { POST_HIT, planStreets } from './streets.js';
 import { buildFurniture } from './furniture.js';
@@ -134,7 +134,7 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   treePts = treePts.concat(ground.bankTrees || []); // 街の外れの川岸の土手の木
   const towers = findTowers(proj, parsed.buildings); // 八角形の鐘楼は専用のモデル
   markBrickSites(proj, parsed.buildings, parsed.areas);
-  markHaussmann(parsed.buildings, parsed.roads);
+  markStreetStyles(parsed.buildings, parsed.roads);
   const clear = monumentClearance(monuments);
   const treeless = treelessTest(parsed.areas);
   treePts = treePts.filter((p) => !clear(p.x ?? p[0], p.z ?? p[1]) && !treeless(p.x ?? p[0], p.z ?? p[1])); // 像・塔のまわり・木のない広場には植えない

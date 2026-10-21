@@ -1,7 +1,7 @@
 // 名所の建物の正面に、専用のテクスチャ（facades.js）を貼る場所を決める。
 // いまはキャピトル（市庁舎）: キャピトル広場に面した、いちばん長い建物の壁を正面とする。
 // あわせて、旧市街の建物・レンガ造りの歴史的な建物群・キャピトル広場を囲む建物に印を付ける（ファサードの様式を選ぶため）。
-import { closestOnSegment, pointInPolygon, signedArea } from '../geo.js';
+import { closestOnSegment, hash01, pointInPolygon, signedArea } from '../geo.js';
 import { oldTownTest } from '../config.js';
 import { CAPITOLE_HEIGHT, STYLE } from './facades.js';
 
@@ -118,45 +118,6 @@ export function markBrickSites(proj, buildings, areas = []) {
   }
 }
 
-// 19 世紀末に切り開かれた通り（利用者の写真: Rue d'Alsace-Lorraine・Rue de Metz・Esquirol）に面した建物は、
-// 砂色の切り石の建物（STYLE.haussmann）と灰色の亜鉛の屋根。通りの中心線から 道幅の半分 + HAUSS_REACH m 以内に、
-// 通りに沿った（向きの差 35° 以内）長さ 4 m 以上の壁が通りの方を向いている建物
-const HAUSS_STREETS = /^(Rue d'Alsace[- ]Lorraine|Rue de Metz|Place [EÉ]tienne[- ]Esquirol|Rue du Languedoc)$/i;
-const HAUSS_REACH = 10;
-export function markHaussmann(buildings, roads) {
-  const segs = [];
-  for (const r of roads) {
-    if (r.tunnel || r.bridge || !HAUSS_STREETS.test(r.name || '')) continue;
-    for (let i = 0; i + 1 < r.pts.length; i++) segs.push([r.pts[i], r.pts[i + 1], r.width / 2 + HAUSS_REACH]);
-  }
-  if (!segs.length) return;
-  for (const b of buildings) {
-    if (b.style === STYLE.arcade || b.info.height < 10 || b.info.isChurch) continue;
-    const bb = b.bounds;
-    const s = signedArea(b.outer) > 0 ? 1 : -1;
-    let hit = false;
-    for (const [p, q, reach] of segs) {
-      if (Math.max(p[0], q[0]) + reach < bb.minX || Math.min(p[0], q[0]) - reach > bb.maxX || Math.max(p[1], q[1]) + reach < bb.minZ || Math.min(p[1], q[1]) - reach > bb.maxZ) continue;
-      const sl = Math.hypot(q[0] - p[0], q[1] - p[1]) || 1, ux = (q[0] - p[0]) / sl, uz = (q[1] - p[1]) / sl;
-      for (let i = 0; i < b.outer.length && !hit; i++) {
-        const a = b.outer[i], c = b.outer[(i + 1) % b.outer.length];
-        const L = Math.hypot(c[0] - a[0], c[1] - a[1]);
-        if (L < 4 || Math.abs(((c[0] - a[0]) * ux + (c[1] - a[1]) * uz) / L) < 0.82) continue;
-        const mx = (a[0] + c[0]) / 2, mz = (a[1] + c[1]) / 2;
-        const hit2 = closestOnSegment(mx, mz, p[0], p[1], q[0], q[1]);
-        if (hit2.d2 > reach * reach) continue;
-        const nx = ((c[1] - a[1]) / L) * s, nz = (-(c[0] - a[0]) / L) * s;
-        if (nx * (hit2.x - mx) + nz * (hit2.z - mz) > 0) hit = true;
-      }
-      if (hit) break;
-    }
-    if (!hit) continue;
-    b.style = STYLE.haussmann;
-    b.tags['roof:material'] = 'slate';
-    b.tags['roof:colour'] ||= '#6c6e72';
-  }
-}
-
 // 広場の方を向いた 6 m 以上の壁がある建物。広場の地図の範囲は、まわりの通りを除いた石畳だけのことが多いので、
 // 壁の前 4〜22 m のどこかが広場の中なら、広場に面しているとする
 export function facingSquare(square, buildings) {
@@ -178,4 +139,55 @@ export function facingSquare(square, buildings) {
     if (facing >= 6) out.push(b);
   }
   return out;
+}
+
+// 通りの名前で決まる様式。通りの中心線から 道幅の半分 + STREET_REACH m 以内に、通りに沿った（向きの差 35° 以内）
+// 長さ 4 m 以上の壁が通りの方を向いている建物（高さ 10 m 以上）に、styles から建物ごとに選んだ様式を付ける
+// - 19 世紀末に切り開かれた通り（利用者の写真: Rue d'Alsace-Lorraine・Rue de Metz・Esquirol）: 砂色の切り石の
+//   建物（STYLE.haussmann）と灰色の亜鉛の屋根
+// - Rue de la République（サン・シプリアン。利用者の Street View）: 7 割はクリーム色・黄土色・サーモン色の漆喰に
+//   レンガの窓枠、3 割はレンガのまま
+const STREET_STYLES = [
+  { name: /^(Rue d'Alsace[- ]Lorraine|Rue de Metz|Place [EÉ]tienne[- ]Esquirol|Rue du Languedoc)$/i, styles: [[STYLE.haussmann, 1]], slate: true },
+  { name: /^Rue de la R[ée]publique$/i, styles: [[STYLE.ochre, 0.25], [STYLE.salmon, 0.25], [STYLE.cream, 0.2], [STYLE.brickStone, 0.15], [STYLE.brickShutters, 0.15]] },
+];
+const STREET_REACH = 10;
+export function markStreetStyles(buildings, roads) {
+  for (const rule of STREET_STYLES) {
+    const segs = [];
+    for (const r of roads) {
+      if (r.tunnel || r.bridge || !rule.name.test(r.name || '')) continue;
+      for (let i = 0; i + 1 < r.pts.length; i++) segs.push([r.pts[i], r.pts[i + 1], r.width / 2 + STREET_REACH]);
+    }
+    if (!segs.length) continue;
+    for (const b of buildings) {
+      if (b.style === STYLE.arcade || b.info.height < 10 || b.info.isChurch || !facesStreet(b, segs)) continue;
+      let r = hash01(b.id, 24);
+      b.style = rule.styles.find(([, p]) => (r -= p) < 0)?.[0] ?? rule.styles[0][0];
+      if (rule.slate) {
+        b.tags['roof:material'] = 'slate';
+        b.tags['roof:colour'] ||= '#6c6e72';
+      }
+    }
+  }
+}
+
+function facesStreet(b, segs) {
+  const bb = b.bounds;
+  const s = signedArea(b.outer) > 0 ? 1 : -1;
+  for (const [p, q, reach] of segs) {
+    if (Math.max(p[0], q[0]) + reach < bb.minX || Math.min(p[0], q[0]) - reach > bb.maxX || Math.max(p[1], q[1]) + reach < bb.minZ || Math.min(p[1], q[1]) - reach > bb.maxZ) continue;
+    const sl = Math.hypot(q[0] - p[0], q[1] - p[1]) || 1, ux = (q[0] - p[0]) / sl, uz = (q[1] - p[1]) / sl;
+    for (let i = 0; i < b.outer.length; i++) {
+      const a = b.outer[i], c = b.outer[(i + 1) % b.outer.length];
+      const L = Math.hypot(c[0] - a[0], c[1] - a[1]);
+      if (L < 4 || Math.abs(((c[0] - a[0]) * ux + (c[1] - a[1]) * uz) / L) < 0.82) continue;
+      const mx = (a[0] + c[0]) / 2, mz = (a[1] + c[1]) / 2;
+      const h = closestOnSegment(mx, mz, p[0], p[1], q[0], q[1]);
+      if (h.d2 > reach * reach) continue;
+      const nx = ((c[1] - a[1]) / L) * s, nz = (-(c[0] - a[0]) / L) * s;
+      if (nx * (h.x - mx) + nz * (h.z - mz) > 0) return true;
+    }
+  }
+  return false;
 }

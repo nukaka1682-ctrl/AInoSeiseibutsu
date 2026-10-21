@@ -530,8 +530,9 @@ export function makeAlsaceTexture() {
       const w = (0.8 + rnd() * 0.4) * ppm;
       const mid = (x + w / 2) / S;
       const pink = st && mid > st[0] && mid < st[1];
-      ctx.fillStyle = shadeSrgb((pink ? pinks : greys)[Math.floor(rnd() * (pink ? pinks : greys).length)], 0.95 + rnd() * 0.08);
+      const col = shadeSrgb((pink ? pinks : greys)[Math.floor(rnd() * (pink ? pinks : greys).length)], 0.95 + rnd() * 0.08);
       for (const dx of [-S, 0, S]) {
+        ctx.fillStyle = col; // stoneGrain が色を変えるので毎回
         ctx.fillRect(x + dx + 1.5, y + 1.5, w - 3, rowH - 3);
         stoneGrain(ctx, rnd, x + dx + 1.5, y + 1.5, w - 3, rowH - 3, 40, 0.1, false);
       }

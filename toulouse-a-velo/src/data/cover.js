@@ -176,7 +176,7 @@ const ALLEE_NAME = /^All[ée]es\s/i;
 const ALLEE_REACH = 24; // 両側の車道の中心線から（Allées Jules Guesde は車道のあいだが約 50 m）
 export const PAVED_PLAZAS = /^Esplanade (du 19 Août 1944|des Parachutistes)$/i;
 const STREET_ROADS = new Set(['trunk', 'primary', 'secondary', 'tertiary', 'residential', 'unclassified', 'living_street', 'pedestrian']);
-const STREET_REACH = 7;
+const STREET_REACH = 10; // Rue de Metz の南の歩道の木の列は中心線から 11〜16 m
 const remap = (m) => Uint8Array.from([0, 1, 2, 3, 4, PAVED], (v) => (v in m ? m[v] : v));
 const PLAZA_GREEN_MIN = 0.06;
 const MAP_PLAZA = remap({ [COVER.private]: COVER.public });

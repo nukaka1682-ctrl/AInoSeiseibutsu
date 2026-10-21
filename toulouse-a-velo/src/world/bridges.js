@@ -61,9 +61,27 @@ const COL = {
   concrete: T('#b7b3ab'),
   concreteDark: T('#9a978f'),
   railing: T('#56697c'), // 高架の鉄の手すり（青灰色）
-  lamp: T('#5b6a63'), // 灰緑の鋳鉄
+  lamp: T('#858b84'), // 明るい灰緑の鋳鉄（利用者の写真 0310_160523254: #8f948c 前後）
   globe: T('#f1eee4'),
 };
+
+// 淡いコンクリートのアーチ橋（利用者の写真 NCM_0102・0103: Pont des Catalans は 1913 年の淡い灰色のコンクリート #b8b4ac）。
+// 石の橋と同じ形で、レンガ・石の色だけ淡い灰色に替える（withPalette）
+const PALE_NAME = /^pont des catalans$/i;
+const PALE = {
+  brick: T('#bdb8ae'), vault: T('#a9a49b'), stone: T('#c9c4ba'), stoneWarm: T('#c4bfb5'), ashlar: T('#c3beb4'),
+  nose: T('#cfcac0'), footing: T('#b1aca2'), cornice: T('#bab5ab'), parapet: T('#d2cdc3'), coping: T('#dcd7cd'),
+};
+function withPalette(pal, fn) {
+  if (!pal) return fn();
+  const saved = {};
+  for (const k of Object.keys(pal)) [saved[k], COL[k]] = [COL[k], pal[k]];
+  try {
+    return fn();
+  } finally {
+    Object.assign(COL, saved);
+  }
+}
 
 export function deckHalf(road) {
   return road.width / 2 + (CAR_ROADS.has(road.type) ? 2 : 0.3);
@@ -593,11 +611,13 @@ export function buildBridges(bridges, allRoads, mats, waterDepthAt, clipRect, te
       const map = deckMap(terrain, prof, root.style.wet, waterDepthAt);
       for (const w of writers) w.map = map;
     }
-    writeDeck({ deck, body, walk, marks }, road, v.half, root.style.kind, info, clipRect);
-    if (v.root === road) {
-      writeStructure(body, road, root, walk);
-      if (prof) writeLandPiers(body, road, root, prof, terrain, waterDepthAt, Math.max(2, ...root.style.wet.map((w) => w.depth)));
-    }
+    withPalette(PALE_NAME.test(v.root.name || '') ? PALE : null, () => {
+      writeDeck({ deck, body, walk, marks }, road, v.half, root.style.kind, info, clipRect);
+      if (v.root === road) {
+        writeStructure(body, road, root, walk);
+        if (prof) writeLandPiers(body, road, root, prof, terrain, waterDepthAt, Math.max(2, ...root.style.wet.map((w) => w.depth)));
+      }
+    });
     for (const w of writers) w.map = null;
   }
   const g = new THREE.Group();
@@ -766,7 +786,8 @@ function writeDeck({ deck, body, walk, marks }, road, half, kind, info, clipRect
 }
 
 const PARAPET_STONE = c3('#fbf3e6'); // 欄干・街灯の台座の淡い切り石（花崗岩の板のテクスチャにかける色）
-const GRANITE = c3('#ffffff'), GRANITE_EDGE = c3('#b9b4ab'); // 花崗岩の板（テクスチャの色のまま）と、縁石の濃い帯
+// 花崗岩の板と、縁石の濃い帯。利用者の写真（ポン・ヌフの歩道）: 板は中くらいの灰色 #8f8b84 前後（テクスチャの淡い色を暗くする）
+const GRANITE = c3('#b4b0a9'), GRANITE_EDGE = c3('#a29e96');
 function writeDeckRibbon(w, pts, half, inner, y, color, sideColor, stone = null) {
   const up = [0, 1, 0];
   const uv = (p) => [p[0] / 4, -p[1] / 4];

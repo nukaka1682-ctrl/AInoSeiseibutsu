@@ -199,7 +199,7 @@ test('地面の覆い: 広場の中の敷地は公道（芝生・木の下は残
   assert.equal(g2.data[56 * cols + 41], COVER.lawn);
 });
 
-test('地面の覆い: 旧市街の通りの中心線から 道幅の半分 + 7 m 以内の木の下は公道（歩道のプラタナスの根元まで石畳）', () => {
+test('地面の覆い: 旧市街の通りの中心線から 道幅の半分 + 10 m 以内の木の下は公道（歩道のプラタナスの根元まで石畳）', () => {
   const cols = 60, rows = 60, rect = { minX: 0, minZ: 0, maxX: 60, maxZ: 60 };
   const parsed = {
     areas: [{ type: 'grass', name: 'Square', outer: [[40, 0], [60, 0], [60, 60], [40, 60]], holes: [] }],
@@ -209,8 +209,8 @@ test('地面の覆い: 旧市街の通りの中心線から 道幅の半分 + 7 
   const at = (g, x, z) => g.data[z * cols + x];
   const old = make();
   stampCover(old, rect, coverStamps(parsed), null, () => true);
-  assert.equal(at(old, 10, 30 + 11), COVER.public); // 5 + 7 m 以内
-  assert.equal(at(old, 10, 30 + 13), COVER.trees); // それより外
+  assert.equal(at(old, 10, 30 + 14), COVER.public); // 5 + 10 m 以内
+  assert.equal(at(old, 10, 30 + 16), COVER.trees); // それより外
   assert.equal(at(old, 50, 30), COVER.trees); // 公園の中はそのまま
   const out = make();
   stampCover(out, rect, coverStamps(parsed), null, () => false);

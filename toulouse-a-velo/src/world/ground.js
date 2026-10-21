@@ -144,17 +144,24 @@ export function createGroundMaterials(tex) {
   return mats;
 }
 
-// 水面: ガロンヌ川はにごったオリーブ色の灰緑（写真 #4b5642〜#7b888a）、運河は暗い緑（#45523a）。色は頂点カラーで付ける。
+// 水面: 色は頂点カラーで付ける（WATER_COLOR）。
 // 波の法線マップは 6 m ごとに繰り返し、大きさと向きの違う 2 枚を別々に流して、同じ模様の繰り返しを見えなくする。
 // 波は弱く（流れのゆるい川面）、少し粗くして空の映り込みをぼかす。空の映り込みは物理どおり真上からはほとんど映らず、
-// 斜めから見るほど強い（強さは main.js で水だけ別に決める）。にごった水に映る空は青くなく灰緑に見えるので、映り込みの色を
-// 灰色に寄せて水の色を少し掛ける
+// 斜めから見るほど強い（強さは main.js で水だけ別に決める）。にごった水に映る空は少しくすむので、映り込みの色を
+// 少し灰色に寄せて水の色を少し掛ける
+// 運河の港 Port Saint-Sauveur（利用者の写真 NCM_0183・0184）: 広い水面の両岸は草の土手ではなく、垂直の石の岸壁。
+// 中心（緯度・経度）から東西 ±hx m・南北 ±hz m の中の運河の岸
+const PORT_SAUVEUR = { latlon: [43.59634, 1.4564], hx: 70, hz: 270 };
+// 運河 Canal de Brienne（利用者の写真 NCM_0186）: 両岸とも水際から並木道まで約 3 m の草の斜面（壁はない）。この線から 30 m 以内の岸
+const BRIENNE = { line: [[43.60441, 1.43441], [43.60652, 1.43016]], reach: 30 };
 const WATER_TILE = 6; // 波の法線マップ 1 枚の大きさ（m）
-const WATER_COLOR = { river: c3('#4f5a46'), canal: c3('#424e37'), pond: c3('#4a5540') };
+// 利用者の写真では、晴れた日の川と運河の港は空を映して青みがかった灰色（ガロンヌ川 #3e5f86 前後、Port Saint-Sauveur
+// #5c7189〜#a0afbe）。水の色は灰緑から青灰色に寄せ、映り込みの空の青も半分ほど残す
+const WATER_COLOR = { river: c3('#4a5856'), canal: c3('#46555a'), pond: c3('#4a5548') };
 function waterMaterial(normalMap) {
   const m = new THREE.MeshStandardMaterial({
     color: '#ffffff', vertexColors: true, roughness: 0.13, metalness: 0,
-    normalMap, normalScale: new THREE.Vector2(0.06, 0.06),
+    normalMap, normalScale: new THREE.Vector2(0.035, 0.035), // 利用者の写真では川も運河もほとんど鏡のよう
   });
   m.userData.time = { value: 0 };
   m.onBeforeCompile = (shader) => {
@@ -172,7 +179,7 @@ function waterMaterial(normalMap) {
         vec3 mapN = normalize(vec3(nA.xy + nB.xy * 1.3, nA.z * nB.z));`)
       .replace('#include <lights_fragment_maps>', `#include <lights_fragment_maps>
         #if defined( USE_ENVMAP ) && defined( RE_IndirectSpecular )
-          radiance = mix(vec3(dot(radiance, vec3(0.2126, 0.7152, 0.0722))), radiance, 0.3) * vec3(0.9, 1.0, 0.93);
+          radiance = mix(vec3(dot(radiance, vec3(0.2126, 0.7152, 0.0722))), radiance, 0.6) * vec3(0.92, 0.98, 1.0);
         #endif`);
   };
   m.customProgramCacheKey = () => 'water-two-layers';
@@ -584,6 +591,10 @@ export function buildGroundBase(parsed, rect, mats, terrain = FLAT_TERRAIN, layo
     const stoneWalls = new MeshWriter(bankOpts);
     const bank = new MeshWriter(bankOpts);
     const quayCentre = parsed.proj ? parsed.proj.project(...QUAY_LATLON) : [-250, 0];
+    const port = parsed.proj ? parsed.proj.project(...PORT_SAUVEUR.latlon) : null;
+    const inPort = (x, z) => port && Math.abs(x - port[0]) < PORT_SAUVEUR.hx && Math.abs(z - port[1]) < PORT_SAUVEUR.hz;
+    const brienne = parsed.proj ? BRIENNE.line.map((ll) => parsed.proj.project(...ll)) : null;
+    const inBrienne = (x, z) => brienne && closestOnSegment(x, z, ...brienne[0], ...brienne[1]).d2 < BRIENNE.reach ** 2;
     const edge = new MeshWriter(bankOpts);
     const onRectEdge = (p, q) => {
       const e = 0.01;
@@ -620,7 +631,8 @@ export function buildGroundBase(parsed, rect, mats, terrain = FLAT_TERRAIN, layo
         return nearBridge(mx, mz, 9) ? 'wall' : 'natural';
       }
       if (a.kind === 'canal') {
-        if (a.tags.water !== 'canal' || nearBridge(mx, mz, 14)) return 'wall';
+        if (a.tags.water !== 'canal' || nearBridge(mx, mz, 14) || inPort(mx, mz)) return 'wall';
+        if (inBrienne(mx, mz)) return 'slope';
         // 岸の形は 500 m ほどの区間ごとに（両岸で別々に決まる）
         return hash01(((a.id | 0) * 131 + chunk) | 0, 7) < 0.45 ? 'slope' : 'step';
       }

@@ -23,6 +23,9 @@ export const MONUMENTS = [
   { id: 'cabanis', kind: 'cabanis', lat: 43.61024, lon: 1.45576, r: 45, minHeight: 25, front: [43.6061, 1.4490] },
   { id: 'coq', kind: 'coq', lat: 43.59823, lon: 1.43445, plaza: /^Place Olivier$/i },
   { id: 'croix-occitane', kind: 'cross', plaza: /^Place du Capitole$/i, radius: 8 },
+  // ラ・グラーヴの円屋根（Chapelle Saint-Joseph de la Grave。利用者の写真 NCM_0102・0105・0107）: 礼拝堂の建物の上に、
+  // 直径約 19 m のレンガのドラム（高さ約 25 m まで）と鉛色のドーム（約 38 m）、頂塔と十字架（約 44 m）
+  { id: 'grave-dome', kind: 'dome', lat: 43.60082, lon: 1.43301, r: 25 },
   // front: 道路の側（ガラスの面と看板が向く先）。pylon: 道端の看板塔。gravel: 白い砂利の植え込み、mulch: その中の木のチップの島
   // [緯度, 経度, 半径 m]（航空写真 2024 から）
   {
@@ -296,6 +299,16 @@ export function findMonuments(proj, { buildings = [], areas = [], facade = null,
       if (!best) continue;
       const c = circleOf(best.b.outer);
       out.push({ spec, kind: 'chateau', x: c.x, z: c.z, rBase: Math.min(11, Math.max(5, c.r)), replaced: [best.b] });
+    } else if (spec.kind === 'dome') {
+      // 礼拝堂の建物（いちばん近い 200 m² 以上の建物）の上に載せる
+      let best = null;
+      for (const b of buildings) {
+        const d = Math.hypot(b.inside[0] - x, b.inside[1] - z);
+        if (d > spec.r || b.info.area < 200) continue;
+        if (!best || d < best.d) best = { b, d };
+      }
+      if (!best) continue;
+      out.push({ spec, kind: 'dome', x, z, base: best.b.info.height || 14, replaced: [] });
     } else if (spec.kind === 'stadium') {
       const b = buildings.find((q) => q.info.area > 5000 && Math.hypot(centroid(q.outer)[0] - x, centroid(q.outer)[1] - z) < spec.r);
       if (!b) continue;
@@ -521,64 +534,75 @@ function blob(w, o, r, yaw, seg, rings, colorAt) {
 }
 
 // ---- シャトー・ドー
+// 利用者の写真（Street View 211021・29_163047303MP）: 14 角形の低いレンガの基壇（持ち送りの胸壁）、上に向かって細くなる
+// オレンジがかったレンガの塔（直径約 7.5 → 6 m、白い帯はなく細いレンガの帯だけ、半円アーチの窓が縦に 3 つ）、
+// レンガの持ち送りの上の淡い灰色の石の手すりの回廊、小さな四角い窓が輪に並ぶ上の細い円筒と、暗いスレートのドーム
 const BRICK_CW = 1.5; // レンガの区画 1 枚の大きさ（m）
 function writeChateau(m, W, groundAt, colliders, onRoad, keepOut) {
   const { x, z } = m;
   const y0 = groundAt(x, z);
-  const rB = m.rBase, hB = 5, rT = 3.5, yT = y0 + 19, rU = 2.3, yU = y0 + 21.8, rD = 2.45;
-  const STONE = col('#e4d8c4'), DARK = col('#2a2420'), IRON = col('#1b1b1c'), ROOF = col('#a39486');
+  const rB = m.rBase, hB = 5, rT0 = 3.75, rT = 3.0, yT = y0 + 19, rU = 2.25, yU = y0 + 22, rD = 2.4;
+  const STONE = col('#e4d8c4'), GREY = col('#c9c5bd'), DARK = col('#2a2420'), IRON = col('#1b1b1c'), ROOF = col('#a39486');
+  const TOWER = col('#e2b292'); // レンガの区画に掛ける色（写真の塔は基壇より濃いオレンジ）
   const w = W.main;
-  // 基壇（太い円形のレンガ）と石の笠、平らな屋上
-  cylinder(w, x, z, rB, rB, y0 - 0.5, y0 + hB - 0.45, { seg: 64, cell: CELL.brick, cw: BRICK_CW, ch: BRICK_CW });
-  cylinder(w, x, z, rB + 0.15, rB + 0.15, y0 + hB - 0.45, y0 + hB, { seg: 64, color: STONE });
-  annulus(w, x, z, rB + 0.15, rB, y0 + hB - 0.45, 64, STONE, false);
-  annulus(w, x, z, rT, rB + 0.15, y0 + hB, 64, ROOF);
+  // 基壇（14 角形のレンガ）と、持ち送りの胸壁、平らな屋上
+  const NB = 14;
+  cylinder(w, x, z, rB, rB, y0 - 0.5, y0 + hB - 0.9, { seg: NB, cell: CELL.brick, cw: BRICK_CW, ch: BRICK_CW });
+  cylinder(w, x, z, rB, rB + 0.3, y0 + hB - 0.9, y0 + hB - 0.6, { seg: NB, cell: CELL.brick, cw: BRICK_CW, ch: BRICK_CW });
+  cylinder(w, x, z, rB + 0.3, rB + 0.3, y0 + hB - 0.6, y0 + hB, { seg: NB, cell: CELL.brick, cw: BRICK_CW, ch: BRICK_CW });
+  annulus(w, x, z, rB + 0.12, rB + 0.3, y0 + hB, NB, STONE);
+  annulus(w, x, z, rT0, rB + 0.12, y0 + hB - 0.25, NB, ROOF);
   // 半円アーチの扉（北・南・西の 3 か所、白い石の枠）
   for (const a of [-Math.PI / 2, Math.PI / 2, Math.PI]) {
     const n = [Math.cos(a), 0, Math.sin(a)], s = [-Math.sin(a), Math.cos(a)];
     vpoly(w, [x + n[0] * (rB + 0.06), z + n[2] * (rB + 0.06)], s, archShape(3.1, 4.1, y0), n, STONE);
     vpoly(w, [x + n[0] * (rB + 0.14), z + n[2] * (rB + 0.14)], s, archShape(2.3, 3.6, y0), n, DARK);
   }
-  // 塔（円筒のレンガ）と石の帯、細い窓
-  cylinder(w, x, z, rT, rT, y0 + hB, yT, { seg: 24, cell: CELL.brick, cw: BRICK_CW, ch: BRICK_CW });
-  for (const yb of [y0 + hB + 4.6, y0 + hB + 9.4]) cylinder(w, x, z, rT + 0.08, rT + 0.08, yb, yb + 0.35, { seg: 24, color: STONE });
+  // 塔（上に向かって細くなるレンガの円筒）、細いレンガの帯、半円アーチの窓（縦に 3 つ、4 方向）
+  cylinder(w, x, z, rT0, rT, y0 + hB - 0.3, yT - 1.1, { seg: 28, cell: CELL.brick, cw: BRICK_CW, ch: BRICK_CW, color: TOWER });
+  const rAt = (y) => rT0 + ((rT - rT0) * (y - y0 - hB + 0.3)) / (yT - 1.1 - y0 - hB + 0.3);
+  for (const yb of [y0 + hB + 4.6, y0 + hB + 9.4]) cylinder(w, x, z, rAt(yb) + 0.06, rAt(yb + 0.18) + 0.06, yb, yb + 0.18, { seg: 28, cell: CELL.brick, cw: BRICK_CW, ch: BRICK_CW, color: col('#c99878') });
   for (let k = 0; k < 4; k++) {
     const a = (k / 4) * Math.PI * 2 + Math.PI / 4;
     const n = [Math.cos(a), 0, Math.sin(a)], s = [-Math.sin(a), Math.cos(a)];
     for (const yw of [y0 + hB + 1.6, y0 + hB + 6.3, y0 + hB + 10.6]) {
-      vpoly(w, [x + n[0] * (rT + 0.05), z + n[2] * (rT + 0.05)], s, archShape(0.6, 1.7, yw, 6), n, DARK);
+      const r = rAt(yw + 0.8) + 0.05;
+      vpoly(w, [x + n[0] * (r + 0.04), z + n[2] * (r + 0.04)], s, archShape(1.0, 2.0, yw - 0.1, 6), n, col('#c08a6a'));
+      vpoly(w, [x + n[0] * (r + 0.08), z + n[2] * (r + 0.08)], s, archShape(0.7, 1.75, yw, 6), n, DARK);
     }
   }
-  // テラス（張り出した石の床）と黒い鉄の手すり
-  const rS = rT + 0.75;
-  cylinder(w, x, z, rS, rS, yT - 0.45, yT, { seg: 24, color: STONE });
-  annulus(w, x, z, 0, rS, yT - 0.45, 24, STONE, false);
-  annulus(w, x, z, rU, rS, yT, 24, ROOF);
-  const mt = W.metal;
-  const rR = rS - 0.12;
-  cylinder(mt, x, z, rR, rR, yT + 1.0, yT + 1.07, { seg: 32, color: IRON });
-  cylinder(mt, x, z, rR, rR, yT + 1.0, yT + 1.07, { seg: 32, color: IRON, inward: true });
-  const nb = Math.round((2 * Math.PI * rR) / 0.3);
+  // レンガの持ち送り（上に広がる）と、張り出した回廊の床、淡い灰色の石の手すり（手すり子の影の縦の線）
+  const rS = rT + 0.8;
+  cylinder(w, x, z, rT, rS, yT - 1.1, yT - 0.45, { seg: 28, cell: CELL.brick, cw: BRICK_CW, ch: BRICK_CW, color: TOWER });
+  cylinder(w, x, z, rS, rS, yT - 0.45, yT, { seg: 28, color: GREY });
+  annulus(w, x, z, rU, rS, yT, 28, ROOF);
+  const rR = rS - 0.1;
+  cylinder(w, x, z, rR, rR, yT, yT + 0.95, { seg: 28, color: GREY });
+  cylinder(w, x, z, rR - 0.2, rR - 0.2, yT, yT + 0.95, { seg: 28, color: GREY, inward: true });
+  annulus(w, x, z, rR - 0.2, rR + 0.05, yT + 0.95, 28, col('#d8d4cc'));
+  const nb = 56;
   for (let k = 0; k < nb; k++) {
     const a = (k / nb) * Math.PI * 2;
-    const p = [x + Math.cos(a) * rR, z + Math.sin(a) * rR], s = [-Math.sin(a), Math.cos(a)];
-    for (const sg of [1, -1]) vpoly(mt, p, s, [[-0.02, yT], [0.02, yT], [0.02, yT + 1.0], [-0.02, yT + 1.0]], [Math.cos(a) * sg, 0, Math.sin(a) * sg], IRON);
+    const p = [x + Math.cos(a) * (rR + 0.01), z + Math.sin(a) * (rR + 0.01)], s = [-Math.sin(a), Math.cos(a)];
+    vpoly(w, p, s, [[-0.05, yT + 0.18], [0.05, yT + 0.18], [0.05, yT + 0.8], [-0.05, yT + 0.8]], [Math.cos(a), 0, Math.sin(a)], col('#77736c'));
   }
-  // 上の細い円筒と、灰色のドーム、小さな頂塔と風見
-  cylinder(w, x, z, rU, rU, yT, yU, { seg: 20, cell: CELL.brick, cw: BRICK_CW, ch: BRICK_CW });
-  cylinder(w, x, z, rU + 0.12, rU + 0.12, yU - 0.3, yU, { seg: 20, color: STONE });
-  annulus(w, x, z, rD, rU + 0.12, yU, 20, STONE);
-  for (let k = 0; k < 4; k++) {
-    const a = (k / 4) * Math.PI * 2;
+  // 上の細い円筒（小さな四角い窓が 8 つ）と石の軒、暗いスレートのドーム、小さな頂塔と風見
+  const mt = W.metal;
+  cylinder(w, x, z, rU, rU, yT, yU, { seg: 24, cell: CELL.brick, cw: BRICK_CW, ch: BRICK_CW, color: TOWER });
+  cylinder(w, x, z, rU + 0.15, rU + 0.15, yU - 0.35, yU, { seg: 24, color: STONE });
+  annulus(w, x, z, rD, rU + 0.15, yU, 24, STONE);
+  for (let k = 0; k < 8; k++) {
+    const a = (k / 8) * Math.PI * 2 + Math.PI / 8;
     const n = [Math.cos(a), 0, Math.sin(a)], s = [-Math.sin(a), Math.cos(a)];
-    vpoly(w, [x + n[0] * (rU + 0.04), z + n[2] * (rU + 0.04)], s, archShape(0.55, 1.3, yT + 0.6, 6), n, DARK);
+    vpoly(w, [x + n[0] * (rU + 0.04), z + n[2] * (rU + 0.04)], s, [[-0.28, yT + 1.4], [0.28, yT + 1.4], [0.28, yT + 2.2], [-0.28, yT + 2.2]], n, DARK);
   }
-  const ZINC = col('#8b9196');
+  const SLATE = col('#3c4450');
   for (let j = 0; j < 6; j++) {
     const p0 = (j / 6) * (Math.PI / 2), p1 = ((j + 1) / 6) * (Math.PI / 2);
-    cylinder(mt, x, z, Math.cos(p0) * rD, Math.max(0.3, Math.cos(p1) * rD), yU + Math.sin(p0) * rD * 0.9, yU + Math.sin(p1) * rD * 0.9, { seg: 20, color: ZINC });
+    cylinder(mt, x, z, Math.cos(p0) * rD, Math.max(0.3, Math.cos(p1) * rD), yU + Math.sin(p0) * rD * 0.9, yU + Math.sin(p1) * rD * 0.9, { seg: 20, color: SLATE });
   }
   const yL = yU + rD * 0.9;
+  const ZINC = col('#5a626c');
   cylinder(mt, x, z, 0.32, 0.32, yL - 0.1, yL + 0.55, { seg: 8, color: ZINC });
   cylinder(mt, x, z, 0.42, 0.02, yL + 0.55, yL + 1.0, { seg: 8, color: ZINC });
   box(mt, [x, yL + 1.6, z], [0.03, 0, 0], [0, 0.65, 0], [0, 0, 0.03], IRON);
@@ -1322,7 +1346,66 @@ function writeJgarden(m, W, groundAt, colliders, onRoad, keepOut) {
   keepOut.push([m.x, m.z, 14]);
 }
 
-const WRITERS = { chateau: writeChateau, stadium: writeStadium, cabanis: writeCabanis, coq: writeCoq, cross: writeCross, fastfood: writeFastfood, jgarden: writeJgarden, parterre: writeParterre };
+// ---- ラ・グラーヴの円屋根: 半円アーチの窓と付け柱のあるレンガのドラム、石の軒、鉛色のドーム（リブ付き）、頂塔
+function writeDome(m, W, groundAt) {
+  const { x, z } = m;
+  const y0 = groundAt(x, z) + m.base - 0.6;
+  const rDr = 9.4, yDr = y0 + 11.5, rDo = 9.7, hDo = 12.5;
+  const w = W.main, mt = W.metal;
+  const STONE = col('#d9cfbf'), DARK = col('#2b2523'), LEAD = col('#7d8790'), BRICK = col('#d6aa94');
+  cylinder(w, x, z, rDr, rDr, y0, yDr, { seg: 32, cell: CELL.brick, cw: BRICK_CW, ch: BRICK_CW, color: BRICK });
+  for (let k = 0; k < 16; k++) {
+    const a = (k / 16) * Math.PI * 2;
+    const n = [Math.cos(a), 0, Math.sin(a)], s = [-Math.sin(a), Math.cos(a)];
+    if (k % 2) {
+      // 付け柱
+      vpoly(w, [x + n[0] * (rDr + 0.12), z + n[2] * (rDr + 0.12)], s, [[-0.45, y0 + 0.6], [0.45, y0 + 0.6], [0.45, yDr - 0.8], [-0.45, yDr - 0.8]], n, STONE);
+    } else {
+      vpoly(w, [x + n[0] * (rDr + 0.06), z + n[2] * (rDr + 0.06)], s, archShape(2.4, 5.4, y0 + 3.2, 8), n, STONE);
+      vpoly(w, [x + n[0] * (rDr + 0.12), z + n[2] * (rDr + 0.12)], s, archShape(1.8, 5.0, y0 + 3.4, 8), n, DARK);
+    }
+  }
+  cylinder(w, x, z, rDr + 0.5, rDr + 0.5, yDr - 0.8, yDr, { seg: 32, color: STONE });
+  annulus(w, x, z, rDr, rDr + 0.5, yDr - 0.8, 32, STONE, false);
+  annulus(w, x, z, rDo, rDr + 0.5, yDr, 32, STONE);
+  // ドーム（だ円の断面）と 16 本のリブ
+  const N = 10;
+  for (let j = 0; j < N; j++) {
+    const p0 = (j / N) * (Math.PI / 2), p1 = ((j + 1) / N) * (Math.PI / 2);
+    cylinder(mt, x, z, Math.cos(p0) * rDo, Math.max(1.4, Math.cos(p1) * rDo), yDr + Math.sin(p0) * hDo, yDr + Math.sin(p1) * hDo, { seg: 32, color: LEAD });
+  }
+  const yTop = yDr + hDo;
+  for (let k = 0; k < 16; k++) {
+    const a = (k / 16) * Math.PI * 2 + Math.PI / 16;
+    for (let j = 0; j < N; j++) {
+      const p0 = (j / N) * (Math.PI / 2), p1 = ((j + 1) / N) * (Math.PI / 2);
+      const r0 = Math.cos(p0) * rDo + 0.08, r1 = Math.max(1.4, Math.cos(p1) * rDo) + 0.08;
+      const y0r = yDr + Math.sin(p0) * hDo, y1r = yDr + Math.sin(p1) * hDo;
+      const s = [-Math.sin(a), Math.cos(a)], c = [Math.cos(a), Math.sin(a)];
+      const P = (r, y, o) => [x + c[0] * r + s[0] * o, y, z + c[1] * r + s[1] * o];
+      const nn = [c[0] * (y1r - y0r), r0 - r1, c[1] * (y1r - y0r)];
+      const l = Math.hypot(...nn) || 1;
+      mt.quad(P(r0, y0r, -0.18), P(r0, y0r, 0.18), P(r1, y1r, 0.18), P(r1, y1r, -0.18), [nn[0] / l, nn[1] / l, nn[2] / l], PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, col('#949ca3'));
+    }
+  }
+  // 頂塔（窓のある円筒と小さな円屋根）と十字架
+  cylinder(w, x, z, 1.5, 1.5, yTop - 0.3, yTop + 3.0, { seg: 12, color: STONE });
+  for (let k = 0; k < 6; k++) {
+    const a = (k / 6) * Math.PI * 2;
+    const n = [Math.cos(a), 0, Math.sin(a)], s = [-Math.sin(a), Math.cos(a)];
+    vpoly(w, [x + n[0] * 1.52, z + n[2] * 1.52], s, archShape(0.55, 1.8, yTop + 0.6, 6), n, DARK);
+  }
+  annulus(w, x, z, 0, 1.75, yTop + 3.0, 12, STONE, false);
+  for (let j = 0; j < 4; j++) {
+    const p0 = (j / 4) * (Math.PI / 2), p1 = ((j + 1) / 4) * (Math.PI / 2);
+    cylinder(mt, x, z, Math.cos(p0) * 1.75, Math.max(0.15, Math.cos(p1) * 1.75), yTop + 3.0 + Math.sin(p0) * 1.6, yTop + 3.0 + Math.sin(p1) * 1.6, { seg: 12, color: LEAD });
+  }
+  const yc = yTop + 4.6;
+  box(mt, [x, yc + 1.0, z], [0.07, 0, 0], [0, 1.0, 0], [0, 0, 0.07], col('#3a3a38'));
+  box(mt, [x, yc + 1.4, z], [0.45, 0, 0], [0, 0.07, 0], [0, 0, 0.07], col('#3a3a38'));
+}
+
+const WRITERS = { dome: writeDome, chateau: writeChateau, stadium: writeStadium, cabanis: writeCabanis, coq: writeCoq, cross: writeCross, fastfood: writeFastfood, jgarden: writeJgarden, parterre: writeParterre };
 
 // 名所のモデルを作る。colliders: 足す当たり判定の円 [x, z, r] か線分 [ax, az, bx, bz]、
 // keepOut: 街の小物を置かない円 [x, z, r]（像の台・シャトー・ドーの柵の内側。monumentSolid）

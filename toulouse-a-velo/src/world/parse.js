@@ -75,6 +75,14 @@ export const CAR_ROADS = new Set([
   'trunk_link', 'primary_link', 'secondary_link', 'tertiary_link',
 ]);
 
+// データの誤りを写真に合わせて直す道（IGN の道の番号 → 置き換えるタグ）。利用者の Street View: Purpan の近くの
+// Avenue de Grande-Bretagne の西行き（北側）の車道は 1 車線（約 4 m）。データは 4〜5 車線・14〜15 m
+const ROAD_FIXES = {
+  41226: { lanes: '1', width: '4' },
+  142020: { lanes: '1', width: '4' },
+  142062: { lanes: '1', width: '4' },
+};
+
 function roadWidth(tags) {
   const hw = tags.highway;
   let w = parseLength(tags.width);
@@ -304,7 +312,7 @@ export function parseOsm(osm, proj, rect, bdtopo = []) {
   const rails = [];
   const waterLines = [];
   for (const w of ways.values()) {
-    const t = w.tags;
+    const t = w.tags && w.tags.highway && ROAD_FIXES[w.id] ? { ...w.tags, ...ROAD_FIXES[w.id] } : w.tags;
     if (!t || !w.nodes) continue;
     if (t.highway && !SKIP_HIGHWAY.has(t.highway)) {
       if (t.area === 'yes' && isClosed(w)) continue; // 広場はポリゴン側で処理

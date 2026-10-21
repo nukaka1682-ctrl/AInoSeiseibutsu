@@ -91,7 +91,8 @@ export const CROWN_ASPECT = 1;
 
 // 高さ h の木の、下枝の高さ（bottom）と樹冠の半径の上限（rmax）
 export function crownLimit(h) {
-  const bottom = Math.max(1.6, Math.min(h * 0.22, 5)); // 下枝の高さ（高さの 2 割ほど、街路樹のプラタナスで 3〜5 m）
+  // 下枝の高さ: 低い木は高さの 2 割ほど、高い木ほど高く（利用者の写真: 高さ 18〜25 m の大きなプラタナスは幹が 6〜8 m 見える）
+  const bottom = Math.max(1.6, Math.min(h * 0.22 + Math.max(0, h - 14) * 0.25, 7.5));
   return { bottom, rmax: Math.max(1.5, Math.min(0.45 * h + 1, (h - bottom) / (2 * CROWN_ASPECT))) };
 }
 
@@ -149,7 +150,7 @@ function lumpyCrown() {
     v.fromBufferAttribute(pos, i);
     const n = Math.sin(v.x * 5.1 + v.y * 2.3) * Math.cos(v.z * 4.7 - v.y * 3.1) + Math.sin(v.x * 3.7 - v.z * 4.3) * 0.5;
     v.multiplyScalar(0.92 * (1 + n * 0.07)); // こぶの分だけ小さく
-    if (v.y < 0) v.y *= 0.85; // 下側は少し平ら
+    if (v.y < 0) v.y *= 0.95; // 下側はほんの少し平ら（平らすぎると下から見て板のよう）
     pos.setXYZ(i, v.x, v.y, v.z);
   }
   g.computeVertexNormals();
@@ -227,7 +228,7 @@ function leafShading(material) {
         }`)
       .replace('#include <color_fragment>', `#include <color_fragment>
         float leaf = leafNoise(vLeafPos * 5.0) * 0.55 + leafNoise(vLeafPos * 13.0) * 0.45;
-        diffuseColor.rgb *= (0.68 + leaf * 0.58) * (0.66 + 0.34 * smoothstep(-0.9, 0.6, vLeafPos.y));`);
+        diffuseColor.rgb *= (0.72 + leaf * 0.56) * (0.74 + 0.26 * smoothstep(-0.9, 0.6, vLeafPos.y));`);
   };
   material.customProgramCacheKey = () => 'leaf-shading';
 }
