@@ -540,8 +540,8 @@ export function abutmentWalls(terrain, roads, waterDepthAt = () => 0) {
   });
 }
 
-// 擁壁の形: 道の側の面（淡いコンクリートに、上から 0.5〜1.1 m の赤い帯）、厚さ 0.4 m の笠と裏の面
-const ABUT_COL = { face: T('#c2beb6'), band: T('#a8523f'), cap: T('#d0ccc4') };
+// 擁壁の形: 道の側の面（ベージュのコンクリートに、上から 0.5 m と 0.83 m の細いテラコッタの帯）、厚さ 0.4 m の笠と裏の面
+const ABUT_COL = { face: T('#cbc2b2'), band: T('#b5654c'), cap: T('#d0ccc4') }; // 利用者の Street View 225619: ベージュのコンクリートに細いテラコッタの帯 2 本
 export function buildAbutments(list, mats) {
   const w = new MeshWriter();
   for (const q of list) {
@@ -550,14 +550,15 @@ export function buildAbutments(list, mats) {
     // 表の面（反時計回り）が n を向く並び
     if ((bx - ax) * nz - (bz - az) * nx < 0) [ax, az, at, ab, bx, bz, bt, bb] = [bx, bz, bt, bb, ax, az, at, ab];
     const L = Math.hypot(bx - ax, bz - az), th = 0.4, px = -nx * th, pz = -nz * th;
-    const ba = at - 1.1, bb2 = bt - 1.1, ca = at - 0.5, cb = bt - 0.5;
     const face = (y0a, y0b, y1a, y1b, color) => {
       if (y1a <= y0a && y1b <= y0b) return;
       w.quad([ax, y0a, az], [bx, y0b, bz], [bx, y1b, bz], [ax, y1a, az], [nx, 0, nz], [0, y0a / 4], [L / 4, y0b / 4], [L / 4, y1b / 4], [0, y1a / 4], color);
     };
-    face(ab, bb, Math.max(ab, ba), Math.max(bb, bb2), ABUT_COL.face);
-    face(Math.max(ab, ba), Math.max(bb, bb2), ca, cb, ABUT_COL.band);
-    face(ca, cb, at, bt, ABUT_COL.face);
+    // 上端から下へ: 面 0.5 m・帯 0.12 m・面 0.21 m・帯 0.12 m・残りは面（壁が低ければ下端で切る）
+    const F = ABUT_COL.face, B = ABUT_COL.band;
+    for (const [d0, d1, color] of [[0, 0.5, F], [0.5, 0.62, B], [0.62, 0.83, F], [0.83, 0.95, B], [0.95, Infinity, F]]) {
+      face(Math.max(ab, at - d1), Math.max(bb, bt - d1), Math.max(ab, at - d0), Math.max(bb, bt - d0), color);
+    }
     w.quad([ax, at, az], [ax + px, at, az + pz], [bx + px, bt, bz + pz], [bx, bt, bz], [0, 1, 0], [0, 0], [0, th / 4], [L / 4, th / 4], [L / 4, 0], ABUT_COL.cap);
     w.quad([bx + px, bb, bz + pz], [ax + px, ab, az + pz], [ax + px, at, az + pz], [bx + px, bt, bz + pz], [-nx, 0, -nz], [0, 0], [L / 4, 0], [L / 4, (bt - bb) / 4], [0, (at - ab) / 4], ABUT_COL.face);
   }

@@ -45,6 +45,10 @@ test('向きの付いた長方形・放射線・円', () => {
   assert.ok(Math.abs(box.a - 30) < 1e-6 && Math.abs(box.b - 12) < 1e-6);
   assert.ok(Math.abs(Math.abs(box.e1[0] * Math.cos(t) + box.e1[1] * Math.sin(t)) - 1) < 1e-6, '長い辺の向き');
   assert.ok(Math.hypot(box.cx - 10, box.cz + 5) < 1e-6);
+  // 縦長の長方形（長い辺が 2 番目の向き）: e1 は長い辺、e2 は e1 に直角
+  const tall = orientedBox(rect(0, 0, 8, 25, 0));
+  assert.ok(Math.abs(tall.a - 25) < 1e-6 && Math.abs(tall.b - 8) < 1e-6);
+  assert.ok(Math.abs(tall.e1[0] * tall.e2[0] + tall.e1[1] * tall.e2[1]) < 1e-9, 'e2 は e1 に直角');
   assert.ok(Math.abs(rayRing(0, 0, 1, 0, rect(0, 0, 20, 10)) - 20) < 1e-9);
   const c = circleOf(circle(3, 4, 9));
   assert.ok(Math.hypot(c.x - 3, c.z - 4) < 1e-6 && Math.abs(c.r - 9) < 1e-6);
