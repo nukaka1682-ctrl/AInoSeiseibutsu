@@ -36,6 +36,7 @@ const PONT_NEUF_HALF = 10.5; // ポン・ヌフの幅の半分（実物は欄干
 export const PONT_NEUF = { spans: [14.4, 20.4, 25.0, 31.7, 28.6, 25.4, 22.0], piers: [6.2, 6.6, 7.0, 7.2, 7.0, 6.6] };
 // 石・レンガのアーチ橋として作る橋の名前（データに橋の構造・材料のタグがないので、実物が石積みの橋だけを挙げる）。
 // ほかの深い水を渡る橋は近代の橋
+const TRUSS_NAME = /^pont saint[- ]pierre$/i;
 export const MASONRY_NAME = /^pont (neuf|des catalans|de la croix[- ]de[- ]pierre|de tounis)$/i;
 // 高速道路・幹線道路（とそのランプ）を含むまとまりは、名前によらず近代の橋
 const MOTOR_TYPES = new Set(['motorway', 'motorway_link', 'trunk', 'trunk_link']);
@@ -61,6 +62,8 @@ const COL = {
   concrete: T('#b7b3ab'),
   concreteDark: T('#9a978f'),
   railing: T('#56697c'), // 高架の鉄の手すり（青灰色）
+  steel: T('#7f8a93'), // サン・ピエール橋の鋼のトラス（利用者の写真 NCM_0105: 明るい灰色 #7a8590）
+  pierBrick: T('#9a7464'),
   lamp: T('#858b84'), // 明るい灰緑の鋳鉄（利用者の写真 0310_160523254: #8f948c 前後）
   globe: T('#f1eee4'),
 };
@@ -676,6 +679,8 @@ export function bridgeStyle(road, v, waterDepthAt, levelAt = null, deckAt = null
   const members = v.members || [road];
   // 陸の上の高速道路・幹線道路の高架（A620 の Grande-Bretagne 通りの上など。写真: 淡いコンクリートの桁と青灰色の鉄の手すり）
   if (!wet.length) return { kind: members.some((m) => MOTOR_TYPES.has(m.type)) ? 'overpass' : 'flat', wet };
+  // サン・ピエール橋（利用者の写真 NCM_0105・0125）: レンガの橋脚 2 本の上の、下弦が弧になった鋼のトラス（3 径間）
+  if (TRUSS_NAME.test(road.name || '')) return { kind: 'truss', wet };
   // 石の橋の一覧にない橋と、高速道路・幹線道路を含むまとまりは近代の橋
   if (!MASONRY_NAME.test(road.name || '') || members.some((m) => MOTOR_TYPES.has(m.type))) return { kind: 'modern', wet };
   const pontNeuf = road.name === 'Pont Neuf';
@@ -707,7 +712,7 @@ export function bridgeStyle(road, v, waterDepthAt, levelAt = null, deckAt = null
 function writeDeck({ deck, body, walk, marks }, road, half, kind, info, clipRect) {
   const topY = CAR_ROADS.has(road.type) ? 0.08 : 0.14; // 歩道橋は少し高くして、重なっても Z ファイティングしないように
   const st = roadStyle(road);
-  const modern = kind === 'modern' || kind === 'overpass';
+  const modern = kind === 'modern' || kind === 'overpass' || kind === 'truss';
   const car = CAR_ROADS.has(road.type) && st.tex === 'asphalt';
   // 車道の標示（中央線・バスレーン・自転車レーン。ポン・ヌフは写真 10・11）。橋の両端 4 m はあける
   if (car) {
@@ -865,6 +870,41 @@ function writeStructure(w, road, v, stone = w) {
   };
   if (kind === 'flat') return plainSides(LAND_BOTTOM, COL.flat);
   if (kind === 'overpass') return plainSides(SLAB_BOTTOM - 0.4, COL.concrete); // 桁の高さ（写真の A620 は淡いコンクリートの厚い桁）
+  if (kind === 'truss') {
+    // 桁の側面（鋼）と、両側の弧の下弦・縦材・斜材のトラス。径間の真ん中で浅く（1.2 m）、橋脚で深い（5 m）
+    plainSides(SLAB_BOTTOM, COL.steel);
+    for (const wt of wet) {
+      const W = wt.s1 - wt.s0, n = 3, span = W / n;
+      const depth = (s) => {
+        const u = (((s - wt.s0) % span) + span) % span / span;
+        return 1.2 + 3.8 * (2 * u - 1) ** 2;
+      };
+      for (const sd of [1, -1]) {
+        const step = span / Math.max(6, Math.round(span / 3.2));
+        for (let s = wt.s0; s < wt.s1 - 1e-6; s += step) {
+          const s1 = Math.min(wt.s1, s + step);
+          const b0 = SLAB_BOTTOM - depth(s), b1 = SLAB_BOTTOM - depth(s1);
+          fq(sd, [s, b0 - 0.45], [s1, b1 - 0.45], [s1, b1], [s, b0], COL.steel); // 下弦
+          fq(sd, [s - 0.12, b0], [s + 0.12, b0], [s + 0.12, SLAB_BOTTOM], [s - 0.12, SLAB_BOTTOM], COL.steel); // 縦材
+          const up = Math.floor((s - wt.s0) / step) % 2 === 0;
+          const [sa, ya, sb, yb] = up ? [s, b0, s1, SLAB_BOTTOM] : [s, SLAB_BOTTOM, s1, b1];
+          fq(sd, [sa - 0.12, ya], [sa + 0.12, ya], [sb + 0.12, yb], [sb - 0.12, yb], COL.steel); // 斜材
+        }
+      }
+      // 径間の境のレンガの橋脚と、橋面の上に立つ四角い柱（両側）
+      for (let k = 1; k < n; k++) {
+        const s = wt.s0 + span * k;
+        const c = fr.at(pts, s), [ux, uz] = U(s);
+        const off = (v.extL - v.extR) / 2;
+        writePier(w, c[0] - uz * off, c[1] + ux * off, ux, uz, (v.extL + v.extR) * 0.5, 1.2, 2.6, SLAB_BOTTOM - 5, -wt.depth - 0.6, COL.pierBrick);
+        for (const sd of [1, -1]) {
+          const q = fr.at(lines[sd], s);
+          writePier(w, q[0], q[1], ux, uz, 0.55, 0, 1.1, 3.2, SLAB_BOTTOM - 5, COL.pierBrick);
+        }
+      }
+    }
+    return;
+  }
   if (kind === 'modern') {
     plainSides(SLAB_BOTTOM, COL.concrete);
     for (const wt of wet) {

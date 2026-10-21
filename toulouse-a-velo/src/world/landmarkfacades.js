@@ -78,7 +78,8 @@ export function facadeSpan(f, a, c, n) {
 // レンガ造りの歴史的な建物群（IGN のデータに壁の材料がないことが多い）。中心から半径 r m の大きな建物は
 // ばら色のレンガに白い石の窓枠の様式にする
 const BRICK_SITES = [
-  { name: 'Hôtel-Dieu Saint-Jacques', lat: 43.59935, lon: 1.43655, r: 85 },
+  // 利用者の写真（NCM_0107・0136・211104）: 背の高い 3 階（1 階 約 5 m）と屋根裏、低い勾配の瓦の寄棟屋根
+  { name: 'Hôtel-Dieu Saint-Jacques', lat: 43.59935, lon: 1.43655, r: 85, floor: 5.2, tiles: true },
   { name: 'Hôpital de La Grave', lat: 43.60095, lon: 1.43405, r: 110 },
 ];
 // 屋根の材料がデータにない名所の屋根
@@ -94,6 +95,12 @@ export function markBrickSites(proj, buildings, areas = []) {
       if (b.info.area > 150 && Math.hypot(b.inside[0] - x, b.inside[1] - z) < s.r) {
         b.tags['building:material'] = 'brick';
         b.style = STYLE.brickStone;
+        if (s.floor) b.info.floorHeight = s.floor;
+        if (s.tiles) {
+          b.tags['roof:material'] = 'roof_tiles';
+          if (b.info.roofShape === 'flat') b.info.roofShape = 'auto';
+          b.info.roofHeight = Math.max(b.info.roofHeight || 0, 3.5);
+        }
       }
     }
   }

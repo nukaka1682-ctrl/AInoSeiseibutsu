@@ -26,6 +26,9 @@ export const MONUMENTS = [
   // ラ・グラーヴの円屋根（Chapelle Saint-Joseph de la Grave。利用者の写真 NCM_0102・0105・0107）: 礼拝堂の建物の上に、
   // 直径約 19 m のレンガのドラム（高さ約 25 m まで）と鉛色のドーム（約 38 m）、頂塔と十字架（約 44 m）
   { id: 'grave-dome', kind: 'dome', lat: 43.60082, lon: 1.43301, r: 25 },
+  // ノートルダム・ド・ラ・ドラード大聖堂の川側の正面（利用者の写真 NCM_0110・0112）: 灰色の石の 6 本の円柱（約 12 m）と
+  // 三角の破風の柱廊。教会の建物の、川（facing）の方を向いたいちばん長い壁の前に建てる
+  { id: 'daurade', kind: 'portico', lat: 43.60097, lon: 1.43983, r: 30, facing: [43.60097, 1.43876] },
   // キャピトルの主塔（Donjon du Capitole。利用者の Street View 211806）: 淡いクリーム色の壁（約 18 m）、出し狭間の帯と
   // 狭間のある胸壁、急なスレートの寄棟屋根に時計の屋根窓、正面の角に円錐の屋根の小塔 2 つ、真ん中に八角形の鐘楼と尖塔（約 40 m）。
   // front: 正面（時計）が向く先（Square Charles-de-Gaulle）
@@ -328,6 +331,28 @@ export function findMonuments(proj, { buildings = [], areas = [], facade = null,
       const [fx, fz] = proj.project(...spec.front);
       const fl = Math.hypot(fx - ob.cx, fz - ob.cz) || 1;
       out.push({ spec, kind: 'donjon', ...ob, front: [(fx - ob.cx) / fl, (fz - ob.cz) / fl], replaced: [best.b] });
+    } else if (spec.kind === 'portico') {
+      let best = null;
+      for (const b of buildings) {
+        const d = Math.hypot(b.inside[0] - x, b.inside[1] - z);
+        if (d > spec.r || b.info.area < 500) continue;
+        if (!best || d < best.d) best = { b, d };
+      }
+      if (!best) continue;
+      const [fx, fz] = proj.project(...spec.facing);
+      const fl = Math.hypot(fx - x, fz - z) || 1, f = [(fx - x) / fl, (fz - z) / fl];
+      const ring = best.b.outer, sg = signedArea(ring) > 0 ? 1 : -1;
+      let face = null;
+      for (let i = 0; i < ring.length; i++) {
+        const a = ring[i], c = ring[(i + 1) % ring.length];
+        const L = Math.hypot(c[0] - a[0], c[1] - a[1]);
+        if (L < 12) continue;
+        const n = [((c[1] - a[1]) / L) * sg, (-(c[0] - a[0]) / L) * sg];
+        const score = (n[0] * f[0] + n[1] * f[1]) * Math.min(L, 30);
+        if (n[0] * f[0] + n[1] * f[1] > 0.7 && (!face || score > face.score)) face = { a, c, L, n, score };
+      }
+      if (!face) continue;
+      out.push({ spec, kind: 'portico', mid: [(face.a[0] + face.c[0]) / 2, (face.a[1] + face.c[1]) / 2], t: [(face.c[0] - face.a[0]) / face.L, (face.c[1] - face.a[1]) / face.L], n: face.n, width: Math.min(22, face.L - 2), replaced: [] });
     } else if (spec.kind === 'statue') {
       if (!inB(x, z)) continue;
       const [fx, fz] = proj.project(...spec.facing);
@@ -1428,6 +1453,42 @@ function writeDome(m, W, groundAt) {
   box(mt, [x, yc + 1.4, z], [0.45, 0, 0], [0, 0.07, 0], [0, 0, 0.07], col('#3a3a38'));
 }
 
+// ---- 円柱と破風の柱廊（壁 mid の前、外向き n、壁に沿った t、幅 width）
+function writePortico(m, W, groundAt, colliders) {
+  const { mid, t, n, width } = m;
+  const w = W.main;
+  const STONE = col('#cbc6bd'), SHADE = col('#b5b0a6'), DARK = col('#4a4744');
+  const y0 = groundAt(mid[0] + n[0] * 1.5, mid[1] + n[1] * 1.5);
+  const D = 2.6, hw = width / 2, yC = y0 + 1.0, yE = yC + 11.5, yP = yE + 1.6, rise = Math.min(4.6, hw * 0.38);
+  const at = (u, v) => [mid[0] + t[0] * u + n[0] * v, mid[1] + t[1] * u + n[1] * v];
+  const T = (h) => [t[0] * h, 0, t[1] * h], N = (h) => [n[0] * h, 0, n[1] * h], Y = (h) => [0, h, 0];
+  // 段（基壇）と、柱の後ろの暗い壁（柱廊の奥）
+  const c0 = at(0, D / 2);
+  box(w, [c0[0], y0 + 0.5, c0[1]], T(hw + 0.4), Y(0.6), N(D / 2 + 0.2), SHADE);
+  const back = at(0, 0.08);
+  vpoly(w, back, t, [[-hw, yC], [hw, yC], [hw, yE], [-hw, yE]], [n[0], 0, n[1]], DARK);
+  // 6 本の円柱（礎盤・柱身・柱頭）
+  for (let k = 0; k < 6; k++) {
+    const u = -hw + 1.0 + ((2 * hw - 2.0) * k) / 5, [px, pz] = at(u, D - 0.8);
+    box(w, [px, yC + 0.25, pz], T(0.75), Y(0.25), N(0.75), STONE);
+    cylinder(w, px, pz, 0.62, 0.55, yC + 0.5, yE - 0.7, { seg: 14, color: STONE });
+    box(w, [px, yE - 0.35, pz], T(0.75), Y(0.35), N(0.75), STONE);
+    colliders.push([px, pz, 0.7]);
+  }
+  // 梁（エンタブラチュア）と三角の破風（前面・屋根の斜面・下面）
+  const ce = at(0, D / 2);
+  box(w, [ce[0], (yE + yP) / 2, ce[1]], T(hw + 0.3), Y((yP - yE) / 2), N(D / 2 + 0.3), STONE);
+  const fr = at(0, D + 0.3), bk = at(0, -0.2);
+  const tri = [[-hw - 0.3, yP], [hw + 0.3, yP], [0, yP + rise]];
+  vpoly(w, fr, t, tri, [n[0], 0, n[1]], STONE);
+  vpoly(w, at(0, D + 0.35), t, [[-hw + 1.2, yP + 0.5], [hw - 1.2, yP + 0.5], [0, yP + rise - 0.6]], [n[0], 0, n[1]], SHADE);
+  for (const sgn of [-1, 1]) {
+    const e = [fr[0] + t[0] * sgn * (hw + 0.3), fr[1] + t[1] * sgn * (hw + 0.3)], e2 = [bk[0] + t[0] * sgn * (hw + 0.3), bk[1] + t[1] * sgn * (hw + 0.3)];
+    const nn = [t[0] * sgn * rise, hw + 0.3, t[1] * sgn * rise], l = Math.hypot(...nn);
+    w.quad([e[0], yP, e[1]], [e2[0], yP, e2[1]], [bk[0], yP + rise, bk[1]], [fr[0], yP + rise, fr[1]], [nn[0] / l, nn[1] / l, nn[2] / l], PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, col('#8a8580'));
+  }
+}
+
 // ---- キャピトルの主塔
 function writeDonjon(m, W, groundAt, colliders) {
   const { cx, cz, e1, e2, a, b } = m;
@@ -1543,7 +1604,7 @@ function writeStatue(m, W, groundAt, colliders, onRoad, keepOut) {
   keepOut.push([x, z, 6]);
 }
 
-const WRITERS = { donjon: writeDonjon, statue: writeStatue, dome: writeDome, chateau: writeChateau, stadium: writeStadium, cabanis: writeCabanis, coq: writeCoq, cross: writeCross, fastfood: writeFastfood, jgarden: writeJgarden, parterre: writeParterre };
+const WRITERS = { portico: writePortico, donjon: writeDonjon, statue: writeStatue, dome: writeDome, chateau: writeChateau, stadium: writeStadium, cabanis: writeCabanis, coq: writeCoq, cross: writeCross, fastfood: writeFastfood, jgarden: writeJgarden, parterre: writeParterre };
 
 // 名所のモデルを作る。colliders: 足す当たり判定の円 [x, z, r] か線分 [ax, az, bx, bz]、
 // keepOut: 街の小物を置かない円 [x, z, r]（像の台・シャトー・ドーの柵の内側。monumentSolid）

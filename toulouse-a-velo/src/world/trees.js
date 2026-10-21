@@ -92,6 +92,20 @@ export function magnoliaTest(roads) {
   });
 }
 
+// 岸壁の上の並木（利用者の写真 NCM_0106・0109・0125: ラ・ドラードの河岸のプラタナスは上の段の岸壁の縁に立ち、樹冠が
+// 下の段の上に張り出す）。LiDAR の木の位置は樹冠の真ん中なので、下の段の壁から QUAY_TREE_REACH m 以内の木は、壁の
+// 上の段の側（壁から 2.2 m 奥）へ移す。木のてっぺんの高さはそのまま（段差の分だけ低い木にする）
+const QUAY_TREE_REACH = 7;
+export function liftQuayTrees(points, terrain) {
+  if (!terrain?.quayBelow) return points;
+  return points.map((p) => {
+    if (p.x == null || !(p.h > 0) || p.abs) return p;
+    const q = terrain.quayBelow(p.x, p.z, QUAY_TREE_REACH);
+    if (!q || q.drop < 2.5 || p.h - q.drop < 5) return p;
+    return { ...p, x: q.x - q.nx * 2.2, z: q.z - q.nz * 2.2, h: p.h - q.drop };
+  });
+}
+
 // 木のない広場（利用者の写真: キャピトル広場には木がない。LiDAR が街灯・日よけ・パラソルを木と見てしまう）
 const TREELESS_PLAZAS = /^Place du Capitole$/i;
 export function treelessTest(areas) {

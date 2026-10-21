@@ -168,6 +168,22 @@ export class Terrain {
     return best;
   }
 
+  // 点 (x, z) が岸壁の下の段の側、壁から reach m 以内なら、いちばん近い壁の上の点と向き・段差を返す（なければ null）
+  quayBelow(x, z, reach) {
+    const B = this.quayBox;
+    if (!B || x < B[0] - reach || z < B[1] - reach || x > B[2] + reach || z > B[3] + reach) return null;
+    let best = null;
+    this.quayGrid.queryPoint(x, z, reach, (i) => {
+      const q = this.quayWalls[i], dx = q.bx - q.ax, dz = q.bz - q.az, L2 = dx * dx + dz * dz;
+      const t = Math.min(1, Math.max(0, ((x - q.ax) * dx + (z - q.az) * dz) / L2));
+      const px = q.ax + dx * t, pz = q.az + dz * t, d = (x - px) * q.nx + (z - pz) * q.nz; // 壁から下の段へ
+      if (d <= 0 || d > reach || (best && d >= best.d)) return;
+      const drop = q.at + (q.bt - q.at) * t - (q.ab + (q.bb - q.ab) * t);
+      best = { x: px, z: pz, nx: q.nx, nz: q.nz, d, drop };
+    });
+    return best;
+  }
+
   // 地面の高さ（y）。5 m の格子の平面。格子の外は遠くの格子
   h(x, z) {
     const g = this.near, u = g.ax * x + g.bx, v = g.az * z + g.bz;

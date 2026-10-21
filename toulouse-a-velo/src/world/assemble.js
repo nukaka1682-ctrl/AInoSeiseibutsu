@@ -12,7 +12,7 @@ import { FLAT_TERRAIN, surfaceFns } from './terrain.js';
 import { buildTerrainTile } from './terrainmesh.js';
 import { buildCoverMesh } from './cover.js';
 import { tileBounds, tileLayout } from '../data/tiles.js';
-import { buildTrees, fillParkTrees, planeTreeTest, streetTrees, treelessTest, magnoliaTest } from './trees.js';
+import { buildTrees, fillParkTrees, planeTreeTest, streetTrees, treelessTest, magnoliaTest, liftQuayTrees } from './trees.js';
 import { buildEnclosures, clearRoads, projectTrees, projectWalls, tameWalls } from './enclosures.js';
 import { clearEntrances, entranceWalls, inEntrance, projectEntrances } from './metro.js';
 import { findTowers } from './towers.js';
@@ -136,6 +136,7 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   markBrickSites(proj, parsed.buildings, parsed.areas);
   markStreetStyles(parsed.buildings, parsed.roads);
   const clear = monumentClearance(monuments);
+  treePts = liftQuayTrees(treePts, terrain); // 岸壁の下の段の木は上の段へ
   const treeless = treelessTest(parsed.areas);
   treePts = treePts.filter((p) => !clear(p.x ?? p[0], p.z ?? p[1]) && !treeless(p.x ?? p[0], p.z ?? p[1])); // 像・塔のまわり・木のない広場には植えない
   const skip = new Set(monuments.flatMap((m) => m.replaced));
