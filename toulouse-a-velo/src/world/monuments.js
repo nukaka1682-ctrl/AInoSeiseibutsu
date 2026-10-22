@@ -50,6 +50,12 @@ export const MONUMENTS = [
   // 暗い灰色の金属のかまぼこ屋根、レンガの横の壁、棟まで約 9.5 m）と、西の岸壁に沿ってつないだ平底船（péniche）の列
   { id: 'capitainerie', kind: 'capitainerie', lat: 43.59508, lon: 1.45592, r: 15, front: [43.59600, 1.45592] },
   { id: 'port-boats', kind: 'moorings', quay: [[43.596166, 1.455856], [43.595088, 1.455965]], water: [43.59563, 1.45610] },
+  // ジャンヌ・ダルクの騎馬像（利用者の写真 NCM_0100）: Place Jeanne d'Arc の南の端の島。灰色の花崗岩の段と台座
+  // （約 2.5 m 角・4.5 m、軒のモールディング）の上に、旗を掲げた騎士と馬の暗いブロンズ像（全体で約 8.5 m）
+  { id: 'jeanne-arc', kind: 'equestrian', lat: 43.60952, lon: 1.44657, facing: [43.60800, 1.44620] },
+  // アリエージュ＝ガロンヌの泉（利用者の写真 NCM_0134）: Place Auguste-Lafourcade の建物の窓のない壁に付いた、淡い石の
+  // 壁泉（幅約 6 m・高さ約 7 m、切り石の付け柱・軒・半円のニッチ、白い大理石の 2 人の女性像、貝の形の小さな水盤と大きな水盤）
+  { id: 'ariege-garonne', kind: 'wallFountain', lat: 43.59221, lon: 1.44454, r: 30 },
   { id: 'patte-oie', kind: 'roundabout', lat: 43.59640, lon: 1.42303, radius: 9 },
   // ノートルダム・ド・ラ・ドラード大聖堂の川側の正面（利用者の写真 NCM_0110・0112）: 灰色の石の 6 本の円柱（約 12 m）と
   // 三角の破風の柱廊。教会の建物の、川（facing）の方を向いたいちばん長い壁の前に建てる
@@ -458,6 +464,26 @@ export function findMonuments(proj, { buildings = [], areas = [], facade = null,
         edges.push({ p, q, L, n: [((q[1] - p[1]) / L) * sg, (-(q[0] - p[0]) / L) * sg] });
       }
       out.push({ spec, kind: 'choir', edges, height: b.info.height || 22, replaced: [] });
+    } else if (spec.kind === 'equestrian') {
+      if (!inB(x, z)) continue;
+      const [fx, fz] = proj.project(...spec.facing);
+      out.push({ spec, kind: 'equestrian', x, z, angle: Math.atan2(fz - z, fx - x), replaced: [] });
+    } else if (spec.kind === 'wallFountain') {
+      // (x, z) の方を向いた、いちばん近い長さ 7 m 以上の建物の壁の真ん中
+      let best = null;
+      for (const b of buildings) {
+        const sg = signedArea(b.outer) > 0 ? 1 : -1;
+        for (let i = 0; i < b.outer.length; i++) {
+          const p = b.outer[i], q = b.outer[(i + 1) % b.outer.length], L = Math.hypot(q[0] - p[0], q[1] - p[1]);
+          if (L < 7) continue;
+          const n = [((q[1] - p[1]) / L) * sg, (-(q[0] - p[0]) / L) * sg], mx = (p[0] + q[0]) / 2, mz = (p[1] + q[1]) / 2;
+          const d = Math.hypot(x - mx, z - mz);
+          if (d > spec.r || (x - mx) * n[0] + (z - mz) * n[1] < 0.5 * d || (best && d >= best.d)) continue;
+          best = { d, mid: [mx, mz], n, t: [(q[0] - p[0]) / L, (q[1] - p[1]) / L] };
+        }
+      }
+      if (!best || !inB(...best.mid)) continue;
+      out.push({ spec, kind: 'wallFountain', mid: best.mid, n: best.n, t: best.t, replaced: [] });
     } else if (spec.kind === 'island') {
       const [a, b] = spec.line.map((ll) => proj.project(...ll));
       if (!inB((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)) continue;
@@ -2062,6 +2088,82 @@ function writeRamblas(m, W, groundAt) {
   }
 }
 
+// ---- 騎馬像: 花崗岩の段と台座、ブロンズの馬（歩く姿）と旗を掲げた騎士
+function writeEquestrian(m, W, groundAt, colliders, onRoad, keepOut) {
+  const { x, z } = m;
+  const y0 = groundAt(x, z);
+  const w = W.main, mt = W.metal;
+  const GRANITE = col('#8c8a85'), GRANITE_D = col('#7a7873'), BRONZE = col('#3d3a36');
+  const c = Math.cos(m.angle), s = Math.sin(m.angle);
+  const F = (h) => [c * h, 0, s * h], S = (h) => [-s * h, 0, c * h], Y = (h) => [0, h, 0];
+  const at = (f, sd, y) => [x + c * f - s * sd, y, z + s * f + c * sd];
+  box(w, [x, y0 + 0.15, z], F(2.2), Y(0.3), S(2.2), GRANITE_D);
+  box(w, [x, y0 + 0.5, z], F(1.8), Y(0.25), S(1.8), GRANITE);
+  cylinder(w, x, z, 1.75, 1.45, y0 + 0.75, y0 + 1.4, { seg: 4, color: GRANITE }); // 下の台（四角錐台）
+  box(w, [x, y0 + 3.0, z], F(1.25), Y(1.6), S(1.0), GRANITE);
+  box(w, [x, y0 + 4.75, z], F(1.45), Y(0.15), S(1.2), GRANITE_D); // 軒
+  box(w, [x, y0 + 5.0, z], F(1.35), Y(0.1), S(1.1), GRANITE);
+  const yb = y0 + 5.1;
+  // 馬: 胴・首・頭・4 本の脚・尾
+  blob(mt, at(0, 0, yb + 1.45), [1.15, 0.5, 0.42], -m.angle, 10, 6, () => BRONZE);
+  blob(mt, at(1.05, 0, yb + 2.05), [0.45, 0.62, 0.26], -m.angle, 8, 5, () => BRONZE);
+  blob(mt, at(1.45, 0, yb + 2.45), [0.42, 0.2, 0.17], -m.angle, 8, 5, () => BRONZE);
+  for (const [f, sd, lift] of [[0.8, 0.22, 0.25], [0.75, -0.22, 0], [-0.8, 0.22, 0], [-0.75, -0.22, 0]]) {
+    const p = at(f, sd, 0);
+    cylinder(mt, p[0], p[2], 0.1, 0.07, yb + lift, yb + 1.25, { seg: 5, color: BRONZE });
+  }
+  blob(mt, at(-1.25, 0, yb + 1.1), [0.12, 0.5, 0.12], -m.angle, 5, 4, () => BRONZE);
+  // 騎士: 脚・胴・頭、右手に高く掲げた旗竿と旗
+  blob(mt, at(-0.05, 0, yb + 2.35), [0.28, 0.5, 0.3], -m.angle, 8, 5, () => BRONZE);
+  blob(mt, at(0, 0, yb + 3.0), [0.14, 0.17, 0.14], 0, 6, 4, () => BRONZE);
+  for (const sd of [-0.32, 0.32]) blob(mt, at(0.1, sd, yb + 1.85), [0.32, 0.12, 0.1], -m.angle, 6, 4, () => BRONZE);
+  const p0 = at(0.2, 0.3, yb + 1.9), p1 = at(0.55, 0.45, yb + 4.6);
+  box(mt, [(p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2, (p0[2] + p1[2]) / 2], [(p1[0] - p0[0]) / 2, (p1[1] - p0[1]) / 2, (p1[2] - p0[2]) / 2], [0.03, 0, 0], [0, 0, 0.03], BRONZE); // 旗竿
+  vpoly(mt, [p1[0], p1[2]], [-c, -s], [[0, p1[1] - 1.1], [0.95, p1[1] - 0.95], [0.85, p1[1] - 0.15], [0, p1[1] - 0.05]], [-s, 0, c], BRONZE);
+  vpoly(mt, [p1[0], p1[2]], [-c, -s], [[0, p1[1] - 1.1], [0.95, p1[1] - 0.95], [0.85, p1[1] - 0.15], [0, p1[1] - 0.05]], [s, 0, -c], BRONZE);
+  colliders.push([x, z, 2.3]);
+  keepOut.push([x, z, 3]);
+}
+
+// ---- 壁泉: 淡い石の付け柱と軒、半円のニッチ、白い大理石の像、貝の形の小さな水盤と丸い縁の大きな水盤
+function writeWallFountain(m, W, groundAt, colliders) {
+  const { mid, n, t } = m;
+  const w = W.main;
+  const STONE = col('#d6d2d4'), SHADE = col('#b9b5b8'), MARBLE = col('#eceae6'), WATER = col('#53645d'), DARK = col('#6e6b6d');
+  const at = (u, o) => [mid[0] + t[0] * u + n[0] * o, mid[1] + t[1] * u + n[1] * o];
+  const y0 = groundAt(...at(0, 2));
+  const N = [n[0], 0, n[1]];
+  const T = (h) => [t[0] * h, 0, t[1] * h], O = (h) => [n[0] * h, 0, n[1] * h], Y = (h) => [0, h, 0];
+  // 背の壁面・付け柱・軒
+  vpoly(w, at(0, 0.05), t, [[-3, y0], [3, y0], [3, y0 + 6.2], [-3, y0 + 6.2]], N, SHADE);
+  for (const u of [-2.6, 2.6]) {
+    const c = at(u, 0.35);
+    for (let k = 0; k < 9; k++) box(w, [c[0], y0 + 0.35 + k * 0.62, c[1]], T(0.42), Y(k % 2 ? 0.28 : 0.3), O(0.32), STONE);
+  }
+  const ce = at(0, 0.4);
+  box(w, [ce[0], y0 + 6.0, ce[1]], T(3.2), Y(0.35), O(0.45), STONE);
+  box(w, [ce[0], y0 + 6.5, ce[1]], T(3.4), Y(0.15), O(0.55), STONE);
+  // 半円のニッチ（奥の暗い面と迫石の縁）
+  vpoly(w, at(0, 0.08), t, archShape(3.6, 5.2, y0 + 0.6, 12), N, DARK);
+  vpoly(w, at(0, 0.06), t, archShape(4.2, 5.5, y0 + 0.5, 12), N, STONE);
+  // 大理石の像（立つ女性・ひざまずく女性・岩）
+  blob(w, [ce[0] + n[0] * -0.05, y0 + 1.4, ce[1] + n[1] * -0.05], [1.3, 0.8, 0.45], 0, 8, 5, () => MARBLE);
+  const fs = at(0.2, 0.55);
+  blob(w, [fs[0], y0 + 2.9, fs[1]], [0.28, 0.85, 0.22], 0, 8, 5, () => MARBLE);
+  blob(w, [fs[0], y0 + 4.0, fs[1]], [0.13, 0.16, 0.13], 0, 6, 4, () => MARBLE);
+  const k2 = at(-0.9, 0.6);
+  blob(w, [k2[0], y0 + 1.85, k2[1]], [0.3, 0.45, 0.25], 0, 8, 5, () => MARBLE);
+  // 水盤: 貝の形の小さな水盤と、張り出した大きな水盤（丸い縁）
+  const sb = at(0, 0.9);
+  cylinder(w, sb[0], sb[1], 0.4, 1.2, y0 + 1.0, y0 + 1.3, { seg: 12, color: STONE });
+  annulus(w, sb[0], sb[1], 0, 1.1, y0 + 1.28, 12, WATER);
+  const lb = at(0, 1.6);
+  cylinder(w, lb[0], lb[1], 2.4, 2.4, y0, y0 + 0.6, { seg: 20, color: STONE });
+  annulus(w, lb[0], lb[1], 2.05, 2.4, y0 + 0.6, 20, MARBLE);
+  annulus(w, lb[0], lb[1], 0, 2.05, y0 + 0.45, 20, WATER);
+  colliders.push([lb[0], lb[1], 2.4]);
+}
+
 // ---- 歩行者の島: 東の端（a）が丸く、西の端（b）が四角い、高さ 0.2 m の石の板の島と縁石、鉄の格子 2 枚
 function writeIsland(m, W, groundAt) {
   const { a, b, half } = m;
@@ -2156,7 +2258,7 @@ function writeStatue(m, W, groundAt, colliders, onRoad, keepOut) {
   keepOut.push([x, z, 6]);
 }
 
-const WRITERS = { capitainerie: writeCapitainerie, moorings: writeMoorings, riverfront: writeRiverfront, arcades: writeArcades, choir: writeChoir, ramblas: writeRamblas, basilica: writeBasilica, island: writeIsland, roundabout: writeRoundabout, portico: writePortico, donjon: writeDonjon, statue: writeStatue, dome: writeDome, chateau: writeChateau, stadium: writeStadium, cabanis: writeCabanis, coq: writeCoq, cross: writeCross, fastfood: writeFastfood, jgarden: writeJgarden, parterre: writeParterre };
+const WRITERS = { equestrian: writeEquestrian, wallFountain: writeWallFountain, capitainerie: writeCapitainerie, moorings: writeMoorings, riverfront: writeRiverfront, arcades: writeArcades, choir: writeChoir, ramblas: writeRamblas, basilica: writeBasilica, island: writeIsland, roundabout: writeRoundabout, portico: writePortico, donjon: writeDonjon, statue: writeStatue, dome: writeDome, chateau: writeChateau, stadium: writeStadium, cabanis: writeCabanis, coq: writeCoq, cross: writeCross, fastfood: writeFastfood, jgarden: writeJgarden, parterre: writeParterre };
 
 // 名所のモデルを作る。colliders: 足す当たり判定の円 [x, z, r] か線分 [ax, az, bx, bz]、
 // keepOut: 街の小物を置かない円 [x, z, r]（像の台・シャトー・ドーの柵の内側。monumentSolid）

@@ -102,7 +102,7 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
         const tile = buildTerrainTile(terrain, b, groundMats, { quayCentre, inWater });
         ground.group.add(tile.group);
         const cv = covers.find((cc) => cc.c.i === i && cc.c.j === j);
-        if (cv) ground.group.add(buildCoverMesh(cv.c, b, groundMats.cover, inOldTown, parsed, tile.geometry));
+        if (cv) ground.group.add(buildCoverMesh(cv.c, b, groundMats.cover, inOldTown, parsed, tile.geometry, (x, z) => (terrain.quayBelow?.(x, z, 25)?.drop ?? 0) > 2));
         ground.far?.setTile(i, j, true);
       }
     }

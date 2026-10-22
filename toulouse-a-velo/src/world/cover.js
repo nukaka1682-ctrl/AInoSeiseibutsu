@@ -141,7 +141,8 @@ function onBeforeCompile(uniforms) {
 // 1 枚の板: bounds（ローカル座標の範囲）を覆う。cover: { cols, rows, rle }、inOldTown(x, z): 旧市街か、
 // parsed: 地図（広場と並木道の名前で覆いを補正する。data/cover.js の coverStamps）
 // geometry: 地形のタイルの地面（terrainmesh.js。頂点はワールド座標）。あればそれに重ねて描く（同じ三角形なので地面とぴったり重なる）
-export function buildCoverMesh(cover, bounds, shared, inOldTown = () => false, parsed = null, geometry = null) {
+// lowQuay(x, z): 河岸の岸壁の下の段か（利用者の写真: ラ・ドラードの下の段は旧市街の小舗石ではなく灰色の石の板。旧市街の外と同じ灰色の舗装にする）
+export function buildCoverMesh(cover, bounds, shared, inOldTown = () => false, parsed = null, geometry = null, lowQuay = null) {
   const grid = decodeCover(cover);
   const w = bounds.maxX - bounds.minX, h = bounds.maxZ - bounds.minZ;
   let cx = (bounds.minX + bounds.maxX) / 2, cz = (bounds.minZ + bounds.maxZ) / 2;
@@ -155,7 +156,10 @@ export function buildCoverMesh(cover, bounds, shared, inOldTown = () => false, p
   const pos = g.attributes.position;
   const old = new Float32Array(pos.count);
   let anyOld = false;
-  for (let i = 0; i < pos.count; i++) if ((old[i] = inOldTown(cx + pos.getX(i), cz + pos.getZ(i)) ? 1 : 0)) anyOld = true;
+  for (let i = 0; i < pos.count; i++) {
+    const x = cx + pos.getX(i), z = cz + pos.getZ(i);
+    if ((old[i] = inOldTown(x, z) && !(lowQuay && lowQuay(x, z)) ? 1 : 0)) anyOld = true;
+  }
   g.setAttribute('oldTown', new THREE.BufferAttribute(old, 1));
   // 旧市街にかかる板だけ、広場の中の印（公道を花崗岩の石畳にする所）を作る
   const mask = parsed && anyOld ? new Uint8Array(grid.cols * grid.rows) : null;
