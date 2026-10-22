@@ -66,12 +66,18 @@ export function findCapitoleFacade(parsed) {
   return { building: best.b, origin, dir, normal: [nx, nz], t0, t1, height: CAPITOLE_HEIGHT, edges: best.edges };
 }
 
-// 壁の一部（a→c、外向きの法線 n）が正面に含まれるなら、テクスチャの横の範囲 [u0, u1] を返す
-export function facadeSpan(f, a, c, n) {
+// 壁の一部（a→c、外向きの法線 n）が正面に含まれるなら、テクスチャの横の範囲 [u0, u1] を返す。
+// other: 正面の建物ではない建物の壁。正面の線から 1.5 m 以内で、正面の範囲（t0〜t1）の中なら正面に含める
+// （利用者の写真: キャピトルの正面は一続き。地図では真ん中の右の一部が別の建物の外形になっている）
+export function facadeSpan(f, a, c, n, other = false) {
   if (!f || n[0] * f.normal[0] + n[2] * f.normal[1] < 0.7) return null;
-  const onFacade = (p) => f.edges.some((e) => closestOnSegment(p[0], p[1], e.a[0], e.a[1], e.c[0], e.c[1]).d2 < 2.5 * 2.5);
+  const t = (p) => (p[0] - f.origin[0]) * f.dir[0] + (p[1] - f.origin[1]) * f.dir[1];
+  const off = (p) => Math.abs((p[0] - f.origin[0]) * f.normal[0] + (p[1] - f.origin[1]) * f.normal[1]);
+  const onFacade = other
+    ? (p) => off(p) < 1.5 && t(p) > f.t0 - 0.5 && t(p) < f.t1 + 0.5
+    : (p) => f.edges.some((e) => closestOnSegment(p[0], p[1], e.a[0], e.a[1], e.c[0], e.c[1]).d2 < 2.5 * 2.5);
   if (!onFacade(a) || !onFacade(c)) return null;
-  const u = (p) => ((p[0] - f.origin[0]) * f.dir[0] + (p[1] - f.origin[1]) * f.dir[1] - f.t0) / (f.t1 - f.t0);
+  const u = (p) => (t(p) - f.t0) / (f.t1 - f.t0);
   return [u(a), u(c)];
 }
 

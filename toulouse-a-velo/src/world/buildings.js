@@ -242,7 +242,7 @@ function writeWalls(W, ring, sign, b, plainColor, facade, covers = null) {
     const nrm = [(dz / L) * sign, 0, (-dx / L) * sign];
     const A = (y) => [a[0], y, a[1]];
     const C = (y) => [c[0], y, c[1]];
-    const span = facade?.building === b ? facadeSpan(facade, a, c, nrm) : null;
+    const span = facade ? facadeSpan(facade, a, c, nrm, facade.building !== b) : null;
     if (span) {
       const top = Math.max(y1, y0 + facade.height);
       W.capitole.quad(A(y0), C(y0), C(top), A(top), nrm, [span[0], 0], [span[1], 0], [span[1], (top - y0) / facade.height], [span[0], (top - y0) / facade.height]);
