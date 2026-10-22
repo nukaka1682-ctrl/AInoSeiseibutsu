@@ -66,6 +66,7 @@ const COL = {
   pierBrick: T('#9a7464'),
   lamp: T('#858b84'), // 明るい灰緑の鋳鉄（利用者の写真 0310_160523254: #8f948c 前後）
   globe: T('#f1eee4'),
+  brass: T('#b08d4a'), // 灯具の真鍮の帯
 };
 
 // 淡いコンクリートのアーチ橋（利用者の写真 NCM_0102・0103: Pont des Catalans は 1913 年の淡い灰色のコンクリート #b8b4ac）。
@@ -1038,7 +1039,8 @@ function writeStructure(w, road, v, stone = w) {
       for (const sd of [1, -1]) {
         const half = sd > 0 ? v.extL : v.extR;
         const c = fr.at(pts, s), n = N(sd, s);
-        const x = c[0] + n[0] * (half - 0.15), z = c[1] + n[2] * (half - 0.15);
+        // 台座は欄干の内側に沿って歩道の上に立つ（利用者の写真 0310_160523254）
+        const x = c[0] + n[0] * (half - 0.8), z = c[1] + n[2] * (half - 0.8);
         writeLamp(w, x, z, U(s), 0.08, [-n[0], -n[2]], stone);
       }
     }
@@ -1279,10 +1281,14 @@ function writeLamp(w, x, z, [ux, uz], baseY, [ix, iz], stone = w) {
   // 吊り下げの灯具（腕の先から下がる。笠・ガラス・下の飾り）
   const [hl, al] = arm[arm.length - 1];
   const lx = x + ix * hl, lz = z + iz * hl, ya = y0 + al;
+  // 鐘の形の灯具（笠・下に広がるガラス・真鍮の帯・下の飾り）
   box(lx, lz, ya - 0.18, ya, 0.025, 0.025, COL.lamp);
-  box(lx, lz, ya - 0.3, ya - 0.18, 0.2, 0.2, COL.lamp);
-  box(lx, lz, ya - 0.72, ya - 0.3, 0.15, 0.15, COL.globe);
-  box(lx, lz, ya - 0.8, ya - 0.72, 0.09, 0.09, COL.lamp);
+  box(lx, lz, ya - 0.3, ya - 0.18, 0.22, 0.22, COL.lamp);
+  box(lx, lz, ya - 0.45, ya - 0.3, 0.12, 0.12, COL.globe);
+  box(lx, lz, ya - 0.6, ya - 0.45, 0.16, 0.16, COL.globe);
+  box(lx, lz, ya - 0.64, ya - 0.6, 0.2, 0.2, COL.brass);
+  box(lx, lz, ya - 0.76, ya - 0.64, 0.19, 0.19, COL.globe);
+  box(lx, lz, ya - 0.84, ya - 0.76, 0.08, 0.08, COL.lamp);
 }
 
 function writeGlobe(w, x, y, z, r, color) {
