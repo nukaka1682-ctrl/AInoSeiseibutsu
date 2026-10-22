@@ -12,10 +12,10 @@
 import * as THREE from 'three';
 import { mulberry32 } from '../geo.js';
 
-export const FACADE_STYLES = 11;
+export const FACADE_STYLES = 12;
 // haussmann: 19 世紀末の切り石の建物（Rue d'Alsace-Lorraine・Rue de Metz）。2 階と 5 階（上の階の 2 段目と 5 段目）は
 // 通しのバルコニーのセル（haussmannFilant。シェーダーで差し替える。様式としては選ばない）
-export const STYLE = { brickStone: 0, brickShutters: 1, ochre: 2, taupe: 3, salmon: 4, cream: 5, modern: 6, rose: 7, arcade: 8, haussmann: 9, haussmannFilant: 10 };
+export const STYLE = { brickStone: 0, brickShutters: 1, ochre: 2, taupe: 3, salmon: 4, cream: 5, modern: 6, rose: 7, arcade: 8, haussmann: 9, haussmannFilant: 10, residence: 11 };
 
 const W = 1024, CELL = 256, BAYW = 256;
 
@@ -33,6 +33,8 @@ const STYLES = [
   // 1 階は全部が背の高い店（石の付け柱のあいだ）。filant: 通しの鉄のバルコニー（石の床板つき）
   { wall: 'stone', plaster: '#cdb798', trim: 'molded', shutters: null, panes: 3, balcony: [1, 1, 1, 1], lintel: true, band: 'stone', shops: true, door: '#2c3a44', shop: '#24313a' },
   { wall: 'stone', plaster: '#cdb798', trim: 'molded', shutters: null, panes: 3, balcony: [0, 0, 0, 0], filant: true, lintel: true, band: 'stone', shops: true, door: '#2c3a44', shop: '#24313a' },
+  // 戦後の集合住宅（利用者の写真 NCM_0183・0184・225015）: サーモン色の漆喰、どの階にも白いコンクリートのバルコニーの帯、鎧戸なし
+  { wall: 'plaster', plaster: '#c9a08e', trim: 'none', shutters: null, panes: 2, balcony: [0, 0, 0, 0], band: 'none', modern: true, residence: true, door: '#555b60', shop: '#3a4046' },
 ];
 
 function canvas(w, h) {
@@ -356,6 +358,19 @@ function drawUpper(ctx, st, rnd) {
     if (st.balustrade) balustrade(ctx, x - 10, top + wh - 54, ww + 20);
     // 窓台の両端からの雨だれ
     rainStreaks(ctx, x - 14, x + ww + 14, top + wh + 9, rnd);
+  }
+  if (st.residence) {
+    // どの階にも、白いコンクリートのバルコニーの床板（下に影）と細い金属の手すり
+    const y = CELL - 30;
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.fillRect(0, y + 18, W, 8);
+    ctx.fillStyle = '#ecebe6';
+    ctx.fillRect(0, y, W, 18);
+    ctx.fillStyle = 'rgba(0,0,0,0.12)';
+    ctx.fillRect(0, y + 15, W, 3);
+    ctx.fillStyle = '#9da2a4';
+    ctx.fillRect(0, y - 52, W, 3);
+    for (let x = 4; x < W; x += 9) ctx.fillRect(x, y - 52, 2, 52);
   }
   if (st.filant) {
     // 通しのバルコニー: 石の床板（下に持ち送りの影）と、壁の端から端までの黒い鉄の手すり

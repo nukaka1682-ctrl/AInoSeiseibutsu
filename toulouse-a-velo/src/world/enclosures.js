@@ -3,7 +3,7 @@
 // 見た目は Wikimedia Commons のトゥールーズのレンガ壁の写真を手本にしたテクスチャ（textures.js の makeEnclosureTexture）。
 import * as THREE from 'three';
 import { MeshWriter } from './meshwriter.js';
-import { Grid, closestOnSegment, hash01 } from '../geo.js';
+import { Grid, closestOnSegment, hash01, pointInRing } from '../geo.js';
 
 const THICK = 0.4;
 const CAP = [0.78, 0.45, 0.32]; // 笠木の瓦（瓦のテクスチャに掛ける色）
@@ -112,6 +112,15 @@ export function projectTrees(trees, proj) {
 const FIXED_WALLS = [
   { pts: [[43.595281, 1.435751], [43.5945, 1.435416], [43.594186, 1.43528], [43.593359, 1.434932], [43.593153, 1.434846]], h: 3.2, kind: 'render' },
 ];
+// 塀のない広場（利用者の写真: Square Charles-de-Gaulle とキャピトル広場は平らな舗装で、LiDAR で見つかる塀は
+// 地下鉄の出入口・植え込みの縁・日よけ）。中点がこの名前の地図の多角形の中にある塀を除く
+const WALL_FREE = /^(Square Charles de Gaulle|Place du Capitole)$/i;
+export function clearNamedAreas(segs, areas) {
+  const rings = areas.filter((a) => WALL_FREE.test(a.name || '')).map((a) => a.outer);
+  if (!rings.length) return segs;
+  return segs.filter(([ax, az, bx, bz]) => !rings.some((r) => pointInRing((ax + bx) / 2, (az + bz) / 2, r)));
+}
+
 // 範囲 bounds に中点が入る区間を [ax, az, bx, bz, h, kind] にして返す
 export function fixedWalls(proj, bounds = null) {
   const out = [];

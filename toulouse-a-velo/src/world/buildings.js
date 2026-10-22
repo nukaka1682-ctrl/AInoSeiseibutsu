@@ -79,6 +79,8 @@ const STYLE_MIX = {
 export function facadeStyle(b) {
   if (b.style != null) return b.style; // 決まった様式（landmarkfacades.js の歴史的な建物）
   const mat = b.tags['building:material'];
+  // 旧市街の外の背の高い戦後の集合住宅（7 階以上か 20 m 以上、レンガ・石でない）: 4 分の 3 は白いバルコニーの帯の漆喰、残りは現代的な様式
+  if (!b.oldTown && mat !== 'brick' && mat !== 'stone' && ((b.info?.levels || 0) >= 7 || (b.info?.height || 0) >= 20)) return hash01(b.id, 21) < 0.75 ? STYLE.residence : STYLE.modern;
   const key = mat === 'sandstone' || mat === 'limestone' ? 'stone' : mat === 'plaster' || mat === 'render' ? 'other' : mat;
   const mix = (b.oldTown && (key === 'brick' || !STYLE_MIX[key]) ? STYLE_MIX.oldTown : STYLE_MIX[key]) || STYLE_MIX.other;
   let r = hash01(b.id, 21);

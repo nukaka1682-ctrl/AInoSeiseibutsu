@@ -131,6 +131,11 @@ test('ファサード: 旧市街のレンガ・材料不明の建物は 8 割が
   assert.ok(share(true, 'brick') >= 0.75, `旧市街・レンガ ${share(true, 'brick')}`);
   assert.ok(share(false, null) < 0.75, `旧市街の外 ${share(false, null)}`);
   assert.equal(facadeStyle({ id: 5, tags: {}, style: STYLE.arcade }), STYLE.arcade);
+  // 旧市街の外の背の高い集合住宅は、白いバルコニーの帯の漆喰か現代的な様式（レンガ・石の建物は除く）
+  for (let id = 1; id <= 50; id++) {
+    assert.ok([STYLE.residence, STYLE.modern].includes(facadeStyle({ id, tags: {}, oldTown: false, info: { levels: 9, height: 28 } })));
+  }
+  assert.ok(![STYLE.residence].includes(facadeStyle({ id: 3, tags: { 'building:material': 'brick' }, oldTown: false, info: { levels: 9, height: 28 } })));
   assert.equal(stylePlainColor(STYLE.brickShutters), null);
   assert.match(stylePlainColor(STYLE.ochre), /^#[0-9a-f]{6}$/);
 

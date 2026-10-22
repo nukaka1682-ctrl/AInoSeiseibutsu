@@ -60,6 +60,9 @@ const BIN_COLORS = ['#2f6a3c', '#2c5a94']; // ごみ収集容器（緑・青）
 
 // ---------------------------------------------------------------- 位置の計算（純粋な関数）
 // 道の始点からの距離 [s0, s1] の中の、step おきの位置（phase だけずらす）。k: 何番目か（道全体で決まる）
+const PLANTER_STREETS = /^Rue d'Alsace[- ]Lorraine$/i;
+const PLANTER_STEP = 28;
+
 export function slotsAlong(s0, s1, step, phase = 0) {
   const out = [];
   for (let k = Math.ceil((s0 - phase) / step - 1e-9); phase + k * step <= s1 + 1e-9; k++) out.push({ k, s: phase + k * step });
@@ -442,6 +445,29 @@ export function planFurniture({ parsed, plan, clip, curbs = [], inOldTown = () =
     }
   }
 
+  // ---- Rue d'Alsace-Lorraine（利用者の Street View 211548・211704）: 通りの真ん中から少し西寄りに、低い植え込みの箱
+  // （3 × 1.4 m・高さ 0.5 m、低木と小さな常緑のタイサンボク）を約 28 m おき。位置は道の始点からの距離で決める
+  for (const road of parsed.roads) {
+    if (!PLANTER_STREETS.test(road.name || '') || road.bridge || road.tunnel) continue;
+    const pts = road.pts, hid = road.id | 0;
+    let acc = 0;
+    for (let i = 0; i + 1 < pts.length; i++) {
+      const [ax, az] = pts[i], [bx, bz] = pts[i + 1], L = Math.hypot(bx - ax, bz - az);
+      if (L < 1e-6) continue;
+      const ux = (bx - ax) / L, uz = (bz - az) / L;
+      // 道の向きによらず西寄り（x の小さい側）
+      const sx = -uz < 0 ? -1 : 1, nx = -uz * sx, nz = ux * sx;
+      for (const { s } of slotsAlong(acc + 6, acc + L - 6, PLANTER_STEP, hash01(hid, 95) * PLANTER_STEP)) {
+        const t = s - acc, x = ax + ux * t + nx * 2.2, z = az + uz * t + nz * 2.2;
+        if (!inClip(x, z) || ctx.nearJunction(x, z, 6) || !clear(x, z, 1.6)) continue;
+        out.planters.push({ x, z, y: heightAt(x, z), a: yaw(ux, uz), type: 'low' });
+        take(x, z, 1.6);
+        boxC(x, z, ux, uz, 1.5, 0.7);
+      }
+      acc += L;
+    }
+  }
+
   // ---- 広場: 旧市街の広場の縁に黒い燭台形の街灯（Capitole の広場は別）、ごみ箱を 2〜4 個
   const terrace = (p, ok) => {
     if (!ok(p.x, p.z, 2.1)) return;
@@ -736,6 +762,21 @@ export function graniteBlockGeometry(long = false) {
   return toGeometry(w);
 }
 
+// 低い植え込みの箱（3 × 1.4 m・高さ 0.5 m、暗い灰色）に低木と小さな常緑の木（高さ約 5 m）。x 軸が箱の長い向き
+export function lowPlanterGeometry() {
+  const w = new MeshWriter();
+  const boxCol = rgb('#4a4d4f'), soil = rgb('#3a2e24'), shrub = rgb('#3d4a26'), bark = rgb('#5a524a'), leaf = rgb('#3f4b22');
+  box(w, -1.5, 0, -0.7, 1.5, 0.5, 0.7, boxCol, { top: soil });
+  for (const x of [-1.0, 1.0]) {
+    const prof = [[0.2, 0], [0.5, 0.15], [0.55, 0.4], [0.35, 0.65], [0, 0.75]];
+    for (let k = 0; k + 1 < prof.length; k++) column(w, x, 0, prof[k][0], prof[k + 1][0], 0.5 + prof[k][1], 0.5 + prof[k + 1][1], 7, shrub, { bottom: k === 0 ? shrub : null });
+  }
+  column(w, 0, 0, 0.08, 0.06, 0.5, 2.6, 5, bark);
+  const prof = [[0.4, 0], [1.3, 0.5], [1.5, 1.3], [1.2, 2.1], [0.6, 2.6], [0, 2.8]];
+  for (let k = 0; k + 1 < prof.length; k++) column(w, 0, 0, prof[k][0], prof[k + 1][0], 2.1 + prof[k][1], 2.1 + prof[k + 1][1], 9, leaf, { bottom: k === 0 ? leaf : null });
+  return toGeometry(w);
+}
+
 // 暗い灰緑色の大きな植木箱（1.6 m 角・高さ 1.3 m）に、刈り込んだ常緑の丸い木（幹 1 m・樹冠の直径約 1.8 m）
 export function planterGeometry() {
   const w = new MeshWriter();
@@ -973,7 +1014,8 @@ export function buildFurniture(opts, cw = null) {
   set.add('bollards', bollardGeometry(), mat, of(items.bollards, 'granite', 'granite'));
   set.add('granite-blocks', graniteBlockGeometry(), mat, of(items.blocks, 'cube', 'cube'), { shadow: true });
   set.add('granite-benches', graniteBlockGeometry(true), mat, of(items.blocks, 'bench', 'cube'), { shadow: true });
-  set.add('planters', planterGeometry(), mat, items.planters, { shadow: true });
+  set.add('planters', planterGeometry(), mat, of(items.planters, 'tall', 'tall'), { shadow: true });
+  set.add('low-planters', lowPlanterGeometry(), mat, of(items.planters, 'low', 'tall'), { shadow: true });
   set.add('potelets', poteletGeometry(), mat, of(items.bollards, 'potelet', 'granite'));
   set.add('terraces', terraceGeometry(), mat, items.terraces);
   set.add('bins', binGeometry(), mat, items.bins);

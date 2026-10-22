@@ -13,7 +13,7 @@ import { buildTerrainTile } from './terrainmesh.js';
 import { buildCoverMesh } from './cover.js';
 import { tileBounds, tileLayout } from '../data/tiles.js';
 import { buildTrees, fillParkTrees, planeTreeTest, streetTrees, treelessTest, magnoliaTest, liftQuayTrees } from './trees.js';
-import { buildEnclosures, clearRoads, fixedWalls, projectTrees, projectWalls, tameWalls } from './enclosures.js';
+import { buildEnclosures, clearNamedAreas, clearRoads, fixedWalls, projectTrees, projectWalls, tameWalls } from './enclosures.js';
 import { clearEntrances, entranceWalls, inEntrance, projectEntrances } from './metro.js';
 import { findTowers } from './towers.js';
 import { buildMonuments, findMonuments, monumentClearance, monumentSolid } from './monuments.js';
@@ -84,7 +84,7 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   progress('道路と川を作成中…', 0.15);
   await pause();
   // 塀（地籍の敷地の境界と LiDAR から見つけたもの）。歩道は建物の壁・塀まで延ばすので、地面より先に用意する
-  const walls = clearEntrances(clearRoads(tameWalls(projectWalls(data.walls || [], proj), parsed.buildings), (x, z) => roadnet.onRoad(x, z, 0.3)), projectEntrances(terrain.metroRaw || [], proj)).concat(fixedWalls(proj, rect)); // 出入口の腰壁は塀にしない（地形の手直しはまだなので緯度経度から）
+  const walls = clearNamedAreas(clearEntrances(clearRoads(tameWalls(projectWalls(data.walls || [], proj), parsed.buildings), (x, z) => roadnet.onRoad(x, z, 0.3)), projectEntrances(terrain.metroRaw || [], proj)), parsed.areas).concat(fixedWalls(proj, rect)); // 出入口の腰壁は塀にしない（地形の手直しはまだなので緯度経度から）
   // 地面の覆い（500 m のブロックごと。fetch-data の bakeSite と同じ区切り）。覆いのある所の緑地は覆いにまかせる
   const layout = tileLayout(rect);
   const covers = (data.cover || []).map((c) => ({ c, b: tileBounds(layout, c.i, c.j) }));
