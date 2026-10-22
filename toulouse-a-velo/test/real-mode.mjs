@@ -132,11 +132,13 @@ for (const v of views) {
         const at = ([r, u, f]) => [b.x + fz * -r + fx * f, b.y + u, b.z + fx * r + fz * f];
         c.position.set(...at(cam.pos));
         c.lookAt(...at(cam.look));
-      } else if (cam.ground) {
+      } else if (cam.ground || cam.deck) {
         // ground: y は地面（岸壁の上の歩道の板を含む）からの高さ（写真と同じ目の高さで撮る）
-        const T = s.world.terrain, g = (x, z) => (T?.top ? T.top(x, z) : T?.h ? T.h(x, z) : 0) + (s.world.liftAt ? s.world.liftAt(x, z) : 0);
-        c.position.set(cam.pos[0], cam.pos[1] + g(cam.pos[0], cam.pos[2]), cam.pos[2]);
-        c.lookAt(cam.look[0], cam.look[1] + g(cam.look[0], cam.look[2]), cam.look[2]);
+        // deck: 橋の上（いちばん上の橋面）からの高さ
+        const T = s.world.terrain, g = cam.deck && s.world.heightAt ? (x, z) => s.world.heightAt(x, z) : (x, z) => (T?.top ? T.top(x, z) : T?.h ? T.h(x, z) : 0) + (s.world.liftAt ? s.world.liftAt(x, z) : 0);
+        const g0 = g(cam.pos[0], cam.pos[2]);
+        c.position.set(cam.pos[0], cam.pos[1] + g0, cam.pos[2]);
+        c.lookAt(cam.look[0], cam.look[1] + (cam.deck ? g0 : g(cam.look[0], cam.look[2])), cam.look[2]); // 橋の上からは水平に
       } else {
         c.position.set(...cam.pos);
         c.lookAt(...cam.look);
