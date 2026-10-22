@@ -217,3 +217,19 @@ test('ファストフード店: 近くの外形を置き換え、看板塔・砂
   const built = buildMonuments([m], { monument: {}, monumentMetal: {}, monumentInlay: {} }, { groundAt: () => 0 });
   assert.ok(built.colliders.some((c) => c.length === 3 && Math.hypot(c[0] - m.pylon[0], c[1] - m.pylon[1]) < 1e-6), '看板塔の当たり判定');
 });
+
+test('閘門: 閘室の両側の柵は当たり判定の線、上の面は地面の切り抜き（ステンシル）', async () => {
+  const { LOCKS, lockFrame } = await import('../../src/world/locks.js');
+  const proj = new LocalProjection(43.6045, 1.4345);
+  const spec = LOCKS.find((l) => l.id === 'ecluse-saint-pierre');
+  const list = findMonuments(proj, { buildings: [], areas: [], roads: [], bounds: null }).filter((m) => m.kind === 'lock');
+  assert.equal(list.length, 1);
+  const f = lockFrame(list[0].a, list[0].b);
+  const [u, v] = f.uv(...f.at(7, -2));
+  assert.ok(Math.abs(u - 7) < 1e-9 && Math.abs(v + 2) < 1e-9);
+  const { group, colliders } = buildMonuments(list, {}, { groundAt: () => 0, waterAt: () => -3 });
+  assert.ok(group.children.some((c) => c.name === 'monument-mask') && group.children.some((c) => c.name === 'monument-mask-reset'));
+  // 柵: 閘室の芯線から幅の半分 + 0.3 m の所に、閘室に沿った線分
+  const side = colliders.filter((c) => c.length === 4 && Math.abs(Math.abs(f.uv(c[0], c[1])[1]) - (spec.width / 2 + 0.3)) < 1e-6);
+  assert.ok(side.length >= 4);
+});

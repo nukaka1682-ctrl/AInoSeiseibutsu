@@ -14,8 +14,10 @@ import * as THREE from 'three';
 import { MeshWriter, triangulate } from './meshwriter.js';
 import { centroid, hash01, mulberry32, pointInPolygon, pointInRing, signedArea } from '../geo.js';
 import { ORDER } from './ground.js';
+import { TERRAIN_ORDER } from './terrainmesh.js';
 import { CAR_ROADS } from './parse.js';
 import { ramblasLayout } from './ramblas.js';
+import { LOCKS, lockFrame } from './locks.js';
 
 export const MONUMENTS = [
   { id: 'chateau-eau', kind: 'chateau', lat: 43.59870, lon: 1.43693, r: 20 },
@@ -56,6 +58,7 @@ export const MONUMENTS = [
   // アリエージュ＝ガロンヌの泉（利用者の写真 NCM_0134）: Place Auguste-Lafourcade の建物の窓のない壁に付いた、淡い石の
   // 壁泉（幅約 6 m・高さ約 7 m、切り石の付け柱・軒・半円のニッチ、白い大理石の 2 人の女性像、貝の形の小さな水盤と大きな水盤）
   { id: 'ariege-garonne', kind: 'wallFountain', lat: 43.59221, lon: 1.44454, r: 30 },
+  ...LOCKS, // 閘門（locks.js）
   { id: 'patte-oie', kind: 'roundabout', lat: 43.59640, lon: 1.42303, radius: 9 },
   // ノートルダム・ド・ラ・ドラード大聖堂の川側の正面（利用者の写真 NCM_0110・0112）: 灰色の石の 6 本の円柱（約 12 m）と
   // 三角の破風の柱廊。教会の建物の、川（facing）の方を向いたいちばん長い壁の前に建てる
@@ -464,6 +467,11 @@ export function findMonuments(proj, { buildings = [], areas = [], facade = null,
         edges.push({ p, q, L, n: [((q[1] - p[1]) / L) * sg, (-(q[0] - p[0]) / L) * sg] });
       }
       out.push({ spec, kind: 'choir', edges, height: b.info.height || 22, replaced: [] });
+    } else if (spec.kind === 'lock') {
+      const a = proj.project(...spec.a), b = proj.project(...spec.b);
+      if (!inB((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)) continue;
+      const water = areas.find((q) => q.type === 'water' && pointInPolygon((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, q));
+      out.push({ spec, kind: 'lock', a, b, width: spec.width, from: spec.from, area: water || null, replaced: [] });
     } else if (spec.kind === 'equestrian') {
       if (!inB(x, z)) continue;
       const [fx, fz] = proj.project(...spec.facing);
@@ -2088,6 +2096,134 @@ function writeRamblas(m, W, groundAt) {
   }
 }
 
+// ---- 閘門（利用者の写真 NCM_0185）: 幅 6.4 m・深さ約 4 m の石積みの閘室（灰色の切石）、底に暗い水。運河の側の端に
+// 錆色の鋼の扉と、その上を渡る鋼の歩道橋（格子の床）。閘室のまわりは黒い鋼の柵（2 m ごとの X の筋交いと、交点の丸い飾り）。
+// 地形モデルでは閘室が浅い窪みなので、閘室の上の面（ステンシル）で地面を切り抜き、中を壁と水で描く（メトロの出入口と同じ）
+function writeLock(m, W, groundAt, colliders, onRoad, keepOut, waterAt) {
+  const w = W.main, mt = W.metal;
+  const { L, u, v, at: P } = lockFrame(m.a, m.b);
+  const hw = m.width / 2;
+  const yw = waterAt(...P(L / 2, 0), m.area) + 0.02;
+  const STONE = ['#b9b3a8', '#aea89d', '#c2bcb1', '#a7a196'].map(col), COPING = col('#bfbab0'), WATER = col('#2f3a38');
+  const GATE = col('#8a6a60'), IRON = col('#3a3a3c'), GRATE = col('#4a4c4e');
+  const u0 = m.from, u1 = L, step = 3;
+  const us = [];
+  for (let k = 0; k <= Math.ceil((u1 - u0) / step); k++) us.push(Math.min(u1, u0 + k * step));
+  // 両側の縁の高さ: 壁のすぐ外の地面と、閘室の中の地面（地形モデルの浅い窪み。切り抜く面より下にする）の高い方
+  const inner = us.map((t) => {
+    let y = -Infinity;
+    for (let du = -1.5; du <= 1.5; du += 0.75) for (let dv = -hw; dv <= hw + 1e-6; dv += hw / 4) y = Math.max(y, groundAt(...P(Math.min(u1, Math.max(u0, t + du)), dv)));
+    return y;
+  });
+  const edge = [-1, 1].map((sd) => us.map((t) => groundAt(...P(t, sd * (hw + 0.9)))));
+  const top = edge.map((E) => E.map((e, k) => Math.max(yw + 1.5, e, inner[k]) + 0.05));
+  // 段にならないよう、隣との差を 1 区間 0.35 m までに（低い方を持ち上げる）
+  for (const T of top) {
+    for (let k = 1; k < T.length; k++) T[k] = Math.max(T[k], T[k - 1] - 0.35);
+    for (let k = T.length - 2; k >= 0; k--) T[k] = Math.max(T[k], T[k + 1] - 0.35);
+  }
+  const topAt = (si, t) => {
+    const T = top[si], f = Math.min(us.length - 1.001, Math.max(0, (t - u0) / step)), i = Math.floor(f);
+    return T[i] + (T[i + 1] - T[i]) * (f - i);
+  };
+  const ashlar = (p0, p1, y0, y1, n, seed) => {
+    // 切石の目地（幅 1.2 m・高さ 0.55 m の石を半分ずつずらして積む。石ごとに色を少し変える）
+    const Lw = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]), d = [(p1[0] - p0[0]) / Lw, (p1[1] - p0[1]) / Lw];
+    const rows = Math.max(1, Math.round((y1 - y0) / 0.55));
+    for (let r = 0; r < rows; r++) {
+      const ya = y0 + ((y1 - y0) * r) / rows, yb = y0 + ((y1 - y0) * (r + 1)) / rows;
+      const off = r % 2 ? 0.6 : 0;
+      for (let s0 = -off; s0 < Lw; s0 += 1.2) {
+        const sa = Math.max(0, s0), sb = Math.min(Lw, s0 + 1.2);
+        if (sb - sa < 0.05) continue;
+        const c = STONE[Math.floor(hash01(seed + r * 131 + Math.round(s0 * 10), 41) * STONE.length)];
+        const A = [p0[0] + d[0] * sa, p0[1] + d[1] * sa], B = [p0[0] + d[0] * sb, p0[1] + d[1] * sb];
+        w.quad([A[0], ya + 0.02, A[1]], [B[0], ya + 0.02, B[1]], [B[0], yb, B[1]], [A[0], yb, A[1]], n, PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, c);
+      }
+      w.quad([p0[0], ya, p0[1]], [p1[0], ya, p1[1]], [p1[0], ya + 0.02, p1[1]], [p0[0], ya + 0.02, p0[1]], n, PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, col('#8d877c'));
+    }
+  };
+  const yBot = yw - 0.4;
+  // 長い側の壁（内向き）と笠石、地面の切り抜き
+  for (let k = 0; k + 1 < us.length; k++) {
+    const t0 = us[k], t1 = us[k + 1];
+    for (const [si, sd] of [[0, -1], [1, 1]]) {
+      const p0 = P(t0, sd * hw), p1 = P(t1, sd * hw), yt = Math.min(top[si][k], top[si][k + 1]);
+      const n = [-v[0] * sd, 0, -v[1] * sd];
+      ashlar(sd < 0 ? p0 : p1, sd < 0 ? p1 : p0, yBot, yt, n, k * 7 + si * 3);
+      // 笠石（幅 0.9 m の淡い花崗岩。上の面と、外側の面を 1.2 m 下ろす）と、壁の上の端（切石の上から笠石まで）
+      const y0 = top[si][k] + 0.1, y1 = top[si][k + 1] + 0.1, o0 = P(t0, sd * (hw + 0.9)), o1 = P(t1, sd * (hw + 0.9));
+      const up = sd < 0 ? [p0, p1, o1, o0] : [p1, p0, o0, o1], ys = sd < 0 ? [y0, y1, y1, y0] : [y1, y0, y0, y1];
+      w.quad(...up.map((q, i) => [q[0], ys[i], q[1]]), [0, 1, 0], PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, COPING);
+      const on = [v[0] * sd, 0, v[1] * sd], [e0, e1, f0, f1] = sd < 0 ? [o1, o0, y1, y0] : [o0, o1, y0, y1];
+      // 外側の面: 上の 0.3 m は笠石、その下は地面の下まで切石
+      const yg = Math.min(edge[si][k], edge[si][k + 1]) - 0.3;
+      w.quad([e0[0], f0 - 0.3, e0[1]], [e1[0], f1 - 0.3, e1[1]], [e1[0], f1, e1[1]], [e0[0], f0, e0[1]], on, PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, COPING);
+      if (yg < Math.min(f0, f1) - 0.3) ashlar(e0, e1, yg, Math.min(f0, f1) - 0.3, on, 501 + k * 5 + si);
+      const [g0, g1, h0, h1] = sd < 0 ? [p0, p1, y0, y1] : [p1, p0, y1, y0];
+      w.quad([g0[0], yt, g0[1]], [g1[0], yt, g1[1]], [g1[0], h1, g1[1]], [g0[0], h0, g0[1]], n, PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, COPING);
+    }
+    // 水面と、地面の切り抜き（閘室の上の面。上向き）
+    const A = P(t0, -hw), B = P(t1, -hw), C = P(t1, hw), D = P(t0, hw);
+    w.quad([A[0], yw, A[1]], [D[0], yw, D[1]], [C[0], yw, C[1]], [B[0], yw, B[1]], [0, 1, 0], PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, WATER);
+    const yA = top[0][k] + 0.1, yB = top[0][k + 1] + 0.1, yC = top[1][k + 1] + 0.1, yD = top[1][k] + 0.1;
+    W.mask.quad([A[0], yA, A[1]], [D[0], yD, D[1]], [C[0], yC, C[1]], [B[0], yB, B[1]], [0, 1, 0], [0, 0], [1, 0], [1, 1], [0, 1], WHITE);
+  }
+  // 両端: 下流は石の壁、上流（運河の側）は錆色の扉（上の 0.5 m は石）
+  for (const [t, sg, gate] of [[u0, 1, false], [u1, -1, true]]) {
+    const yt = Math.min(topAt(0, t), topAt(1, t));
+    const p0 = P(t, -hw), p1 = P(t, hw), n = [u[0] * sg, 0, u[1] * sg];
+    if (gate) {
+      const c = P(t, 0);
+      box(w, [c[0], (yBot + yt - 0.5) / 2, c[1]], [v[0] * hw, 0, v[1] * hw], [0, (yt - 0.5 - yBot) / 2, 0], [u[0] * 0.15, 0, u[1] * 0.15], GATE);
+      // 扉の縦の補強（1.1 m ごと）
+      for (let k = -2; k <= 2; k++) {
+        const q = P(t - sg * 0.18, k * 1.1);
+        box(w, [q[0], (yBot + yt - 0.5) / 2, q[1]], [v[0] * 0.06, 0, v[1] * 0.06], [0, (yt - 0.5 - yBot) / 2, 0], [u[0] * 0.04, 0, u[1] * 0.04], col('#6e5048'));
+      }
+      ashlar(sg > 0 ? p1 : p0, sg > 0 ? p0 : p1, yt - 0.5, yt, n, 991);
+    } else ashlar(sg > 0 ? p1 : p0, sg > 0 ? p0 : p1, yBot, yt, n, 977);
+    const q = P(t - sg * 0.45, 0);
+    box(w, [q[0], yt - 0.45, q[1]], [v[0] * (hw + 0.9), 0, v[1] * (hw + 0.9)], [0, 0.55, 0], [u[0] * 0.45, 0, u[1] * 0.45], COPING);
+  }
+  // 鋼の柵（高さ 1.1 m。2 m ごとの柱、上下の横桟、X の筋交いと交点の丸い飾り）
+  const rail = (p0, p1, y0f, y1f) => {
+    const Lr = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]), d = [(p1[0] - p0[0]) / Lr, (p1[1] - p0[1]) / Lr], nn = [-d[1] * 0.025, 0, d[0] * 0.025];
+    const n = Math.max(1, Math.round(Lr / 2));
+    for (let k = 0; k <= n; k++) {
+      const f = k / n, q = [p0[0] + (p1[0] - p0[0]) * f, p0[1] + (p1[1] - p0[1]) * f], y = y0f + (y1f - y0f) * f;
+      box(mt, [q[0], y + 0.55, q[1]], [0.035, 0, 0], [0, 0.55, 0], [0, 0, 0.035], IRON);
+    }
+    for (const h of [0.08, 1.08]) {
+      box(mt, [(p0[0] + p1[0]) / 2, (y0f + y1f) / 2 + h, (p0[1] + p1[1]) / 2], [(p1[0] - p0[0]) / 2, (y1f - y0f) / 2, (p1[1] - p0[1]) / 2], [0, 0.025, 0], nn, IRON);
+    }
+    for (let k = 0; k < n; k++) {
+      const f0 = k / n, f1 = (k + 1) / n;
+      const A = [p0[0] + (p1[0] - p0[0]) * f0, y0f + (y1f - y0f) * f0, p0[1] + (p1[1] - p0[1]) * f0];
+      const B = [p0[0] + (p1[0] - p0[0]) * f1, y0f + (y1f - y0f) * f1, p0[1] + (p1[1] - p0[1]) * f1];
+      for (const [ya, yb] of [[0.1, 1.06], [1.06, 0.1]]) {
+        const c = [(A[0] + B[0]) / 2, (A[1] + B[1] + ya + yb) / 2, (A[2] + B[2]) / 2];
+        box(mt, c, [(B[0] - A[0]) / 2, (B[1] + yb - A[1] - ya) / 2, (B[2] - A[2]) / 2], [0, 0.018, 0], nn, IRON);
+      }
+      const c = [(A[0] + B[0]) / 2, (A[1] + B[1]) / 2 + 0.58, (A[2] + B[2]) / 2];
+      box(mt, c, [d[0] * 0.07, 0, d[1] * 0.07], [0, 0.07, 0], [nn[0] * 1.6, 0, nn[2] * 1.6], IRON);
+    }
+    colliders.push([p0[0], p0[1], p1[0], p1[1]]);
+  };
+  for (const [si, sd] of [[0, -1], [1, 1]]) {
+    for (let k = 0; k + 1 < us.length; k++) rail(P(us[k], sd * (hw + 0.3)), P(us[k + 1], sd * (hw + 0.3)), top[si][k] + 0.1, top[si][k + 1] + 0.1);
+  }
+  rail(P(u0 - 0.3, -(hw + 0.3)), P(u0 - 0.3, hw + 0.3), topAt(0, u0) + 0.1, topAt(1, u0) + 0.1);
+  // 上流の扉の上の歩道橋（幅 2 m、格子の床、両側に柵）
+  const yd = Math.max(topAt(0, u1), topAt(1, u1)) + 0.15;
+  const c = P(u1 - 1, 0);
+  box(mt, [c[0], yd, c[1]], [u[0] * 1, 0, u[1] * 1], [0, 0.08, 0], [v[0] * (hw + 0.9), 0, v[1] * (hw + 0.9)], GRATE);
+  for (const sd of [-1, 1]) {
+    const q = P(u1 - 1 - sd * 0.97, 0), e = [v[0] * (hw + 0.9), v[1] * (hw + 0.9)];
+    rail([q[0] - e[0], q[1] - e[1]], [q[0] + e[0], q[1] + e[1]], yd, yd);
+  }
+}
+
 // ---- 騎馬像: 花崗岩の段と台座、ブロンズの馬（歩く姿）と旗を掲げた騎士
 function writeEquestrian(m, W, groundAt, colliders, onRoad, keepOut) {
   const { x, z } = m;
@@ -2258,14 +2394,27 @@ function writeStatue(m, W, groundAt, colliders, onRoad, keepOut) {
   keepOut.push([x, z, 6]);
 }
 
-const WRITERS = { equestrian: writeEquestrian, wallFountain: writeWallFountain, capitainerie: writeCapitainerie, moorings: writeMoorings, riverfront: writeRiverfront, arcades: writeArcades, choir: writeChoir, ramblas: writeRamblas, basilica: writeBasilica, island: writeIsland, roundabout: writeRoundabout, portico: writePortico, donjon: writeDonjon, statue: writeStatue, dome: writeDome, chateau: writeChateau, stadium: writeStadium, cabanis: writeCabanis, coq: writeCoq, cross: writeCross, fastfood: writeFastfood, jgarden: writeJgarden, parterre: writeParterre };
+const WRITERS = { lock: writeLock, equestrian: writeEquestrian, wallFountain: writeWallFountain, capitainerie: writeCapitainerie, moorings: writeMoorings, riverfront: writeRiverfront, arcades: writeArcades, choir: writeChoir, ramblas: writeRamblas, basilica: writeBasilica, island: writeIsland, roundabout: writeRoundabout, portico: writePortico, donjon: writeDonjon, statue: writeStatue, dome: writeDome, chateau: writeChateau, stadium: writeStadium, cabanis: writeCabanis, coq: writeCoq, cross: writeCross, fastfood: writeFastfood, jgarden: writeJgarden, parterre: writeParterre };
 
 // 名所のモデルを作る。colliders: 足す当たり判定の円 [x, z, r] か線分 [ax, az, bx, bz]、
 // keepOut: 街の小物を置かない円 [x, z, r]（像の台・シャトー・ドーの柵の内側。monumentSolid）
+const MASK_MATS = {
+  mask: new THREE.MeshBasicMaterial({
+    colorWrite: false, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4,
+    stencilWrite: true, stencilRef: 1, stencilFunc: THREE.AlwaysStencilFunc, stencilZPass: THREE.ReplaceStencilOp,
+  }),
+  reset: new THREE.ShaderMaterial({
+    vertexShader: 'void main() { gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    fragmentShader: 'void main() { gl_FragDepth = 1.0; }',
+    colorWrite: false, depthWrite: true, depthFunc: THREE.AlwaysDepth,
+    stencilWrite: true, stencilRef: 1, stencilFunc: THREE.EqualStencilFunc, stencilFail: THREE.KeepStencilOp, stencilZFail: THREE.KeepStencilOp, stencilZPass: THREE.KeepStencilOp,
+  }),
+};
+
 export function buildMonuments(list, materials, { groundAt = () => 0, onRoad = () => false, waterAt = (x, z) => groundAt(x, z) - 2 } = {}) {
   const group = new THREE.Group();
   group.name = 'monuments';
-  const W = { main: new MeshWriter(), metal: new MeshWriter(), inlay: new MeshWriter() };
+  const W = { main: new MeshWriter(), metal: new MeshWriter(), inlay: new MeshWriter(), mask: new MeshWriter() };
   const colliders = [], keepOut = [];
   for (const m of list) WRITERS[m.kind](m, W, groundAt, colliders, onRoad, keepOut, waterAt);
   const mats = { main: materials.monument, metal: materials.monumentMetal, inlay: materials.monumentInlay };
@@ -2283,6 +2432,17 @@ export function buildMonuments(list, materials, { groundAt = () => 0, onRoad = (
       mesh.receiveShadow = true;
     }
     group.add(mesh);
+  }
+  if (!W.mask.empty) {
+    // 地面の切り抜き（閘室）: 地面のあとに深度テスト付きでステンシルに印を付け、その所の深度を一番奥に戻す（metro.js と同じ）
+    const geo = W.mask.toGeometry();
+    for (const [mat, order, name] of [[MASK_MATS.mask, TERRAIN_ORDER.mask, 'monument-mask'], [MASK_MATS.reset, TERRAIN_ORDER.maskReset, 'monument-mask-reset']]) {
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.renderOrder = order;
+      mesh.name = name;
+      mesh.matrixAutoUpdate = false;
+      group.add(mesh);
+    }
   }
   return { group, colliders, keepOut };
 }

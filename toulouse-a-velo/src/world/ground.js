@@ -10,6 +10,7 @@ import { MeshWriter, writeFlatPolygon } from './meshwriter.js';
 import { COVER_COLORS, createCoverShared } from './cover.js';
 import { Grid, centroid, clipPolylineToRect, clipRingToRect, closestOnSegment, freeRects, hash01, pointInPolygon, ringBounds, signedArea } from '../geo.js';
 import { ramblasLayout } from './ramblas.js';
+import { LOCKS, lockFrame } from './locks.js';
 import { RaisedIndex, oldTownBase, planStreets, streetSteps, writePrism } from './streets.js';
 import { CAR_ROADS } from './parse.js';
 import { catenaryStations, slicePolyline, subtract, tramCrossCuts } from './markings.js';
@@ -599,6 +600,12 @@ export function buildGroundBase(parsed, rect, mats, terrain = FLAT_TERRAIN, layo
     const inPort = (x, z) => port && Math.abs(x - port[0]) < PORT_SAUVEUR.hx && Math.abs(z - port[1]) < PORT_SAUVEUR.hz;
     const brienne = parsed.proj ? BRIENNE.line.map((ll) => parsed.proj.project(...ll)) : null;
     const inBrienne = (x, z) => brienne && closestOnSegment(x, z, ...brienne[0], ...brienne[1]).d2 < BRIENNE.reach ** 2;
+    // 閘門の閘室（monuments.js の writeLock が石の壁を作る）の岸には土手を作らない
+    const locks = parsed.proj ? LOCKS.map((l) => ({ l, f: lockFrame(parsed.proj.project(...l.a), parsed.proj.project(...l.b)) })) : [];
+    const inLock = (x, z) => locks.some(({ l, f }) => {
+      const [u, v] = f.uv(x, z);
+      return u > l.from - 2 && u < f.L + 2 && Math.abs(v) < l.width / 2 + 4;
+    });
     const edge = new MeshWriter(bankOpts);
     const onRectEdge = (p, q) => {
       const e = 0.01;
@@ -635,6 +642,7 @@ export function buildGroundBase(parsed, rect, mats, terrain = FLAT_TERRAIN, layo
         return nearBridge(mx, mz, 9) ? 'wall' : 'natural';
       }
       if (a.kind === 'canal') {
+        if (inLock(mx, mz)) return null;
         if (a.tags.water !== 'canal' || nearBridge(mx, mz, 14) || inPort(mx, mz)) return 'wall';
         if (inBrienne(mx, mz)) return 'slope';
         // 岸の形は 500 m ほどの区間ごとに（両岸で別々に決まる）
