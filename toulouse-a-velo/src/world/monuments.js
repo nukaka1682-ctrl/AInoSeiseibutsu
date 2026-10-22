@@ -1536,6 +1536,53 @@ function writeJgarden(m, W, groundAt, colliders, onRoad, keepOut) {
       w.tri(A, B, C, [0, 1, 0], PLAIN_UV, PLAIN_UV, PLAIN_UV, ROOF);
     }
   }
+  // 見る人の側の砂利の縁（塀のない辺）: 低い木の杭（0.6 m、2.5 m おき）にたるんだ麻の縄、外に灰色の飛び石。
+  // 塀の外（裏）に竹の茂み 2 つ、州浜のそばに白い石（利用者の写真 NCM_0117・0121・0122）
+  const POST = col('#706964'), ROPE = col('#808288'), SLAB = col('#bababe'), BAMBOO = col('#6a7d3a'), BLEAF = col('#5d7a32'), WHITE = col('#d9d6cf');
+  const g = m.gravel, wallSet = new Set(m.wall.map(([x, z]) => `${x.toFixed(2)},${z.toFixed(2)}`));
+  const isWall = (p, q) => wallSet.has(`${p[0].toFixed(2)},${p[1].toFixed(2)}`) && wallSet.has(`${q[0].toFixed(2)},${q[1].toFixed(2)}`);
+  for (let i = 0; i < g.length; i++) {
+    const p = g[i], q = g[(i + 1) % g.length];
+    if (isWall(p, q)) continue;
+    const L = Math.hypot(q[0] - p[0], q[1] - p[1]);
+    if (L < 1) continue;
+    const ux = (q[0] - p[0]) / L, uz = (q[1] - p[1]) / L;
+    // 外向き（砂利の中心から離れる向き）
+    let nx = -uz, nz = ux;
+    if ((p[0] + ux * L / 2 - gx) * nx + (p[1] + uz * L / 2 - gz) * nz < 0) [nx, nz] = [-nx, -nz];
+    const n = Math.max(1, Math.round(L / 2.5));
+    let prev = null;
+    for (let k = 0; k <= n; k++) {
+      const x = p[0] + ux * (L * k) / n + nx * 0.3, z = p[1] + uz * (L * k) / n + nz * 0.3, y = groundAt(x, z);
+      box(w, [x, y + 0.3, z], [0.06, 0, 0], [0, 0.3, 0], [0, 0, 0.06], POST);
+      if (prev) {
+        // 縄: 2 つの区間でたるませる
+        const mx = (prev[0] + x) / 2, mz = (prev[1] + z) / 2, my = (prev[2] + y) / 2 + 0.42;
+        for (const [a, b] of [[[prev[0], prev[2] + 0.55, prev[1]], [mx, my, mz]], [[mx, my, mz], [x, y + 0.55, z]]]) {
+          w.quad([a[0], a[1], a[2]], [b[0], b[1], b[2]], [b[0], b[1] + 0.03, b[2]], [a[0], a[1] + 0.03, a[2]], [nx, 0, nz], PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, ROPE);
+        }
+      }
+      prev = [x, z, y];
+    }
+    for (let t = 0.8; t < L - 0.6; t += 1.7) {
+      const x = p[0] + ux * t + nx * 1.4, z = p[1] + uz * t + nz * 1.4;
+      box(W.inlay, [x, groundAt(x, z) + 0.05, z], [ux * 0.6, 0, uz * 0.6], [0, 0.04, 0], [nx * 0.3, 0, nz * 0.3], SLAB);
+    }
+  }
+  for (const end of [m.wall[0], m.wall[m.wall.length - 1]]) {
+    let ox = end[0] - gx, oz = end[1] - gz;
+    const ol = Math.hypot(ox, oz) || 1;
+    ox /= ol;
+    oz /= ol;
+    const bx = end[0] + ox * 2.2, bz = end[1] + oz * 2.2, y = groundAt(bx, bz);
+    for (let k = 0; k < 14; k++) {
+      const a = rnd() * Math.PI * 2, r = rnd() * 1.1, h = 3.8 + rnd() * 1.6;
+      const sx = bx + Math.cos(a) * r, sz = bz + Math.sin(a) * r;
+      cylinder(w, sx, sz, 0.035, 0.025, y, y + h, { seg: 4, color: BAMBOO });
+      blob(w, [sx, y + h - 0.6, sz], [0.6, 0.9, 0.6], rnd() * 6, 6, 4, () => BLEAF);
+    }
+  }
+  for (const [rx, rz] of m.spit.slice(0, 3)) blob(w, [rx, groundAt(rx, rz) + 0.25, rz], [0.55, 0.35, 0.45], rnd() * 6, 7, 4, () => WHITE);
   keepOut.push([m.x, m.z, 14]);
 }
 
