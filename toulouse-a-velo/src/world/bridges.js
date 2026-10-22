@@ -447,7 +447,8 @@ export function setupDecks(terrain, roads, proj, waterDepthAt = () => 0) {
 // ABUT_STEP m ごとに道の縁から外へ地面を測り、道より 1 m 以上高くなる所（盛り土の斜面）があれば、その手前の足元に盛り土の上
 // （その先 10 m の最高）までの壁を立てる（道より ABUT_RISE m 以上高い所だけ）。ほかの道（盛り土を上る坂・階段）を横切る壁は捨てる。
 // 返り値: [{ ax, az, at, ab, bx, bz, bt, bb, nx, nz }]（at/ab: 上端・下端の y。n: 道の側に向く水平の向き）
-const ABUT_REACH = 90, ABUT_STEP = 2, ABUT_RISE = 1.8;
+// 利用者のストリートビュー 210711: 擁壁は高架の下の短い橋台だけで、その手前は木と草の盛り土の斜面
+const ABUT_REACH = 30, ABUT_STEP = 2, ABUT_RISE = 1.8;
 export function abutmentWalls(terrain, roads, waterDepthAt = () => 0) {
   if (!terrain || terrain.flat || !terrain.deck) return [];
   const og = new Grid(50), osegs = [];
@@ -568,15 +569,15 @@ export function buildAbutments(list, mats) {
     const L = Math.hypot(bx - ax, bz - az), th = 0.4, px = -nx * th, pz = -nz * th;
     const face = (y0a, y0b, y1a, y1b, color) => {
       if (y1a <= y0a && y1b <= y0b) return;
-      w.quad([ax, y0a, az], [bx, y0b, bz], [bx, y1b, bz], [ax, y1a, az], [nx, 0, nz], [0, y0a / 4], [L / 4, y0b / 4], [L / 4, y1b / 4], [0, y1a / 4], color);
+      w.quad([ax, y0a, az], [bx, y0b, bz], [bx, y1b, bz], [ax, y1a, az], [nx, 0, nz], FLAT_UV, FLAT_UV, FLAT_UV, FLAT_UV, color); // 打ち放しのコンクリート（模様なし）
     };
     // 上端から下へ: 面 0.5 m・帯 0.12 m・面 0.21 m・帯 0.12 m・残りは面（壁が低ければ下端で切る）
     const F = ABUT_COL.face, B = ABUT_COL.band;
     for (const [d0, d1, color] of [[0, 0.5, F], [0.5, 0.62, B], [0.62, 0.83, F], [0.83, 0.95, B], [0.95, Infinity, F]]) {
       face(Math.max(ab, at - d1), Math.max(bb, bt - d1), Math.max(ab, at - d0), Math.max(bb, bt - d0), color);
     }
-    w.quad([ax, at, az], [ax + px, at, az + pz], [bx + px, bt, bz + pz], [bx, bt, bz], [0, 1, 0], [0, 0], [0, th / 4], [L / 4, th / 4], [L / 4, 0], ABUT_COL.cap);
-    w.quad([bx + px, bb, bz + pz], [ax + px, ab, az + pz], [ax + px, at, az + pz], [bx + px, bt, bz + pz], [-nx, 0, -nz], [0, 0], [L / 4, 0], [L / 4, (bt - bb) / 4], [0, (at - ab) / 4], ABUT_COL.face);
+    w.quad([ax, at, az], [ax + px, at, az + pz], [bx + px, bt, bz + pz], [bx, bt, bz], [0, 1, 0], FLAT_UV, FLAT_UV, FLAT_UV, FLAT_UV, ABUT_COL.cap);
+    w.quad([bx + px, bb, bz + pz], [ax + px, ab, az + pz], [ax + px, at, az + pz], [bx + px, bt, bz + pz], [-nx, 0, -nz], FLAT_UV, FLAT_UV, FLAT_UV, FLAT_UV, ABUT_COL.face);
   }
   const m = new THREE.Mesh(w.toGeometry(), mats.bridge);
   m.castShadow = true;
@@ -811,7 +812,8 @@ function writeDeck({ deck, body, walk, marks }, road, half, kind, info, clipRect
 
 const PARAPET_STONE = c3('#fbf3e6'); // 欄干・街灯の台座の淡い切り石（花崗岩の板のテクスチャにかける色）
 // 花崗岩の板と、縁石の濃い帯。利用者の写真（ポン・ヌフの歩道）: 板は中くらいの灰色 #8f8b84 前後（テクスチャの淡い色を暗くする）
-const GRANITE = c3('#b4b0a9'), GRANITE_EDGE = c3('#a29e96');
+// 歩道の花崗岩（利用者の写真・Street View: ポン・ヌフの歩道は灰色の花崗岩、車道の縁に濃い帯）
+const GRANITE = c3('#a6a7a6'), GRANITE_EDGE = c3('#8c8d8c');
 function writeDeckRibbon(w, pts, half, inner, y, color, sideColor, stone = null) {
   const up = [0, 1, 0];
   const uv = (p) => [p[0] / 4, -p[1] / 4];
@@ -924,10 +926,11 @@ function writeStructure(w, road, v, stone = w) {
         const s = wt.s0 + span * k;
         const c = fr.at(pts, s), [ux, uz] = U(s);
         const off = (v.extL - v.extR) / 2;
-        writePier(w, c[0] - uz * off, c[1] + ux * off, ux, uz, (v.extL + v.extR) * 0.5, 1.2, 2.6, SLAB_BOTTOM - 5, -wt.depth - 0.6, COL.pierBrick);
+        // 利用者の写真 NCM_0105・0106・0109: 橋脚は厚いレンガの塊で、橋面の両脇に高さ 4 m ほどの塊になって突き出す
+        writePier(w, c[0] - uz * off, c[1] + ux * off, ux, uz, (v.extL + v.extR) * 0.5, 1.2, 3.4, SLAB_BOTTOM - 5, -wt.depth - 0.6, COL.pierBrick);
         for (const sd of [1, -1]) {
           const q = fr.at(lines[sd], s);
-          writePier(w, q[0], q[1], ux, uz, 0.55, 0, 1.1, 3.2, SLAB_BOTTOM - 5, COL.pierBrick);
+          writePier(w, q[0], q[1], ux, uz, 1.1, 0, 3.4, 4.0, SLAB_BOTTOM - 5, COL.pierBrick);
         }
       }
     }
@@ -1287,7 +1290,7 @@ function writeLamp(w, x, z, [ux, uz], baseY, [ix, iz], stone = w) {
   for (let i = 0; i < 6; i++) {
     const a0 = (i / 6) * Math.PI * 2, a1 = ((i + 1) / 6) * Math.PI * 2, am = (a0 + a1) / 2;
     const p = (a, r, y) => [x + Math.cos(a) * r, y, z + Math.sin(a) * r];
-    w.quad(p(a0, 0.12, yb), p(a1, 0.12, yb), p(a1, 0.065, yt), p(a0, 0.065, yt), [Math.cos(am), 0.05, Math.sin(am)], [0, 0], [0.1, 0], [0.1, 1], [0, 1], COL.lamp);
+    w.quad(p(a0, 0.12, yb), p(a1, 0.12, yb), p(a1, 0.065, yt), p(a0, 0.065, yt), [Math.cos(am), 0.05, Math.sin(am)], FLAT_UV, FLAT_UV, FLAT_UV, FLAT_UV, COL.lamp); // 塗った鋳鉄（模様なし）
   }
   // 白鳥の首の腕: [内への距離, 高さ] の 5 点を 4 本の角棒でつなぐ
   const arm = [[0, 6.5], [0.12, 6.95], [0.42, 7.22], [0.85, 7.28], [1.22, 7.15]];
@@ -1298,7 +1301,7 @@ function writeLamp(w, x, z, [ux, uz], baseY, [ix, iz], stone = w) {
     const ph = -(a1 - a0) / L, py = (h1 - h0) / L; // 腕に直角な向き（腕の面の中で上側）
     const V = (h, a, du, dn) => [x + ix * (h + ph * dn) + ux * du, y0 + a + py * dn, z + iz * (h + ph * dn) + uz * du];
     // 面の向きは法線で決まる（MeshWriter が巻きの向きを合わせる）
-    const q = ([du0, dn0], [du1, dn1], n) => w.quad(V(h0, a0, du0, dn0), V(h1, a1, du0, dn0), V(h1, a1, du1, dn1), V(h0, a0, du1, dn1), n, [0, 0], [0.1, 0], [0.1, 0.1], [0, 0.1], COL.lamp);
+    const q = ([du0, dn0], [du1, dn1], n) => w.quad(V(h0, a0, du0, dn0), V(h1, a1, du0, dn0), V(h1, a1, du1, dn1), V(h0, a0, du1, dn1), n, FLAT_UV, FLAT_UV, FLAT_UV, FLAT_UV, COL.lamp);
     q([-r, -r], [-r, r], [-ux, 0, -uz]);
     q([r, -r], [r, r], [ux, 0, uz]);
     q([-r, r], [r, r], [ix * ph, py, iz * ph]);

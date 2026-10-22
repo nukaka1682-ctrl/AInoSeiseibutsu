@@ -31,6 +31,8 @@ import { inLaneBand } from './markings.js';
 export const FURNITURE_FAR = 280; // これより遠い小物は描かない（m、自転車から）
 const REFILL = 12; // 自転車がこれだけ動いたら、描く小物を選び直す（m）
 
+const PROMENADE_STEP = 18; // 河岸の下の遊歩道の街灯の間隔
+const PROMENADES = /^Promenade Henri[- ]Martin$/i; // 街灯を並べる河岸の下の遊歩道
 const LIGHT_STEP = 27; // 横向きの灯具の街灯の間隔（片側だけの通り。左右交互の通りは片側でこの 2 倍）
 const DISC_STEP = 32; // 大通りの円盤形の街灯の間隔（両側に向かい合わせ）
 const BOULEVARD = new Set(['trunk', 'primary', 'secondary']);
@@ -220,6 +222,7 @@ function contextOf(parsed, plan) {
   c = {
     plazas,
     parkings: areas.filter((a) => a.type === 'parking' && a.outer?.length >= 3),
+    promenades: (parsed.roads || []).filter((r) => PROMENADES.test(r.name || '') && !r.bridge && !r.tunnel),
     nearJunction: (x, z, r) => near(jGrid, plan.junctions, x, z, r, (n) => Math.hypot(n.x - x, n.z - z) < r),
     nearBridgeEnd: (x, z, r) => near(eGrid, ends, x, z, r, (p) => Math.hypot(p[0] - x, p[1] - z) < r),
     nearRail: (x, z, r) => near(rGrid, rails, x, z, r, (s) => segD(x, z, s) < r),
@@ -565,6 +568,29 @@ export function planFurniture({ parsed, plan, clip, curbs = [], inOldTown = () =
       const sl = 0.93 + hash01(h, 82) * 0.12;
       out.cars.push({ x: st.x, z: st.z, y: 0, a: yaw(st.ux, st.uz), sx: sl, sy: 0.94 + hash01(h, 83) * 0.16, color: carColor(hash01(h, 84)) });
       boxC(st.x, st.z, st.ux, st.uz, (CAR_L / 2) * sl, CAR_W / 2);
+    }
+  }
+
+  // ---- 河岸の下の遊歩道の街灯（利用者の写真 NCM_0125・0138・0174: ラ・ドラードから Saint-Pierre までの下の段の遊歩道に
+  // 街灯が並ぶ）。道の陸の側（岸壁の足元）に PROMENADE_STEP m ごと
+  for (const r of ctx.promenades) {
+    let next = hash01(r.id | 0, 61) * PROMENADE_STEP, s0 = 0;
+    for (let i = 0; i + 1 < r.pts.length; i++) {
+      const [ax, az] = r.pts[i], [bx, bz] = r.pts[i + 1], L = Math.hypot(bx - ax, bz - az);
+      const ux = (bx - ax) / (L || 1), uz = (bz - az) / (L || 1);
+      for (; next < s0 + L; next += PROMENADE_STEP) {
+        const t = next - s0;
+        const cx = ax + ux * t, cz = az + uz * t;
+        // 陸の側: 6 m 先が水（solid）でない側
+        const sd = !solid(cx - uz * 6, cz + ux * 6) ? 1 : !solid(cx + uz * 6, cz - ux * 6) ? -1 : 0;
+        if (!sd) continue;
+        const off = r.width / 2 + 0.4, x = cx - uz * off * sd, z = cz + ux * off * sd;
+        if (!inClip(x, z) || !clear(x, z, 0.6) || onRoad(x, z, 0.2)) continue;
+        out.lights.push({ x, z, y: heightAt(x, z), a: yaw(uz * sd, -ux * sd), type: 'swan' });
+        take(x, z, 0.4);
+        circle(x, z, 0.12);
+      }
+      s0 += L;
     }
   }
   return out;

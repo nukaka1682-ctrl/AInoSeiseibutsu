@@ -206,7 +206,7 @@ class TileStreamer {
     const context = parseOsm(data.ctx, this.proj, this.rect, []).buildings;
     const group = new THREE.Group();
     group.name = `tile-${t.key}`;
-    const walls = clearNamedAreas(clearEntrances(clearRoads(tameWalls(projectWalls(data.walls, this.proj), buildings.concat(context)), (x, z) => this.roadnet.onRoad(x, z, 0.3)), this.terrain.metro || []), this.parsed.areas).concat(fixedWalls(this.proj, B));
+    const walls = clearNamedAreas(clearEntrances(clearRoads(tameWalls(projectWalls(data.walls, this.proj), buildings.concat(context)), (x, z) => this.roadnet.onRoad(x, z, 0.3)), this.terrain.metro || []), this.parsed.areas, this.proj).concat(fixedWalls(this.proj, B));
 
     // 地面（地面の覆い・緑地・道路・歩道・線路・橋）。覆いのあるタイルでは、緑地は覆い（芝生・木の下）にまかせる。
     // 歩道はこのタイルと隣のタイルの境近くの建物・塀の壁まで延ばす。歩道の計算は重いので、道ごとに区切ってフレームに譲りながら作る

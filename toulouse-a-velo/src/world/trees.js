@@ -123,8 +123,9 @@ export const CROWN_ASPECT = 1;
 
 // 高さ h の木の、下枝の高さ（bottom）と樹冠の半径の上限（rmax）
 export function crownLimit(h) {
-  // 下枝の高さ: 低い木は高さの 2 割ほど、高い木ほど高く（利用者の写真: 高さ 18〜25 m の大きなプラタナスは幹が 6〜8 m 見える）
-  const bottom = Math.max(1.6, Math.min(h * 0.22 + Math.max(0, h - 14) * 0.25, 7.5));
+  // 下枝の高さ: 高さの 4 割弱、高い木ほど高く（利用者の写真: 街路・河岸の高さ 15〜20 m のプラタナスは下枝が 6〜8 m で、
+  // 樹冠の下に通りの家並みと空が見える）
+  const bottom = Math.max(1.6, Math.min(h * 0.36 + Math.max(0, h - 14) * 0.15, 8.5));
   return { bottom, rmax: Math.max(1.5, Math.min(0.45 * h + 1, (h - bottom) / (2 * CROWN_ASPECT))) };
 }
 
@@ -137,7 +138,7 @@ export function shapeTrees(points, canPlace = () => true, groundH = null) {
     if (!(t.h > 0) || !(t.r > 0)) {
       // 大きさの分からない木（OSM・並木道・公園に補った木）
       const r = 2.4 + hash01(seed, 1) * 2.4;
-      const trunkH = 2.6 + hash01(seed, 2) * 2.2;
+      const trunkH = 3.4 + hash01(seed, 2) * 2.4;
       const crownH = r * (1 + hash01(seed, 4) * 0.25);
       out.push({ x, z, y, r, crownH, crownY: trunkH + crownH * 0.9, trunkH, seed });
       continue;

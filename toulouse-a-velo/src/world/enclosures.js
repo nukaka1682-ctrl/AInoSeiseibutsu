@@ -115,10 +115,17 @@ const FIXED_WALLS = [
 // 塀のない広場（利用者の写真: Square Charles-de-Gaulle とキャピトル広場は平らな舗装で、LiDAR で見つかる塀は
 // 地下鉄の出入口・植え込みの縁・日よけ）。中点がこの名前の地図の多角形の中にある塀を除く
 const WALL_FREE = /^(Square Charles de Gaulle|Place du Capitole)$/i;
-export function clearNamedAreas(segs, areas) {
+// 塀のない円 [緯度, 経度, 半径 m]（利用者のストリートビュー 210837: Route de Bayonne のマクドナルドの敷地は低い植え込みの島の
+// 駐車場で、LiDAR で見つかる塀は生け垣と車止め）
+const WALL_FREE_DISCS = [[43.60828, 1.39535, 40]];
+export function clearNamedAreas(segs, areas, proj = null) {
   const rings = areas.filter((a) => WALL_FREE.test(a.name || '')).map((a) => a.outer);
-  if (!rings.length) return segs;
-  return segs.filter(([ax, az, bx, bz]) => !rings.some((r) => pointInRing((ax + bx) / 2, (az + bz) / 2, r)));
+  const discs = proj ? WALL_FREE_DISCS.map(([lat, lon, r]) => [...proj.project(lat, lon), r]) : [];
+  if (!rings.length && !discs.length) return segs;
+  return segs.filter(([ax, az, bx, bz]) => {
+    const mx = (ax + bx) / 2, mz = (az + bz) / 2;
+    return !rings.some((r) => pointInRing(mx, mz, r)) && !discs.some(([x, z, r]) => (mx - x) ** 2 + (mz - z) ** 2 < r * r);
+  });
 }
 
 // 範囲 bounds に中点が入る区間を [ax, az, bx, bz, h, kind] にして返す

@@ -84,9 +84,10 @@ export function facadeSpan(f, a, c, n, other = false) {
 // レンガ造りの歴史的な建物群（IGN のデータに壁の材料がないことが多い）。中心から半径 r m の大きな建物は
 // ばら色のレンガに白い石の窓枠の様式にする
 const BRICK_SITES = [
-  // 利用者の写真（NCM_0107・0136・211104）: 背の高い 3 階（1 階 約 5 m）と屋根裏、低い勾配の瓦の寄棟屋根
-  { name: 'Hôtel-Dieu Saint-Jacques', lat: 43.59935, lon: 1.43655, r: 85, floor: 5.2, tiles: true },
-  { name: 'Hôpital de La Grave', lat: 43.60095, lon: 1.43405, r: 110 },
+  // 利用者の写真（NCM_0107・0136・0137・211104）: 背の高い 3 階（1 階 約 5 m）と屋根裏、低い勾配の暗い灰色のスレートの寄棟屋根
+  { name: 'Hôtel-Dieu Saint-Jacques', lat: 43.59935, lon: 1.43655, r: 85, floor: 5.2, roof: { material: 'slate', colour: '#55585d' } },
+  // 利用者の写真 NCM_0102・0106: ラ・グラーヴの病棟の屋根も暗い灰色のスレート
+  { name: 'Hôpital de La Grave', lat: 43.60095, lon: 1.43405, r: 110, roof: { material: 'slate', colour: '#55585d' } },
 ];
 // 石の内陣の教会（利用者の写真 NCM_0095: サン・テティエンヌ大聖堂の東の内陣はレンガではなく、風雨にさらされた灰色がかった
 // ベージュの石灰岩）。建物の中心から east の向きに split m より先の壁を石の色にする（buildings.js の教会の壁）
@@ -105,8 +106,9 @@ export function markBrickSites(proj, buildings, areas = []) {
         b.tags['building:material'] = 'brick';
         b.style = STYLE.brickStone;
         if (s.floor) b.info.floorHeight = s.floor;
-        if (s.tiles) {
-          b.tags['roof:material'] = 'roof_tiles';
+        if (s.roof) {
+          b.tags['roof:material'] = s.roof.material;
+          b.tags['roof:colour'] = s.roof.colour;
           if (b.info.roofShape === 'flat') b.info.roofShape = 'auto';
           b.info.roofHeight = Math.max(b.info.roofHeight || 0, 3.5);
         }

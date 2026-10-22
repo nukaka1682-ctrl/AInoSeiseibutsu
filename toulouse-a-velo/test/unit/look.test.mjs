@@ -46,7 +46,8 @@ test('木の形: LiDAR の横に広い塊を平たい板にしない', () => {
   // ふつうの街路樹（高さ 20 m・半径 6 m）はそのまま 1 本
   const plane = shapeTrees([{ x: 0, z: 0, y: 0, h: 20, r: 6 }]);
   assert.equal(plane.length, 1);
-  assert.ok(Math.abs(plane[0].r - 6.3) < 1e-9);
+  assert.ok(Math.abs(plane[0].r - Math.min(6.3, crownLimit(20).rmax)) < 1e-9);
+  assert.ok(plane[0].crownY - plane[0].crownH >= 6, '大きなプラタナスは下枝が 6 m より上');
   assert.ok(Math.abs(plane[0].crownY + plane[0].crownH - 20) < 1e-9);
   // 実際の LiDAR の木の大きさの範囲（高さ 4〜45 m、半径 1.5〜9 m）のどれも、樹冠は平たくならず、木の高さに収まる
   for (let h = 4; h <= 45; h += 0.7) {

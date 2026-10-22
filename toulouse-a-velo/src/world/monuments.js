@@ -641,8 +641,9 @@ export function monumentClearance(list) {
     if (m.kind === 'statue') circles.push([m.x, m.z, 6]);
     if (m.kind === 'pavilion') circles.push([m.x, m.z, 5]);
   }
-  // 中庭の刈り込んだ木は専用の形で描くので、地形モデルの木（丸い樹冠）は植えない
-  const rings = list.filter((m) => m.kind === 'parterre').map((m) => m.outer);
+  // 中庭の刈り込んだ木は専用の形で描くので、地形モデルの木（丸い樹冠）は植えない。日本庭園の枯山水の砂利の面にも
+  // 植えない（利用者の写真 NCM_0117: 砂利の面には石組みのそばの小さな松だけ）
+  const rings = list.filter((m) => m.kind === 'parterre').map((m) => m.outer).concat(list.filter((m) => m.kind === 'jgarden').map((m) => m.gravel));
   return (x, z) => circles.some(([cx, cz, r]) => Math.hypot(x - cx, z - cz) < r) || rings.some((r) => pointInRing(x, z, r));
 }
 
@@ -1637,9 +1638,11 @@ function writeJgarden(m, W, groundAt, colliders, onRoad, keepOut) {
 function writeDome(m, W, groundAt) {
   const { x, z } = m;
   const y0 = groundAt(x, z) + m.base - 0.6;
-  const rDr = 9.4, yDr = y0 + 11.5, rDo = 9.7, hDo = 12.5;
+  // 鼓胴は地面から 28 m 以上まで（利用者の写真 NCM_0102・0106・211211: ドームは病院の屋根の上に高い鼓胴ごと突き出し、
+  // ポン・ヌフからもオテル・デューの屋根の上に大きく見える）
+  const rDr = 9.4, yDr = Math.max(y0 + 11.5, groundAt(x, z) + 28), rDo = 9.7, hDo = 12.5;
   const w = W.main, mt = W.metal;
-  const STONE = col('#d9cfbf'), DARK = col('#2b2523'), LEAD = col('#7d8790'), BRICK = col('#d6aa94');
+  const STONE = col('#d9cfbf'), DARK = col('#2b2523'), LEAD = col('#8c9a92'), BRICK = col('#d6aa94'); // 鉛の屋根は灰緑
   cylinder(w, x, z, rDr, rDr, y0, yDr, { seg: 32, cell: CELL.brick, cw: BRICK_CW, ch: BRICK_CW, color: BRICK });
   for (let k = 0; k < 16; k++) {
     const a = (k / 16) * Math.PI * 2;
@@ -1648,8 +1651,11 @@ function writeDome(m, W, groundAt) {
       // 付け柱
       vpoly(w, [x + n[0] * (rDr + 0.12), z + n[2] * (rDr + 0.12)], s, [[-0.45, y0 + 0.6], [0.45, y0 + 0.6], [0.45, yDr - 0.8], [-0.45, yDr - 0.8]], n, STONE);
     } else {
-      vpoly(w, [x + n[0] * (rDr + 0.06), z + n[2] * (rDr + 0.06)], s, archShape(2.4, 5.4, y0 + 3.2, 8), n, STONE);
-      vpoly(w, [x + n[0] * (rDr + 0.12), z + n[2] * (rDr + 0.12)], s, archShape(1.8, 5.0, y0 + 3.4, 8), n, DARK);
+      // 鼓胴の上のほうの窓（高い鼓胴では窓の段を上に置き、下は低いアーチの窓）
+      const yw = yDr - y0 > 16 ? yDr - 7.4 : y0 + 3.2;
+      vpoly(w, [x + n[0] * (rDr + 0.06), z + n[2] * (rDr + 0.06)], s, archShape(2.4, 5.4, yw, 8), n, STONE);
+      vpoly(w, [x + n[0] * (rDr + 0.12), z + n[2] * (rDr + 0.12)], s, archShape(1.8, 5.0, yw + 0.2, 8), n, DARK);
+      if (yw > y0 + 6) vpoly(w, [x + n[0] * (rDr + 0.12), z + n[2] * (rDr + 0.12)], s, archShape(1.4, 2.6, y0 + 2.4, 6), n, DARK);
     }
   }
   cylinder(w, x, z, rDr + 0.5, rDr + 0.5, yDr - 0.8, yDr, { seg: 32, color: STONE });

@@ -158,7 +158,8 @@ export function createGroundMaterials(tex) {
 // 中心（緯度・経度）から東西 ±hx m・南北 ±hz m の中の運河の岸
 const PORT_SAUVEUR = { latlon: [43.59634, 1.4564], hx: 70, hz: 270 };
 // 運河 Canal de Brienne（利用者の写真 NCM_0186）: 両岸とも水際から並木道まで約 3 m の草の斜面（壁はない）。この線から 30 m 以内の岸
-const BRIENNE = { line: [[43.60441, 1.43441], [43.60652, 1.43016]], reach: 30 };
+// （運河の芯線に沿った折れ線。閘門の上で北へ曲がってから北西へ）
+const BRIENNE = { line: [[43.604413, 1.434409], [43.604811, 1.434372], [43.605083, 1.434089], [43.605282, 1.433639], [43.606512, 1.430163]], reach: 30 };
 const WATER_TILE = 6; // 波の法線マップ 1 枚の大きさ（m）
 // 利用者の写真では、晴れた日の川と運河の港は空を映して青みがかった灰色（ガロンヌ川 #3e5f86 前後、Port Saint-Sauveur
 // #5c7189〜#a0afbe）。水の色は灰緑から青灰色に寄せ、映り込みの空の青も半分ほど残す
@@ -569,7 +570,15 @@ export function buildGroundBase(parsed, rect, mats, terrain = FLAT_TERRAIN, layo
   if (!T.flat && !T.conditioned) {
     T.conditioned = true;
     // メトロの出入口: 地形モデルに写った吹き抜けの穴を周りの高さで埋める（穴は下でステンシルにして、中に階段を作る）
-    T.metro = projectEntrances(T.metroRaw, T.proj).filter((e) => !inWater(e.x, e.z));
+    // 車道の中に落ちたメトロの階段は捨てる（LiDAR の穴の見誤り。利用者の写真 NCM_0095: Rue Bertrand de l'Isle の車道の真ん中に
+    // 階段ができていた。駐車場の坂は車道から下りるので残す）
+    const carSegs = [];
+    for (const r of parsed.roads) {
+      if (!CAR_ROADS.has(r.type) || r.bridge || r.tunnel) continue;
+      for (let i = 0; i + 1 < r.pts.length; i++) carSegs.push([...r.pts[i], ...r.pts[i + 1], r.width / 2]);
+    }
+    const inCarriageway = (x, z) => carSegs.some(([ax, az, bx, bz, h]) => x > Math.min(ax, bx) - h && x < Math.max(ax, bx) + h && z > Math.min(az, bz) - h && z < Math.max(az, bz) + h && closestOnSegment(x, z, ax, az, bx, bz).d2 < h * h);
+    T.metro = projectEntrances(T.metroRaw, T.proj).filter((e) => !inWater(e.x, e.z) && !(e.kind === 'metro' && inCarriageway(e.x, e.z)));
     orientRamps(T.metro, parsed.roads);
     fillMetroPits(T, T.metro);
     conditionRoads(T, parsed.roads, inWater);
@@ -630,7 +639,7 @@ export function buildGroundBase(parsed, rect, mats, terrain = FLAT_TERRAIN, layo
     const port = parsed.proj ? parsed.proj.project(...PORT_SAUVEUR.latlon) : null;
     const inPort = (x, z) => port && Math.abs(x - port[0]) < PORT_SAUVEUR.hx && Math.abs(z - port[1]) < PORT_SAUVEUR.hz;
     const brienne = parsed.proj ? BRIENNE.line.map((ll) => parsed.proj.project(...ll)) : null;
-    const inBrienne = (x, z) => brienne && closestOnSegment(x, z, ...brienne[0], ...brienne[1]).d2 < BRIENNE.reach ** 2;
+    const inBrienne = (x, z) => brienne && brienne.some((p, i) => i + 1 < brienne.length && closestOnSegment(x, z, ...p, ...brienne[i + 1]).d2 < BRIENNE.reach ** 2);
     // 閘門の閘室（monuments.js の writeLock が石の壁を作る）の岸には土手を作らない
     const locks = parsed.proj ? LOCKS.map((l) => ({ l, f: lockFrame(parsed.proj.project(...l.a), parsed.proj.project(...l.b)) })) : [];
     const inLock = (x, z) => locks.some(({ l, f }) => {

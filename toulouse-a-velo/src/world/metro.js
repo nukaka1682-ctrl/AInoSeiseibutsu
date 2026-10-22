@@ -15,6 +15,7 @@ import { CAR_ROADS } from './parse.js';
 const STEP_H = 0.16; // 段の高さ（m）
 const LANDING = 2.4; // 下の踊り場の長さ（m）
 const PARAPET = 1.0, PARAPET_T = 0.3; // 腰壁の高さ・厚さ
+const RAMP_PARAPET = 0.6; // 駐車場の坂の腰壁の高さ（利用者の写真: キャピトル・Esquirol の坂の縁は低いばら色の花崗岩）
 const ESCALATOR_W = 1.25;
 const C = {
   stone: [0.86, 0.79, 0.69], // ベージュの花崗岩
@@ -210,7 +211,8 @@ export function createMetroMaterials(tex) {
   // 面の向き（周回順）は気にせず両面で描く（法線は面ごとに渡す）
   const D = THREE.DoubleSide;
   return {
-    stone: new THREE.MeshStandardMaterial({ map: tex.plain, vertexColors: true, roughness: 0.85, side: D }),
+    // 石・コンクリート: 模様なし（壁のレンガの明るさの模様をかけると、腰壁が淡いレンガの箱に見えた）
+    stone: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, side: D }),
     steel: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.35, metalness: 0.6, side: D }),
     plain: new THREE.MeshLambertMaterial({ vertexColors: true, side: D }),
     sign: typeof document === 'undefined' ? new THREE.MeshLambertMaterial({ color: '#f9b80d', side: D }) : new THREE.MeshLambertMaterial({ map: signTexture(), side: D }),
@@ -284,7 +286,7 @@ function writeRamp(e, w) {
   // 3 辺のコンクリートの腰壁（入口の側を除く）と手すり
   const ry = (u0, v0, u1, v1) => {
     const a = rimAt(e, u0, v0), b = rimAt(e, u1, v1);
-    return [Math.min(a, b) - 0.3, (a + b) / 2 + PARAPET];
+    return [Math.min(a, b) - 0.3, (a + b) / 2 + RAMP_PARAPET];
   };
   for (const s of [-1, 1]) {
     const [cx, cz] = f.at(0.15, s * (W + PARAPET_T / 2));
@@ -294,7 +296,7 @@ function writeRamp(e, w) {
     const [cx, cz] = f.at(L + PARAPET_T / 2, 0);
     box(w.stone, cx, cz, ...ry(L, -W, L, W), f.sx, f.sz, e.wid + 2 * PARAPET_T, PARAPET_T, C.concrete);
   }
-  const railY = rimAt(e, 0, 0) + PARAPET + 0.12, o = PARAPET_T / 2;
+  const railY = rimAt(e, 0, 0) + RAMP_PARAPET + 0.12, o = PARAPET_T / 2;
   bar(w.steel, P(-L, -W - o, railY), P(L + o, -W - o, railY), 0.05, C.steel);
   bar(w.steel, P(L + o, -W - o, railY), P(L + o, W + o, railY), 0.05, C.steel);
   bar(w.steel, P(L + o, W + o, railY), P(-L, W + o, railY), 0.05, C.steel);
