@@ -15,6 +15,7 @@ import { MeshWriter, triangulate } from './meshwriter.js';
 import { centroid, hash01, mulberry32, pointInPolygon, pointInRing, signedArea } from '../geo.js';
 import { ORDER } from './ground.js';
 import { CAR_ROADS } from './parse.js';
+import { ramblasLayout } from './ramblas.js';
 
 export const MONUMENTS = [
   { id: 'chateau-eau', kind: 'chateau', lat: 43.59870, lon: 1.43693, r: 20 },
@@ -471,6 +472,30 @@ export function findMonuments(proj, { buildings = [], areas = [], facade = null,
       if (!inB(cx, cz)) continue;
       out.push({ spec, kind: 'cross', x: cx, z: cz, ax, radius: spec.radius, replaced: [] });
     }
+  }
+  // ジャン・ジョレス通りの遊歩道の植え込み（ramblas.js）: 帯に沿って 2.3 m ごとに低木、約 7.5 m ごとに若い木
+  const rl = roads.length ? ramblasLayout(roads, proj) : null;
+  if (rl) {
+    const shrubs = [], young = [];
+    for (const line of rl.beds) {
+      let next = 0, acc = 0, nextTree = 3;
+      for (let i = 0; i + 1 < line.length; i++) {
+        const p = line[i], q = line[i + 1], L = Math.hypot(q[0] - p[0], q[1] - p[1]);
+        const ux = (q[0] - p[0]) / L, uz = (q[1] - p[1]) / L;
+        for (; next < acc + L; next += 2.3) {
+          const t = next - acc, k = Math.round(next / 2.3), off = (k % 2 ? 1 : -1) * (0.8 + hash01(k, 61) * 1.2);
+          const x = p[0] + ux * t - uz * off, z = p[1] + uz * t + ux * off;
+          if (inB(x, z)) shrubs.push([x, z, k]);
+        }
+        for (; nextTree < acc + L; nextTree += 6 + hash01(Math.round(nextTree), 62) * 3) {
+          const t = nextTree - acc, off = (hash01(Math.round(nextTree), 63) - 0.5) * 2.4;
+          const x = p[0] + ux * t - uz * off, z = p[1] + uz * t + ux * off;
+          if (inB(x, z)) young.push([x, z, Math.round(nextTree)]);
+        }
+        acc += L;
+      }
+    }
+    if (shrubs.length || young.length) out.push({ kind: 'ramblas', shrubs, young, replaced: [] });
   }
   return out;
 }
@@ -1720,6 +1745,21 @@ function writeBasilica(m, W, groundAt) {
   }
 }
 
+// ---- 遊歩道の植え込み: 低木の塊（高さ 1〜2 m）と、幹の細い若い木（高さ 6〜9 m）
+function writeRamblas(m, W, groundAt) {
+  const w = W.main;
+  const SHRUB = [col('#5a6026'), col('#4a5328'), col('#3f4628'), col('#66692e')], LEAF = [col('#5f7a35'), col('#6b8238'), col('#577030')];
+  for (const [x, z, k] of m.shrubs) {
+    const h = 1 + hash01(k, 64) * 1.0, r = 0.7 + hash01(k, 65) * 0.5;
+    blob(w, [x, groundAt(x, z) + h * 0.55, z], [r * 1.2, h * 0.55, r], hash01(k, 66) * 6, 7, 4, (f) => SHRUB[(k + f) % SHRUB.length]);
+  }
+  for (const [x, z, k] of m.young) {
+    const y = groundAt(x, z), h = 6 + hash01(k, 67) * 3, r = 1.6 + hash01(k, 68) * 0.9;
+    for (const [dx, dz] of [[0.18, 0], [-0.12, 0.15]]) cylinder(w, x + dx, z + dz, 0.08, 0.05, y, y + h - r, { seg: 5, color: col('#6a6058') });
+    blob(w, [x, y + h - r * 0.9, z], [r, r * 0.95, r * 0.9], hash01(k, 69) * 6, 9, 5, (f) => LEAF[(k + f) % LEAF.length]);
+  }
+}
+
 // ---- 歩行者の島: 東の端（a）が丸く、西の端（b）が四角い、高さ 0.2 m の石の板の島と縁石、鉄の格子 2 枚
 function writeIsland(m, W, groundAt) {
   const { a, b, half } = m;
@@ -1814,7 +1854,7 @@ function writeStatue(m, W, groundAt, colliders, onRoad, keepOut) {
   keepOut.push([x, z, 6]);
 }
 
-const WRITERS = { basilica: writeBasilica, island: writeIsland, roundabout: writeRoundabout, portico: writePortico, donjon: writeDonjon, statue: writeStatue, dome: writeDome, chateau: writeChateau, stadium: writeStadium, cabanis: writeCabanis, coq: writeCoq, cross: writeCross, fastfood: writeFastfood, jgarden: writeJgarden, parterre: writeParterre };
+const WRITERS = { ramblas: writeRamblas, basilica: writeBasilica, island: writeIsland, roundabout: writeRoundabout, portico: writePortico, donjon: writeDonjon, statue: writeStatue, dome: writeDome, chateau: writeChateau, stadium: writeStadium, cabanis: writeCabanis, coq: writeCoq, cross: writeCross, fastfood: writeFastfood, jgarden: writeJgarden, parterre: writeParterre };
 
 // 名所のモデルを作る。colliders: 足す当たり判定の円 [x, z, r] か線分 [ax, az, bx, bz]、
 // keepOut: 街の小物を置かない円 [x, z, r]（像の台・シャトー・ドーの柵の内側。monumentSolid）

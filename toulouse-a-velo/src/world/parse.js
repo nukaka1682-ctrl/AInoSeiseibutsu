@@ -3,6 +3,7 @@
 import {
   Grid, centroid, clipRingToRect, closestOnSegment, hash01, pointInPolygon, pointInRing, ringBounds, signedArea, simplifyRing,
 } from '../geo.js';
+import { reshapeRoads } from './ramblas.js';
 
 export const FLOOR_HEIGHT = 3.1;
 
@@ -413,6 +414,7 @@ export function parseOsm(osm, proj, rect, bdtopo = []) {
     }
   }
 
+  reshapeRoads(roads, proj); // ジャン・ジョレス通りの 2023 年の車道の位置（ramblas.js）
   unifyWaterLevels(areas);
   fillWaterUnderBridges(areas, roads);
   return { nodePos, buildings, parts, roads, areas, rails, waterLines, trees, named, proj };

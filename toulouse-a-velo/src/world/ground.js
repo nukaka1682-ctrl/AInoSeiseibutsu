@@ -8,7 +8,8 @@
 import * as THREE from 'three';
 import { MeshWriter, writeFlatPolygon } from './meshwriter.js';
 import { COVER_COLORS, createCoverShared } from './cover.js';
-import { Grid, centroid, clipPolylineToRect, clipRingToRect, closestOnSegment, freeRects, hash01, pointInPolygon, signedArea } from '../geo.js';
+import { Grid, centroid, clipPolylineToRect, clipRingToRect, closestOnSegment, freeRects, hash01, pointInPolygon, ringBounds, signedArea } from '../geo.js';
+import { ramblasLayout } from './ramblas.js';
 import { RaisedIndex, oldTownBase, planStreets, streetSteps, writePrism } from './streets.js';
 import { CAR_ROADS } from './parse.js';
 import { catenaryStations, slicePolyline, subtract, tramCrossCuts } from './markings.js';
@@ -1004,6 +1005,18 @@ function* groundDetailSteps(parsed, clip, mats, waterDepthAt, opts) {
       writeRibbon(w, pts, sa.half, 0, sa.color, 2.4);
       writeDisc(w, pts[0], sa.half, 0, sa.color, 2.4, 16);
       writeDisc(w, pts[pts.length - 1], sa.half, 0, sa.color, 2.4, 16);
+    }
+  }
+  // ---- ジャン・ジョレス通りの遊歩道（ramblas.js）: 淡いベージュの固めた砂と、車道沿いの植え込みの帯（暗い土に低木）
+  const rl = parsed.proj ? ramblasLayout(parsed.roads, parsed.proj) : null;
+  if (rl) {
+    const rb = ringBounds(rl.ring);
+    if (overlaps(rb)) {
+      const outer = clipRingToRect(rl.ring, clip.minX, clip.minZ, clip.maxX, clip.maxZ);
+      if (outer.length >= 3) writeFlatPolygon(W(ORDER.plaza, 'gravel'), outer, [], 0, 3, c3('#f2eee8'));
+    }
+    for (const line of rl.beds) {
+      for (const pts of clipPolylineToRect(line, ...clipRect)) writeRibbon(W(ORDER.plaza + 0.1, 'grass'), pts, rl.bedHalf, 0, c3('#8a7a5a'), 3);
     }
   }
   // ---- 道路 ----
