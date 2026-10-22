@@ -232,7 +232,7 @@ class TileStreamer {
     const built = await buildBuildings(tp, this.materials, null, facade, { context, towers, groundAt: ground.heightAt, skip: new Set(monuments.flatMap((m) => m.replaced)), terrain: T });
     const buildingMs = performance.now() - tb;
     group.add(built.group);
-    const mon = buildMonuments(monuments, this.materials, { groundAt: (x, z) => T.h(x, z) + ground.heightAt(x, z), onRoad: onCarRoad });
+    const mon = buildMonuments(monuments, this.materials, { groundAt: (x, z) => T.h(x, z) + ground.heightAt(x, z), onRoad: onCarRoad, waterAt: (x, z, area) => T.waterLevel(x, z, area) });
     group.add(mon.group);
     if (t.state !== 'loading') return disposeGroup(group);
 

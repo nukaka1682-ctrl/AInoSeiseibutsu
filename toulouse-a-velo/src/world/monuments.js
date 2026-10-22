@@ -46,6 +46,10 @@ export const MONUMENTS = [
   // オテル・デューの川側（利用者の写真 NCM_0107・0125・0136）: 真ん中の張り出しの三角の破風、水際の 2 つの大きなアーチ、
   // 正面の前の川の中に残るポン・ヴィユー（古い橋）の橋脚の跡（幅約 8 m、アーチの付け根）
   { id: 'hotel-dieu-river', kind: 'riverfront', lat: 43.59988, lon: 1.43720, r: 45, minArea: 5000, facing: [43.59994, 1.43851] },
+  // Port Saint-Sauveur（利用者の写真 NCM_0183・0184）: 港の南西の端のカピテヌリー（北を向いた半円のガラスの正面、
+  // 暗い灰色の金属のかまぼこ屋根、レンガの横の壁、棟まで約 9.5 m）と、西の岸壁に沿ってつないだ平底船（péniche）の列
+  { id: 'capitainerie', kind: 'capitainerie', lat: 43.59508, lon: 1.45592, r: 15, front: [43.59600, 1.45592] },
+  { id: 'port-boats', kind: 'moorings', quay: [[43.596166, 1.455856], [43.595088, 1.455965]], water: [43.59563, 1.45610] },
   { id: 'patte-oie', kind: 'roundabout', lat: 43.59640, lon: 1.42303, radius: 9 },
   // ノートルダム・ド・ラ・ドラード大聖堂の川側の正面（利用者の写真 NCM_0110・0112）: 灰色の石の 6 本の円柱（約 12 m）と
   // 三角の破風の柱廊。教会の建物の、川（facing）の方を向いたいちばん長い壁の前に建てる
@@ -383,6 +387,36 @@ export function findMonuments(proj, { buildings = [], areas = [], facade = null,
       const e1 = [ob.e1[0] * sg, ob.e1[1] * sg], e2 = [-e1[1], e1[0]];
       const sc = (x - ob.cx) * e1[0] + (z - ob.cz) * e1[1];
       out.push({ spec, kind: 'basilica', cx: ob.cx, cz: ob.cz, e1, e2, a: ob.a, b: ob.b, sc, height: b.info.height, replaced: [b] });
+    } else if (spec.kind === 'capitainerie') {
+      let best = null;
+      for (const b of buildings) {
+        const d = Math.hypot(b.inside[0] - x, b.inside[1] - z);
+        if (d < spec.r && b.info.area > 150 && b.info.area < 800 && (!best || d < best.d)) best = { b, d };
+      }
+      if (!best) continue;
+      const ob = orientedBox(best.b.outer);
+      const [fx, fz] = proj.project(...spec.front);
+      const fl = Math.hypot(fx - ob.cx, fz - ob.cz) || 1, f = [(fx - ob.cx) / fl, (fz - ob.cz) / fl];
+      // かまぼこ屋根の軸は正面の向きに近い方の辺
+      const along1 = Math.abs(ob.e1[0] * f[0] + ob.e1[1] * f[1]) >= Math.abs(ob.e2[0] * f[0] + ob.e2[1] * f[1]);
+      let ax = along1 ? ob.e1 : ob.e2;
+      if (ax[0] * f[0] + ax[1] * f[1] < 0) ax = [-ax[0], -ax[1]];
+      out.push({ spec, kind: 'capitainerie', cx: ob.cx, cz: ob.cz, ax, hl: along1 ? ob.a : ob.b, hw: along1 ? ob.b : ob.a, replaced: [best.b] });
+    } else if (spec.kind === 'moorings') {
+      const [a, b] = spec.quay.map((ll) => proj.project(...ll)), [wx, wz] = proj.project(...spec.water);
+      const L = Math.hypot(b[0] - a[0], b[1] - a[1]), t = [(b[0] - a[0]) / L, (b[1] - a[1]) / L];
+      let n = [-t[1], t[0]];
+      if ((wx - a[0]) * n[0] + (wz - a[1]) * n[1] < 0) n = [-n[0], -n[1]];
+      const water = areas.find((q) => q.type === 'water' && pointInPolygon(wx, wz, q));
+      const boats = [];
+      for (let s = 4, k = 0; s < L - 8; k++) {
+        const len = 16 + hash01(k, 71) * 10;
+        const c = s + len / 2, off = 3.4 + hash01(k, 72) * 0.6;
+        const bx = a[0] + t[0] * c + n[0] * off, bz = a[1] + t[1] * c + n[1] * off;
+        if (inB(bx, bz)) boats.push({ x: bx, z: bz, len, k });
+        s += len + 2.5 + hash01(k, 73) * 3;
+      }
+      if (boats.length) out.push({ spec, kind: 'moorings', t, n, boats, area: water || null, replaced: [] });
     } else if (spec.kind === 'riverfront') {
       const b = buildings.find((q) => q.info.area >= spec.minArea && Math.hypot(q.inside[0] - x, q.inside[1] - z) < spec.r);
       if (!b) continue;
@@ -1803,6 +1837,74 @@ function writeBasilica(m, W, groundAt) {
   }
 }
 
+// ---- カピテヌリー: レンガの横の壁、北の半円のガラスの正面（暗い枠）、張り出した暗い金属のかまぼこ屋根
+function writeCapitainerie(m, W, groundAt, colliders) {
+  const { cx, cz, ax, hl, hw } = m;
+  const w = W.main, mt = W.metal;
+  const y0 = groundAt(cx, cz), hWall = 4.4, rise = Math.min(5.2, hw * 0.75);
+  const side = [-ax[1], ax[0]];
+  const P = (u, v, y) => [cx + ax[0] * u + side[0] * v, y0 + y, cz + ax[1] * u + side[1] * v];
+  const P2 = (u, v) => [cx + ax[0] * u + side[0] * v, cz + ax[1] * u + side[1] * v];
+  const ROOF = col('#525a64'), GLASS = col('#3d4a52'), FRAME = col('#2a2e30'), BRICKC = col('#d39a80');
+  // 横の壁（レンガ）と裏の壁
+  wall(w, P2(-hl, -hw), P2(hl, -hw), y0, y0 + hWall, [-side[0], 0, -side[1]], CELL.brick, BRICK_CW, BRICK_CW, BRICKC);
+  wall(w, P2(hl, hw), P2(-hl, hw), y0, y0 + hWall, [side[0], 0, side[1]], CELL.brick, BRICK_CW, BRICK_CW, BRICKC);
+  wall(w, P2(-hl, hw), P2(-hl, -hw), y0, y0 + hWall, [-ax[0], 0, -ax[1]], CELL.brick, BRICK_CW, BRICK_CW, BRICKC);
+  // 屋根の断面（円弧）: v → 高さ
+  const N = 12, arcY = (f) => hWall + rise * Math.sin(Math.acos(Math.max(-1, Math.min(1, f))));
+  const ov = 1.5, ovs = 0.5;
+  for (let i = 0; i < N; i++) {
+    const f0 = -1 + (2 * i) / N, f1 = -1 + (2 * (i + 1)) / N;
+    const v0 = f0 * (hw + ovs), v1 = f1 * (hw + ovs), y0a = arcY(f0), y1a = arcY(f1);
+    const nn = [side[0] * -(y1a - y0a), v1 - v0, side[1] * -(y1a - y0a)], l = Math.hypot(...nn);
+    mt.quad(P(-hl - ov, v0, y0a), P(hl + ov, v0, y0a), P(hl + ov, v1, y1a), P(-hl - ov, v1, y1a), nn.map((q) => q / l), PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, ROOF);
+    // 正面のガラス（円弧の下の扇形）と裏の妻壁
+    for (const [u, sg] of [[hl, 1], [-hl, -1]]) {
+      const n3 = [ax[0] * sg, 0, ax[1] * sg];
+      const vv0 = f0 * hw, vv1 = f1 * hw, ya = arcY(f0) - 0.1, yb = arcY(f1) - 0.1;
+      if (sg > 0) w.quad(P(u, vv0, 0), P(u, vv1, 0), P(u, vv1, yb), P(u, vv0, ya), n3, PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, GLASS);
+      else w.quad(P(u, vv0, hWall), P(u, vv1, hWall), P(u, vv1, yb), P(u, vv0, ya), n3, PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, BRICKC);
+    }
+  }
+  // ガラスの正面の縦の枠
+  for (let k = 0; k <= 8; k++) {
+    const f = -1 + (2 * k) / 8, v = f * hw, yt = arcY(f) - 0.1;
+    const c = P2(hl + 0.05, v);
+    box(w, [c[0], y0 + yt / 2, c[1]], [ax[0] * 0.06, 0, ax[1] * 0.06], [0, yt / 2, 0], [side[0] * 0.08, 0, side[1] * 0.08], FRAME);
+  }
+  const c = P2(hl + 0.05, 0);
+  box(w, [c[0], y0 + 2.6, c[1]], [ax[0] * 0.06, 0, ax[1] * 0.06], [0, 0.08, 0], [side[0] * hw, 0, side[1] * hw], FRAME);
+}
+
+// ---- つないだ平底船: 暗い紺〜黒の船体（へさきは細く）、白い操舵室とニスを塗った木の屋根
+function writeMoorings(m, W, groundAt, colliders, onRoad, keepOut, waterAt) {
+  const w = W.main;
+  const HULLS = [col('#1e2a3a'), col('#202224'), col('#2c3b2e'), col('#3a2a24')], CABIN = col('#e8e6e0'), WOOD = col('#8a5e3a'), DECK = col('#6e6a62');
+  const { t, n } = m;
+  for (const { x, z, len, k } of m.boats) {
+    const yw = waterAt(x, z, m.area);
+    const hl = len / 2, hb = 2.2, fb = 0.9;
+    const P = (u, v, y) => [x + t[0] * u + n[0] * v, yw + y, z + t[1] * u + n[1] * v];
+    const hull = HULLS[k % HULLS.length];
+    // 船体: 四角い胴と、細くなるへさき
+    box(w, [x + t[0] * -1.5, yw + fb / 2 - 0.3, z + t[1] * -1.5], [t[0] * (hl - 1.5), 0, t[1] * (hl - 1.5)], [0, fb / 2 + 0.3, 0], [n[0] * hb, 0, n[1] * hb], hull, { top: DECK });
+    const bow = [P(hl - 3, -hb, -0.6), P(hl - 3, hb, -0.6), P(hl, 0, -0.6), P(hl - 3, -hb, fb + 0.1), P(hl - 3, hb, fb + 0.1), P(hl + 0.4, 0, fb + 0.1)];
+    for (const sg of [-1, 1]) {
+      const a = sg < 0 ? 0 : 1, nn = [n[0] * sg + t[0] * 0.8, 0, n[1] * sg + t[1] * 0.8], l = Math.hypot(...nn);
+      w.quad(bow[a], bow[2], bow[5], bow[a + 3], nn.map((q) => q / l), PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, hull);
+    }
+    w.tri(bow[3], bow[4], bow[5], [0, 1, 0], PLAIN_UV, PLAIN_UV, PLAIN_UV, DECK);
+    // 操舵室・居室（後ろ寄り）と木の屋根
+    const cl = Math.min(hl * 1.1, 8 + hash01(k, 74) * 6), cu = -hl + 1.5 + cl / 2;
+    const cc = P(cu, 0, 0);
+    box(w, [cc[0], yw + fb + 0.9, cc[2]], [t[0] * cl / 2, 0, t[1] * cl / 2], [0, 0.9, 0], [n[0] * (hb - 0.4), 0, n[1] * (hb - 0.4)], CABIN, { top: WOOD });
+    for (let j = 0; j < Math.floor(cl / 1.6); j++) {
+      const wc = P(cu - cl / 2 + 0.9 + j * 1.6, hb - 0.38, fb + 1.15);
+      for (const sg of [-1, 1]) vpoly(w, [wc[0] + n[0] * (sg < 0 ? -2 * (hb - 0.38) : 0), wc[2] + n[1] * (sg < 0 ? -2 * (hb - 0.38) : 0)], t, [[-0.45, wc[1] - 0.35], [0.45, wc[1] - 0.35], [0.45, wc[1] + 0.35], [-0.45, wc[1] + 0.35]], [n[0] * sg, 0, n[1] * sg], col('#2c3238'));
+    }
+  }
+}
+
 // ---- 川に面した正面: 破風・水際のアーチ・古い橋脚の跡
 function writeRiverfront(m, W, groundAt) {
   const w = W.main;
@@ -2007,16 +2109,16 @@ function writeStatue(m, W, groundAt, colliders, onRoad, keepOut) {
   keepOut.push([x, z, 6]);
 }
 
-const WRITERS = { riverfront: writeRiverfront, arcades: writeArcades, choir: writeChoir, ramblas: writeRamblas, basilica: writeBasilica, island: writeIsland, roundabout: writeRoundabout, portico: writePortico, donjon: writeDonjon, statue: writeStatue, dome: writeDome, chateau: writeChateau, stadium: writeStadium, cabanis: writeCabanis, coq: writeCoq, cross: writeCross, fastfood: writeFastfood, jgarden: writeJgarden, parterre: writeParterre };
+const WRITERS = { capitainerie: writeCapitainerie, moorings: writeMoorings, riverfront: writeRiverfront, arcades: writeArcades, choir: writeChoir, ramblas: writeRamblas, basilica: writeBasilica, island: writeIsland, roundabout: writeRoundabout, portico: writePortico, donjon: writeDonjon, statue: writeStatue, dome: writeDome, chateau: writeChateau, stadium: writeStadium, cabanis: writeCabanis, coq: writeCoq, cross: writeCross, fastfood: writeFastfood, jgarden: writeJgarden, parterre: writeParterre };
 
 // 名所のモデルを作る。colliders: 足す当たり判定の円 [x, z, r] か線分 [ax, az, bx, bz]、
 // keepOut: 街の小物を置かない円 [x, z, r]（像の台・シャトー・ドーの柵の内側。monumentSolid）
-export function buildMonuments(list, materials, { groundAt = () => 0, onRoad = () => false } = {}) {
+export function buildMonuments(list, materials, { groundAt = () => 0, onRoad = () => false, waterAt = (x, z) => groundAt(x, z) - 2 } = {}) {
   const group = new THREE.Group();
   group.name = 'monuments';
   const W = { main: new MeshWriter(), metal: new MeshWriter(), inlay: new MeshWriter() };
   const colliders = [], keepOut = [];
-  for (const m of list) WRITERS[m.kind](m, W, groundAt, colliders, onRoad, keepOut);
+  for (const m of list) WRITERS[m.kind](m, W, groundAt, colliders, onRoad, keepOut, waterAt);
   const mats = { main: materials.monument, metal: materials.monumentMetal, inlay: materials.monumentInlay };
   for (const key of ['main', 'metal', 'inlay']) {
     if (W[key].empty || !mats[key]) continue;

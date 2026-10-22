@@ -143,7 +143,7 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   const skip = new Set(monuments.flatMap((m) => m.replaced));
   const buildings = await buildBuildings(parsed, buildingMats, (p) => progress(`建物を建てています… ${Math.round(p * 100)}%`, 0.3 + p * 0.6), facade, { towers, groundAt: liftAt, skip, terrain });
   group.add(buildings.group);
-  const mon = buildMonuments(monuments, buildingMats, { groundAt: (x, z) => terrain.h(x, z) + liftAt(x, z), onRoad: onCarRoad });
+  const mon = buildMonuments(monuments, buildingMats, { groundAt: (x, z) => terrain.h(x, z) + liftAt(x, z), onRoad: onCarRoad, waterAt: (x, z, area) => terrain.waterLevel(x, z, area) });
   group.add(mon.group);
   for (const c of mon.colliders) {
     if (c.length === 4) collision.addSegment(...c); // 像の台・塔の鉄柵（円 [x, z, r] か線分 [ax, az, bx, bz]）
