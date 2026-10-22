@@ -52,8 +52,13 @@ const strHash = (s) => {
 
 // 通りの種類: shared（旧市街の石畳の共有空間）/ taur（小舗石の車道＋石の板の歩道）/ curb（縁石と一段高い歩道）/
 // bridge（橋。歩道は作らないが、ほかの歩道を切る）/ plain（それ以外: 歩道なしの車道・歩行者の通り・小道）
+// 旧市街でも、車道（アスファルト）と灰色の花崗岩の板の歩道の通り（利用者のストリートビュー 2026-10-17 210627: ポン・ヌフの橋のたもと）
+const GREY_WALKS = /^(Place du Pont[- ]Neuf|Quai de la Daurade)$/i;
+
 export function classifyStreet(road, old) {
   const t = road.type;
+  const grey = GREY_WALKS.test(road.name || '');
+  if (grey) old = false;
   const car = CAR_ROADS.has(t);
   const h = strHash(road.name || `#${road.id}`);
   const near = NEAR_TYPES.has(t) || road.bridge;
@@ -80,7 +85,7 @@ export function classifyStreet(road, old) {
     // 縁石の足元の 2 列の小舗石の側溝は、中心部と幹線道路だけ（郊外の住宅街はアスファルトのまま）
     // Esquirol と Rue de Metz（利用者の Street View）: 両側とも赤茶色の小舗石の歩道
     const esq = /^(Place [EÉ]tienne[- ]Esquirol|Rue de Metz)$/i.test(road.name || '');
-    return { kind: 'curb', band: road.width / 2, red: esq ? [true, true] : [hash01(h, 34) < p, hash01(h, 35) < p], gutter: old || MAIN.has(t), near };
+    return { kind: 'curb', band: road.width / 2, red: esq ? [true, true] : grey ? [false, false] : [hash01(h, 34) < p, hash01(h, 35) < p], gutter: old || MAIN.has(t), near };
   }
   return { kind: 'plain', band: road.width / 2, near };
 }

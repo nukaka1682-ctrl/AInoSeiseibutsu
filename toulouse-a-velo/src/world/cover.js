@@ -141,7 +141,8 @@ function onBeforeCompile(uniforms) {
 // 1 枚の板: bounds（ローカル座標の範囲）を覆う。cover: { cols, rows, rle }、inOldTown(x, z): 旧市街か、
 // parsed: 地図（広場と並木道の名前で覆いを補正する。data/cover.js の coverStamps）
 // geometry: 地形のタイルの地面（terrainmesh.js。頂点はワールド座標）。あればそれに重ねて描く（同じ三角形なので地面とぴったり重なる）
-// lowQuay(x, z): 河岸の岸壁の下の段か（利用者の写真: ラ・ドラードの下の段は旧市街の小舗石ではなく灰色の石の板。旧市街の外と同じ灰色の舗装にする）
+// lowQuay(x, z): 旧市街の中で灰色の舗装にする所か（利用者の写真: ラ・ドラードの下の段・ポン・ヌフの橋のたもとは小舗石ではなく灰色の石の板。
+// 旧市街の外と同じ灰色の舗装にする）
 export function buildCoverMesh(cover, bounds, shared, inOldTown = () => false, parsed = null, geometry = null, lowQuay = null) {
   const grid = decodeCover(cover);
   const w = bounds.maxX - bounds.minX, h = bounds.maxZ - bounds.minZ;

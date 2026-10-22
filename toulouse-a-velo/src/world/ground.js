@@ -425,6 +425,32 @@ function bankSection(kind, d, W = 16) {
   return null;
 }
 
+// 岸壁の線のすき間をふさぐ壁 [始点, 終点]（緯度・経度）。終点は岸壁の線の端で、高さと向きはその壁から写す
+// ポン・ヌフの北の欄干の端 → ドラード河岸の岸壁の端（利用者のストリートビュー 2026-10-17 210627: 橋の欄干がそのまま河岸の
+// 手すり壁に続く。地形の格子の岸壁の線は橋の 3 m 手前で切れ、下の段と川が見えていた）
+// fill: 壁の上の段の高さに敷く歩道の板（橋のたもとの角の、格子の斜面の 1 マスを隠す）
+const QUAY_LINKS = [{
+  wall: [[43.5996839, 1.4403807], [43.5997144, 1.4403683]],
+  fill: [[43.5996893, 1.4403733], [43.5996893, 1.4404365], [43.5996632, 1.4404365], [43.5996632, 1.4403832]],
+}];
+export function quayLinks(walls, proj) {
+  const out = [];
+  for (const { wall: [la, lb], fill } of QUAY_LINKS) {
+    const [ax, az] = proj.project(...la), [bx, bz] = proj.project(...lb);
+    let best = null;
+    for (const q of walls) {
+      for (const [x, z, t, b] of [[q.ax, q.az, q.at, q.ab], [q.bx, q.bz, q.bt, q.bb]]) {
+        const d = Math.hypot(x - bx, z - bz);
+        if (d < 1.5 && (!best || d < best.d)) best = { d, q, t, b };
+      }
+    }
+    if (!best) continue;
+    const { q, t, b } = best;
+    out.push({ ax, az, at: t, ab: b, bx, bz, bt: t, bb: b, nx: q.nx, nz: q.nz, wa: q.wa, wb: q.wb, fill: fill?.map((ll) => proj.project(...ll)) });
+  }
+  return out;
+}
+
 // 旧市街のまわりの岸壁（terraincond.js の sharpenQuays の線）: 上の河岸から下の遊歩道まで垂直のレンガの壁と手すり壁、
 // 壁の上から河岸の車道の縁までの歩道の板（壁の裏の 1 マスの斜面を隠す）
 const QUAY_PARAPET = 1.0; // 岸壁の上のレンガの手すり壁の高さ（m）
@@ -480,6 +506,10 @@ function buildQuayWalls(list, mats) {
     const uax = ax - aex * ka, uaz = az - aez * ka, ubx = bx - bex * kb, ubz = bz - bez * kb;
     walk.quad([pax, cy(at), paz], [uax, cy(at), uaz], [ubx, cy(bt), ubz], [pbx, cy(bt), pbz], [0, 1, 0], [pax / 2.4, paz / 2.4], [uax / 2.4, uaz / 2.4], [ubx / 2.4, ubz / 2.4], [pbx / 2.4, pbz / 2.4], BANK.quayWalk);
     walk.quad([ubx, cy(bt) - 3, ubz], [uax, cy(at) - 3, uaz], [uax, cy(at), uaz], [ubx, cy(bt), ubz], [-nx, 0, -nz], [0, 0], [L / 2.4, 0], [L / 2.4, 1.25], [0, 1.25], BANK.quayWalk);
+    if (q.fill) {
+      const F = q.fill.map(([x, z]) => [x, cy(at), z]);
+      for (let i = 1; i + 1 < F.length; i++) walk.tri(F[0], F[i], F[i + 1], [0, 1, 0], [F[0][0] / 2.4, F[0][2] / 2.4], [F[i][0] / 2.4, F[i][2] / 2.4], [F[i + 1][0] / 2.4, F[i + 1][2] / 2.4], BANK.quayWalk);
+    }
   }
   const g = new THREE.Group();
   g.name = 'quay-walls';
@@ -543,7 +573,8 @@ export function buildGroundBase(parsed, rect, mats, terrain = FLAT_TERRAIN, layo
     orientRamps(T.metro, parsed.roads);
     fillMetroPits(T, T.metro);
     conditionRoads(T, parsed.roads, inWater);
-    T.setQuayWalls(sharpenQuays(T, parsed.proj ? parsed.proj.project(...QUAY_LATLON) : [-250, 0], QUAY_RADIUS + 150, { inWater, paths: parsed.roads }));
+    const quays = sharpenQuays(T, parsed.proj ? parsed.proj.project(...QUAY_LATLON) : [-250, 0], QUAY_RADIUS + 150, { inWater, paths: parsed.roads });
+    T.setQuayWalls(parsed.proj ? quays.concat(quayLinks(quays, parsed.proj)) : quays);
     despike(T);
   }
   if (!T.flat && T.quayWalls.length) group.add(buildQuayWalls(T.quayWalls, mats));

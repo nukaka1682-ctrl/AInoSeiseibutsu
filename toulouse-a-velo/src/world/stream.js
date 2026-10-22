@@ -17,7 +17,7 @@ import { buildMonuments, findMonuments, monumentClearance, monumentSolid } from 
 import { areaFrame, makeSurfaceAt } from './assemble.js';
 import { buildGroundBase, buildGroundDetailAsync, makeWaterTest } from './ground.js';
 import { POST_HIT, planStreets } from './streets.js';
-import { historicCoreTest, oldTownTest } from '../config.js';
+import { greySquareTest, historicCoreTest, oldTownTest } from '../config.js';
 import { buildAbutments, makeDeckTest, setupDecks } from './bridges.js';
 import { FLAT_TERRAIN, surfaceFns, waterPass } from './terrain.js';
 import { buildTerrainTile } from './terrainmesh.js';
@@ -62,12 +62,13 @@ export async function assembleStreamWorld({ base, bbox, presetId, buildingMats, 
   const inOldTown = oldTownTest(proj);
   // 通りの石畳・段差のない通りは右岸の歴史的な中心だけ（利用者の写真: 左岸のサン・シプリアンの通りはアスファルト）
   const inCore = historicCoreTest(proj);
+  const inGreySquare = greySquareTest(proj);
   planStreets(parsed, inCore); // 通りの種類・交差点・横断歩道（エリアで 1 回）
   // 並木道（IGN のデータには個々の木がないので、LiDAR の木がないタイルで使う）
   const avenues = parsed.roads.filter((r) => CAR_ROADS.has(r.type) || r.type === 'pedestrian');
 
   const streamer = new TileStreamer({
-    presetId, bbox, rect, proj, layout, parsed, roadnet, inWater, onRoad, avenues, inOldTown, inCore,
+    presetId, bbox, rect, proj, layout, parsed, roadnet, inWater, onRoad, avenues, inOldTown, inCore, inGreySquare,
     materials: buildingMats, groundMats, waterDepthAt: ground.waterDepthAt, bankTrees: ground.bankTrees || [], collision, group,
     terrain, far: ground.far, quayCentre: proj.project(43.5994, 1.4364),
   });
@@ -214,7 +215,7 @@ class TileStreamer {
     // 地形: タイルの地面（地面の覆いは同じ三角形に描く）
     const tile = T.flat ? null : buildTerrainTile(T, B, this.groundMats, { quayCentre: this.quayCentre, inWater: this.inWater });
     if (tile) ground.group.add(tile.group);
-    const lowQuay = (x, z) => (T.quayBelow?.(x, z, 25)?.drop ?? 0) > 2; // 岸壁の下の段（石の板の河岸）
+    const lowQuay = (x, z) => this.inGreySquare(x, z) || (T.quayBelow?.(x, z, 25)?.drop ?? 0) > 2; // 岸壁の下の段（石の板の河岸）と灰色の広場
     if (data.cover) ground.group.add(buildCoverMesh(data.cover, B, this.groundMats.cover, this.inOldTown, this.parsed, tile?.geometry, lowQuay));
     group.add(ground.group);
     await pause();

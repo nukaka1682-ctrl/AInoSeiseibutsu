@@ -18,7 +18,7 @@ import { clearEntrances, entranceWalls, inEntrance, projectEntrances } from './m
 import { findTowers } from './towers.js';
 import { buildMonuments, findMonuments, monumentClearance, monumentSolid } from './monuments.js';
 import { findCapitoleFacade, markBrickSites, markStreetStyles } from './landmarkfacades.js';
-import { historicCoreTest, oldTownTest } from '../config.js';
+import { greySquareTest, historicCoreTest, oldTownTest } from '../config.js';
 import { POST_HIT, planStreets } from './streets.js';
 import { buildFurniture } from './furniture.js';
 import { CollisionWorld } from '../game/collision.js';
@@ -90,6 +90,7 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   const covers = (data.cover || []).map((c) => ({ c, b: tileBounds(layout, c.i, c.j) }));
   const inOldTown = oldTownTest(proj);
   const inCore = historicCoreTest(proj); // 通りの石畳は右岸の歴史的な中心だけ（stream.js と同じ）
+  const inGreySquare = greySquareTest(proj);
   const ground = buildGround(parsed, rect, groundMats, { buildings: parsed.buildings, walls, inOldTown, inStreetOld: inCore, covered: covers.map(({ b }) => b), terrain, layout, proj });
   if (terrain.flat) {
     for (const { c, b } of covers) ground.group.add(buildCoverMesh(c, b, groundMats.cover, inOldTown, parsed));
@@ -102,7 +103,7 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
         const tile = buildTerrainTile(terrain, b, groundMats, { quayCentre, inWater });
         ground.group.add(tile.group);
         const cv = covers.find((cc) => cc.c.i === i && cc.c.j === j);
-        if (cv) ground.group.add(buildCoverMesh(cv.c, b, groundMats.cover, inOldTown, parsed, tile.geometry, (x, z) => (terrain.quayBelow?.(x, z, 25)?.drop ?? 0) > 2));
+        if (cv) ground.group.add(buildCoverMesh(cv.c, b, groundMats.cover, inOldTown, parsed, tile.geometry, (x, z) => inGreySquare(x, z) || (terrain.quayBelow?.(x, z, 25)?.drop ?? 0) > 2));
         ground.far?.setTile(i, j, true);
       }
     }
