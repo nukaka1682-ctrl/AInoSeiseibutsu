@@ -233,3 +233,12 @@ test('閘門: 閘室の両側の柵は当たり判定の線、上の面は地面
   const side = colliders.filter((c) => c.length === 4 && Math.abs(Math.abs(f.uv(c[0], c[1])[1]) - (spec.width / 2 + 0.3)) < 1e-6);
   assert.ok(side.length >= 4);
 });
+
+test('入市税の門の小屋: 2 つ、正面は広場（東）を向き、壁は当たり判定の 4 辺', () => {
+  const proj = new LocalProjection(43.5979, 1.4310);
+  const list = findMonuments(proj, { buildings: [], areas: [], roads: [], bounds: null }).filter((m) => m.kind === 'pavilion');
+  assert.equal(list.length, 2);
+  for (const m of list) assert.ok(m.f[0] > 0.8); // 東向き
+  const { colliders } = buildMonuments(list, {}, { groundAt: () => 0 });
+  assert.equal(colliders.length, 8);
+});

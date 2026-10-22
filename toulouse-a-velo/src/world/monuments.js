@@ -59,6 +59,10 @@ export const MONUMENTS = [
   // 壁泉（幅約 6 m・高さ約 7 m、切り石の付け柱・軒・半円のニッチ、白い大理石の 2 人の女性像、貝の形の小さな水盤と大きな水盤）
   { id: 'ariege-garonne', kind: 'wallFountain', lat: 43.59221, lon: 1.44454, r: 30 },
   ...LOCKS, // 閘門（locks.js）
+  // サン・シプリアンの入市税の門の小屋（Pavillons de l'octroi。利用者のストリートビュー 2026-10-02 210226、航空写真）:
+  // Place Intérieure Saint-Cyprien の西の端、噴水のロータリーの両脇に、淡い石の小さな平屋（約 6 m 四方）。正面は広場（東）を向き、
+  // 三角の破風と頂の壺の飾り。at: 2 つの小屋の真ん中、face: 正面が向く点
+  { id: 'octroi-saint-cyprien', kind: 'pavilion', at: [[43.598079, 1.430942], [43.597622, 1.430764]], face: [43.59790, 1.43230], size: [5.6, 6], h: 4.6 },
   { id: 'patte-oie', kind: 'roundabout', lat: 43.59640, lon: 1.42303, radius: 9 },
   // ノートルダム・ド・ラ・ドラード大聖堂の川側の正面（利用者の写真 NCM_0110・0112）: 灰色の石の 6 本の円柱（約 12 m）と
   // 三角の破風の柱廊。教会の建物の、川（facing）の方を向いたいちばん長い壁の前に建てる
@@ -472,6 +476,14 @@ export function findMonuments(proj, { buildings = [], areas = [], facade = null,
       if (!inB((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)) continue;
       const water = areas.find((q) => q.type === 'water' && pointInPolygon((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, q));
       out.push({ spec, kind: 'lock', a, b, width: spec.width, from: spec.from, area: water || null, replaced: [] });
+    } else if (spec.kind === 'pavilion') {
+      const [fx, fz] = proj.project(...spec.face);
+      for (const ll of spec.at) {
+        const [px, pz] = proj.project(...ll);
+        if (!inB(px, pz)) continue;
+        const fl = Math.hypot(fx - px, fz - pz) || 1;
+        out.push({ spec, kind: 'pavilion', x: px, z: pz, f: [(fx - px) / fl, (fz - pz) / fl], size: spec.size, h: spec.h, replaced: [] });
+      }
     } else if (spec.kind === 'equestrian') {
       if (!inB(x, z)) continue;
       const [fx, fz] = proj.project(...spec.facing);
@@ -627,6 +639,7 @@ export function monumentClearance(list) {
     if (m.kind === 'coq') circles.push([m.x, m.z, 3]);
     if (m.kind === 'roundabout') circles.push([m.x, m.z, m.radius + 0.5]); // 島の木は島のモデルで描く
     if (m.kind === 'statue') circles.push([m.x, m.z, 6]);
+    if (m.kind === 'pavilion') circles.push([m.x, m.z, 5]);
   }
   // 中庭の刈り込んだ木は専用の形で描くので、地形モデルの木（丸い樹冠）は植えない
   const rings = list.filter((m) => m.kind === 'parterre').map((m) => m.outer);
@@ -2224,6 +2237,48 @@ function writeLock(m, W, groundAt, colliders, onRoad, keepOut, waterAt) {
   }
 }
 
+// ---- 入市税の門の小屋: 淡い石の平屋（台座・角の付け柱・軒の蛇腹）、正面（f の向き）に三角の破風と頂の壺の飾り、
+// 戸口と、横の壁のめくら窓
+function writePavilion(m, W, groundAt, colliders) {
+  const w = W.main;
+  const { x, z, f, h: H } = m, [wd, dp] = m.size, a = wd / 2, b = dp / 2;
+  const s = [-f[1], f[0]];
+  const P2 = (u, v) => [x + f[0] * u + s[0] * v, z + f[1] * u + s[1] * v];
+  let y0 = Infinity;
+  for (const [u, v] of [[-b, -a], [b, -a], [b, a], [-b, a]]) y0 = Math.min(y0, groundAt(...P2(u, v)));
+  const STONE = col('#dec6a0'), SHADE = col('#ccb48f'), DARK = col('#3e3a36'), CORN = col('#e6d2b0');
+  const B = (u, v, y, hu, hv, hy, c) => {
+    const p = P2(u, v);
+    box(w, [p[0], y, p[1]], [f[0] * hu, 0, f[1] * hu], [0, hy, 0], [s[0] * hv, 0, s[1] * hv], c);
+  };
+  B(0, 0, y0 + 0.1, b + 0.15, a + 0.15, 0.45, SHADE); // 台座
+  B(0, 0, y0 + H / 2, b, a, H / 2, STONE); // 壁
+  for (const su of [-1, 1]) for (const sv of [-1, 1]) B(su * (b - 0.2), sv * (a - 0.2), y0 + H / 2, 0.28, 0.28, H / 2, CORN); // 角の付け柱
+  B(0, 0, y0 + H + 0.18, b + 0.3, a + 0.3, 0.18, CORN); // 軒の蛇腹
+  B(0, 0, y0 + H + 0.5, b, a, 0.14, SHADE); // 屋上の縁
+  // 正面の三角の破風（奥行き 0.5 m の三角柱）と頂の壺
+  const ph = 1.25, y1 = y0 + H + 0.36;
+  for (const du of [b + 0.3, b - 0.2]) {
+    const o = P2(du, 0);
+    vpoly(w, o, s, [[-(a + 0.3), y1], [a + 0.3, y1], [0, y1 + ph]], [f[0] * Math.sign(du - b + 0.05), 0, f[1] * Math.sign(du - b + 0.05)], CORN);
+  }
+  const sl = Math.hypot(a + 0.3, ph);
+  for (const sv of [-1, 1]) {
+    const e0 = P2(b + 0.3, sv * (a + 0.3)), e1 = P2(b - 0.2, sv * (a + 0.3)), t0 = P2(b + 0.3, 0), t1 = P2(b - 0.2, 0);
+    const n = [s[0] * sv * (ph / sl), (a + 0.3) / sl, s[1] * sv * (ph / sl)];
+    w.quad([e0[0], y1, e0[1]], [e1[0], y1, e1[1]], [t1[0], y1 + ph, t1[1]], [t0[0], y1 + ph, t0[1]], n, PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, SHADE);
+  }
+  const u0 = P2(b + 0.05, 0);
+  cylinder(w, u0[0], u0[1], 0.14, 0.2, y1 + ph, y1 + ph + 0.25, { seg: 10, color: CORN });
+  cylinder(w, u0[0], u0[1], 0.26, 0.14, y1 + ph + 0.25, y1 + ph + 0.7, { seg: 10, color: CORN });
+  annulus(w, u0[0], u0[1], 0, 0.14, y1 + ph + 0.7, 10, CORN);
+  // 戸口（正面）とめくら窓（横）
+  B(b + 0.02, 0, y0 + 0.55 + 1.25, 0.04, 0.65, 1.25, DARK);
+  for (const sv of [-1, 1]) B(0, sv * (a + 0.02), y0 + 2.2, 0.6, 0.04, 1.0, SHADE);
+  const C = [[-b, -a], [b, -a], [b, a], [-b, a]].map(([u, v]) => P2(u, v));
+  for (let i = 0; i < 4; i++) colliders.push([...C[i], ...C[(i + 1) % 4]]);
+}
+
 // ---- 騎馬像: 花崗岩の段と台座、ブロンズの馬（歩く姿）と旗を掲げた騎士
 function writeEquestrian(m, W, groundAt, colliders, onRoad, keepOut) {
   const { x, z } = m;
@@ -2394,7 +2449,7 @@ function writeStatue(m, W, groundAt, colliders, onRoad, keepOut) {
   keepOut.push([x, z, 6]);
 }
 
-const WRITERS = { lock: writeLock, equestrian: writeEquestrian, wallFountain: writeWallFountain, capitainerie: writeCapitainerie, moorings: writeMoorings, riverfront: writeRiverfront, arcades: writeArcades, choir: writeChoir, ramblas: writeRamblas, basilica: writeBasilica, island: writeIsland, roundabout: writeRoundabout, portico: writePortico, donjon: writeDonjon, statue: writeStatue, dome: writeDome, chateau: writeChateau, stadium: writeStadium, cabanis: writeCabanis, coq: writeCoq, cross: writeCross, fastfood: writeFastfood, jgarden: writeJgarden, parterre: writeParterre };
+const WRITERS = { pavilion: writePavilion, lock: writeLock, equestrian: writeEquestrian, wallFountain: writeWallFountain, capitainerie: writeCapitainerie, moorings: writeMoorings, riverfront: writeRiverfront, arcades: writeArcades, choir: writeChoir, ramblas: writeRamblas, basilica: writeBasilica, island: writeIsland, roundabout: writeRoundabout, portico: writePortico, donjon: writeDonjon, statue: writeStatue, dome: writeDome, chateau: writeChateau, stadium: writeStadium, cabanis: writeCabanis, coq: writeCoq, cross: writeCross, fastfood: writeFastfood, jgarden: writeJgarden, parterre: writeParterre };
 
 // 名所のモデルを作る。colliders: 足す当たり判定の円 [x, z, r] か線分 [ax, az, bx, bz]、
 // keepOut: 街の小物を置かない円 [x, z, r]（像の台・シャトー・ドーの柵の内側。monumentSolid）
