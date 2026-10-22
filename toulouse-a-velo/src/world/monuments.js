@@ -36,6 +36,9 @@ export const MONUMENTS = [
   // 低い勾配の瓦屋根と、東の端の段々の後陣（放射状の 5 つの小礼拝堂 8 m → 周歩廊 13 m → 後陣の円筒 20 m、どれも
   // 半円錐の瓦屋根）。crossing: 交差部（八角形の鐘楼 towers.js）、apex: 東の端の方向
   { id: 'saint-sernin', kind: 'basilica', lat: 43.60848, lon: 1.442154, r: 40, apex: [43.60863, 1.44250] },
+  // サン・テティエンヌ大聖堂の石の内陣（利用者の写真 NCM_0095）: 石の壁（buildings.js）の外に、控え壁と尖塔飾り、
+  // 2 段の尖頭アーチの高い窓、足元のすすけた帯、軒の手すり。landmarkfacades.js の STONE_CHOIRS と同じ所・向き
+  { id: 'saint-etienne-choir', kind: 'choir', lat: 43.59988, lon: 1.45046, r: 30, east: [43.59996, 1.4515], split: 1 },
   { id: 'patte-oie', kind: 'roundabout', lat: 43.59640, lon: 1.42303, radius: 9 },
   // ノートルダム・ド・ラ・ドラード大聖堂の川側の正面（利用者の写真 NCM_0110・0112）: 灰色の石の 6 本の円柱（約 12 m）と
   // 三角の破風の柱廊。教会の建物の、川（facing）の方を向いたいちばん長い壁の前に建てる
@@ -373,6 +376,18 @@ export function findMonuments(proj, { buildings = [], areas = [], facade = null,
       const e1 = [ob.e1[0] * sg, ob.e1[1] * sg], e2 = [-e1[1], e1[0]];
       const sc = (x - ob.cx) * e1[0] + (z - ob.cz) * e1[1];
       out.push({ spec, kind: 'basilica', cx: ob.cx, cz: ob.cz, e1, e2, a: ob.a, b: ob.b, sc, height: b.info.height, replaced: [b] });
+    } else if (spec.kind === 'choir') {
+      const b = buildings.find((q) => q.info.isChurch && Math.hypot(q.inside[0] - x, q.inside[1] - z) < spec.r);
+      if (!b) continue;
+      const [ex, ez] = proj.project(...spec.east);
+      const l = Math.hypot(ex - x, ez - z) || 1, e = [(ex - x) / l, (ez - z) / l], s0 = x * e[0] + z * e[1] + spec.split;
+      const sg = signedArea(b.outer) > 0 ? 1 : -1, edges = [];
+      for (let i = 0; i < b.outer.length; i++) {
+        const p = b.outer[i], q = b.outer[(i + 1) % b.outer.length], L = Math.hypot(q[0] - p[0], q[1] - p[1]);
+        if (L < 3 || ((p[0] + q[0]) / 2) * e[0] + ((p[1] + q[1]) / 2) * e[1] < s0) continue;
+        edges.push({ p, q, L, n: [((q[1] - p[1]) / L) * sg, (-(q[0] - p[0]) / L) * sg] });
+      }
+      out.push({ spec, kind: 'choir', edges, height: b.info.height || 22, replaced: [] });
     } else if (spec.kind === 'island') {
       const [a, b] = spec.line.map((ll) => proj.project(...ll));
       if (!inB((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)) continue;
@@ -907,18 +922,20 @@ function writeCabanis(m, W, groundAt) {
   const { e1, e2, a: A, b: B, m0, m1, front } = L;
   const y0 = groundAt(L.cx, L.cz);
   const H = m.height, FL = H / Math.max(1, Math.round(H / 4.2)); // 階の高さ（ルーバーの区画 1 枚）
-  const Ho = y0 + Math.min(H - 2 * FL, Math.max(12, Math.ceil((m1 - m0) / FL - 0.15) * FL)); // 開口の上端: 幅とほぼ同じ高さの四角い開口（階の帯にそろえる）
+  // 開口の上端: 利用者の写真 212520・NCM_0101 では高さの約 2/3（階の帯にそろえる）
+  const Ho = y0 + Math.min(H - 2 * FL, Math.max(12, Math.round((0.65 * H) / FL) * FL));
   const Y = y0 + H;
   const at = (u, v) => [L.cx + e1[0] * u + e2[0] * v, L.cz + e1[1] * u + e2[1] * v];
   const n3 = (v2, s = 1) => [v2[0] * s, 0, v2[1] * s];
   const w = W.main, mt = W.metal;
-  const GLASS = col('#c9c3bb'), SOFFIT = col('#d6d1c8'), ROOF = col('#9b9a96');
+  // 写真: ルーバーは暗いえんじ色がかった茶（#7a4a40 前後。テクスチャのテラコッタ色に掛ける）、開口の天井と奥は暗い
+  const GLASS = col('#8a8480'), SOFFIT = col('#3a3230'), ROOF = col('#9b9a96'), LOUVRE = col('#c49a90'), TOPGLASS = col('#4a5a62');
   // 正面と裏（開口の部分は上の梁だけ）
   for (const sv of [1, -1]) {
     const v = sv * B, n = n3(e2, sv);
     const seg = (u0, u1, ya, yb) => {
       const p = sv > 0 ? [at(u1, v), at(u0, v)] : [at(u0, v), at(u1, v)];
-      wall(w, p[0], p[1], ya, yb, n, CELL.louvre, FL, FL);
+      wall(w, p[0], p[1], ya, yb, n, CELL.louvre, FL, FL, LOUVRE);
     };
     seg(-A, m0, y0, Y);
     seg(m1, A, y0, Y);
@@ -927,7 +944,12 @@ function writeCabanis(m, W, groundAt) {
   // 両脇
   for (const su of [1, -1]) {
     const u = su * A;
-    wall(w, at(u, su > 0 ? -B : B), at(u, su > 0 ? B : -B), y0, Y, n3(e1, su), CELL.louvre, FL, FL);
+    wall(w, at(u, su > 0 ? -B : B), at(u, su > 0 ? B : -B), y0, Y, n3(e1, su), CELL.louvre, FL, FL, LOUVRE);
+  }
+  // いちばん上の階は全面ガラス（庇の下の暗い緑がかった灰色の帯。壁の少し外に貼る）
+  const g = 0.06;
+  for (const [p, q, n] of [[at(-A - g, -B - g), at(A + g, -B - g), n3(e2, -1)], [at(A + g, B + g), at(-A - g, B + g), n3(e2, 1)], [at(A + g, -B - g), at(A + g, B + g), n3(e1, 1)], [at(-A - g, B + g), at(-A - g, -B - g), n3(e1, -1)]]) {
+    w.quad([p[0], Y - FL, p[1]], [q[0], Y - FL, q[1]], [q[0], Y - 0.3, q[1]], [p[0], Y - 0.3, p[1]], n, PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, TOPGLASS);
   }
   // 開口の内側の壁（ガラスとルーバー）と天井
   wall(w, at(m0, -B), at(m0, B), y0, Ho, n3(e1, 1), CELL.louvre, FL, FL, GLASS);
@@ -1745,6 +1767,48 @@ function writeBasilica(m, W, groundAt) {
   }
 }
 
+// ---- ゴシックの石の内陣: 辺ごとに控え壁（尖塔飾り付き）と、そのあいだの 2 段の尖頭アーチの窓
+const lancet = (wd, ht, y0) => {
+  const r = wd / 2, ys = y0 + ht - wd * 0.95;
+  return [[-r, y0], [r, y0], [r, ys], [r * 0.72, ys + (y0 + ht - ys) * 0.55], [0, y0 + ht], [-r * 0.72, ys + (y0 + ht - ys) * 0.55], [-r, ys]];
+};
+function writeChoir(m, W, groundAt, colliders) {
+  const w = W.main;
+  const STONE = col('#b3a696'), SOOT = col('#4f4843'), DARK = col('#26282c'), TRACERY = col('#9a8f82');
+  const H = m.height;
+  for (const { p, q, L, n } of m.edges) {
+    const t = [(q[0] - p[0]) / L, (q[1] - p[1]) / L], N = [n[0], 0, n[1]];
+    const y0 = groundAt((p[0] + q[0]) / 2, (p[1] + q[1]) / 2);
+    const at = (s, o) => [p[0] + t[0] * s + n[0] * o, p[1] + t[1] * s + n[1] * o];
+    // すすけた足元（6 m）
+    vpoly(w, at(L / 2, 0.04), t, [[-L / 2, y0], [L / 2, y0], [L / 2, y0 + 6], [-L / 2, y0 + 6]], N, SOOT);
+    // 控え壁: 辺の両端と 6.5 m ごと
+    const nb = Math.max(1, Math.round(L / 6.5));
+    for (let k = 0; k <= nb; k++) {
+      const c = at((L * k) / nb, 0.9);
+      box(w, [c[0], y0 + H * 0.42, c[1]], [t[0] * 0.6, 0, t[1] * 0.6], [0, H * 0.42, 0], [n[0] * 0.9, 0, n[1] * 0.9], STONE);
+      const c2 = at((L * k) / nb, 0.5);
+      box(w, [c2[0], y0 + H * 0.92, c2[1]], [t[0] * 0.45, 0, t[1] * 0.45], [0, H * 0.08, 0], [n[0] * 0.5, 0, n[1] * 0.5], STONE);
+      cylinder(w, c2[0], c2[1], 0.45, 0.02, y0 + H, y0 + H + 3.2, { seg: 4, color: STONE });
+      colliders.push([c[0], c[1], 1.0]);
+    }
+    // 窓（控え壁のあいだごとに、下の段 4〜9 m と上の段 10.5〜19 m）
+    for (let k = 0; k < nb; k++) {
+      const sm = (L * (k + 0.5)) / nb, span = L / nb;
+      if (span < 3) continue;
+      const wd = Math.min(2.6, span - 2.2), o = at(sm, 0.05);
+      vpoly(w, o, t, lancet(wd + 0.5, 6.3, y0 + 3.7), N, TRACERY);
+      vpoly(w, at(sm, 0.08), t, lancet(wd, 5.8, y0 + 4), N, DARK);
+      if (H > 16) {
+        vpoly(w, o, t, lancet(wd + 0.5, Math.min(9, H - 12) + 0.4, y0 + 10.3), N, TRACERY);
+        vpoly(w, at(sm, 0.08), t, lancet(wd, Math.min(9, H - 12), y0 + 10.5), N, DARK);
+      }
+    }
+    // 軒の手すり（細い帯）
+    vpoly(w, at(L / 2, 0.06), t, [[-L / 2, y0 + H - 0.9], [L / 2, y0 + H - 0.9], [L / 2, y0 + H + 0.6], [-L / 2, y0 + H + 0.6]], N, STONE);
+  }
+}
+
 // ---- 遊歩道の植え込み: 低木の塊（高さ 1〜2 m）と、幹の細い若い木（高さ 6〜9 m）
 function writeRamblas(m, W, groundAt) {
   const w = W.main;
@@ -1854,7 +1918,7 @@ function writeStatue(m, W, groundAt, colliders, onRoad, keepOut) {
   keepOut.push([x, z, 6]);
 }
 
-const WRITERS = { ramblas: writeRamblas, basilica: writeBasilica, island: writeIsland, roundabout: writeRoundabout, portico: writePortico, donjon: writeDonjon, statue: writeStatue, dome: writeDome, chateau: writeChateau, stadium: writeStadium, cabanis: writeCabanis, coq: writeCoq, cross: writeCross, fastfood: writeFastfood, jgarden: writeJgarden, parterre: writeParterre };
+const WRITERS = { choir: writeChoir, ramblas: writeRamblas, basilica: writeBasilica, island: writeIsland, roundabout: writeRoundabout, portico: writePortico, donjon: writeDonjon, statue: writeStatue, dome: writeDome, chateau: writeChateau, stadium: writeStadium, cabanis: writeCabanis, coq: writeCoq, cross: writeCross, fastfood: writeFastfood, jgarden: writeJgarden, parterre: writeParterre };
 
 // 名所のモデルを作る。colliders: 足す当たり判定の円 [x, z, r] か線分 [ax, az, bx, bz]、
 // keepOut: 街の小物を置かない円 [x, z, r]（像の台・シャトー・ドーの柵の内側。monumentSolid）

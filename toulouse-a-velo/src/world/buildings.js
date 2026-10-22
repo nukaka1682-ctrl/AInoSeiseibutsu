@@ -216,6 +216,8 @@ function coverIntervals(L, covers) {
   return out;
 }
 
+const STONE_CHOIR = [0.7, 0.65, 0.59]; // 石の内陣の壁（風雨にさらされた灰色がかったベージュの石灰岩 #b3a696）
+
 // covers: 辺ごとの、隣の建物に接している区間（makePartyIndex の結果）
 function writeWalls(W, ring, sign, b, plainColor, facade, covers = null) {
   const info = b.info;
@@ -258,8 +260,14 @@ function writeWalls(W, ring, sign, b, plainColor, facade, covers = null) {
       }
       if (y0 < 0.5 && W.contact && l >= 1.5 && info.kind !== 'roof') writeContact(W.contact, P(t0, 0), P(t1, 0), nrm);
       if (info.isChurch && L >= 1.6) {
-        // 教会の壁: 地面からの高さで窓の段がそろう
+        // 教会の壁: 地面からの高さで窓の段がそろう。石の内陣（landmarkfacades.js の stoneFrom）の壁は灰色がかった石の色
         const s0 = (along + t0) / CHURCH_TILE.w, s1 = (along + t1) / CHURCH_TILE.w;
+        const sf = b.stoneFrom;
+        if (sf && (((a[0] + c[0]) / 2) * sf.e[0] + ((a[1] + c[1]) / 2) * sf.e[1]) >= sf.s0) {
+          // 石の壁（尖頭アーチの窓と控え壁は monuments.js の choir）
+          W.plain.quad(P(t0, y0), P(t1, y0), P(t1, y1), P(t0, y1), nrm, [t0 / 4, y0 / 4], [t1 / 4, y0 / 4], [t1 / 4, y1 / 4], [t0 / 4, y1 / 4], STONE_CHOIR);
+          continue;
+        }
         W.church.quad(P(t0, y0), P(t1, y0), P(t1, y1), P(t0, y1), nrm, [s0, y0 / CHURCH_TILE.h], [s1, y0 / CHURCH_TILE.h], [s1, y1 / CHURCH_TILE.h], [s0, y1 / CHURCH_TILE.h], tint);
         continue;
       }

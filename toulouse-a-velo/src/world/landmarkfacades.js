@@ -82,6 +82,9 @@ const BRICK_SITES = [
   { name: 'Hôtel-Dieu Saint-Jacques', lat: 43.59935, lon: 1.43655, r: 85, floor: 5.2, tiles: true },
   { name: 'Hôpital de La Grave', lat: 43.60095, lon: 1.43405, r: 110 },
 ];
+// 石の内陣の教会（利用者の写真 NCM_0095: サン・テティエンヌ大聖堂の東の内陣はレンガではなく、風雨にさらされた灰色がかった
+// ベージュの石灰岩）。建物の中心から east の向きに split m より先の壁を石の色にする（buildings.js の教会の壁）
+const STONE_CHOIRS = [{ name: 'Cathédrale Saint-Étienne', lat: 43.59988, lon: 1.45046, r: 30, east: [43.59996, 1.4515], split: 1 }];
 // 屋根の材料がデータにない名所の屋根
 const SLATE_ROOFS = [{ name: 'Donjon du Capitole', lat: 43.60442, lon: 1.44478, r: 10, colour: '#5f5f61' }];
 // areas: 広場など（キャピトル広場に面した建物を見つけるのに使う）
@@ -102,6 +105,13 @@ export function markBrickSites(proj, buildings, areas = []) {
           b.info.roofHeight = Math.max(b.info.roofHeight || 0, 3.5);
         }
       }
+    }
+  }
+  for (const c of STONE_CHOIRS) {
+    const [x, z] = proj.project(c.lat, c.lon), [ex, ez] = proj.project(...c.east);
+    const l = Math.hypot(ex - x, ez - z) || 1, e = [(ex - x) / l, (ez - z) / l];
+    for (const b of buildings) {
+      if (b.info.isChurch && Math.hypot(b.inside[0] - x, b.inside[1] - z) < c.r) b.stoneFrom = { e, s0: x * e[0] + z * e[1] + c.split };
     }
   }
   // キャピトルの主塔（donjon）は急なスレートの屋根
@@ -151,11 +161,14 @@ export function facingSquare(square, buildings) {
 // 通りの名前で決まる様式。通りの中心線から 道幅の半分 + STREET_REACH m 以内に、通りに沿った（向きの差 35° 以内）
 // 長さ 4 m 以上の壁が通りの方を向いている建物（高さ 10 m 以上）に、styles から建物ごとに選んだ様式を付ける
 // - 19 世紀末に切り開かれた通り（利用者の写真: Rue d'Alsace-Lorraine・Rue de Metz・Esquirol）: 砂色の切り石の
-//   建物（STYLE.haussmann）と灰色の亜鉛の屋根
+//   建物（STYLE.haussmann）と灰色の亜鉛の屋根。Alsace-Lorraine の建物は IGN でレンガとされていても写真では石
 // - Rue de la République（サン・シプリアン。利用者の Street View）: 7 割はクリーム色・黄土色・サーモン色の漆喰に
 //   レンガの窓枠、3 割はレンガのまま
 const STREET_STYLES = [
-  { name: /^(Rue d'Alsace[- ]Lorraine|Rue de Metz|Place [EÉ]tienne[- ]Esquirol|Rue du Languedoc)$/i, styles: [[STYLE.haussmann, 1]], slate: true },
+  { name: /^(Rue d'Alsace[- ]Lorraine|Rue du Languedoc)$/i, styles: [[STYLE.haussmann, 1]], slate: true },
+  // Rue de Metz・Esquirol はレンガの建物も混じる（利用者の写真: Esquirol のブラッスリー、Rue Bertrand de l'Isle の角）。
+  // IGN の壁の材料がレンガの建物はそのまま
+  { name: /^(Rue de Metz|Place [EÉ]tienne[- ]Esquirol)$/i, styles: [[STYLE.haussmann, 1]], slate: true, keepBrick: true },
   { name: /^Rue de la R[ée]publique$/i, styles: [[STYLE.ochre, 0.25], [STYLE.salmon, 0.25], [STYLE.cream, 0.2], [STYLE.brickStone, 0.15], [STYLE.brickShutters, 0.15]] },
 ];
 const STREET_REACH = 10;
@@ -168,7 +181,7 @@ export function markStreetStyles(buildings, roads) {
     }
     if (!segs.length) continue;
     for (const b of buildings) {
-      if (b.style === STYLE.arcade || b.info.height < 10 || b.info.isChurch || !facesStreet(b, segs)) continue;
+      if (b.style === STYLE.arcade || b.info.height < 10 || b.info.isChurch || (rule.keepBrick && b.tags['building:material'] === 'brick') || !facesStreet(b, segs)) continue;
       let r = hash01(b.id, 24);
       b.style = rule.styles.find(([, p]) => (r -= p) < 0)?.[0] ?? rule.styles[0][0];
       if (rule.slate) {
