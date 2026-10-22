@@ -30,6 +30,8 @@ export const ARCH_MIN_DEPTH = 3; // これより深い水を渡る区間にだ�
 const CORNICE = -0.9; // 側面の蛇腹（コーニス）の下端。ここから上は橋面の way ごとに欄干と一緒に作る
 const LAND_BOTTOM = -1.3; // 平らな橋・陸の上の橋の底
 const SLAB_BOTTOM = -1.5; // 近代の橋の桁の下面
+const FLAT_UV = [0.5, 0.5]; // 模様のない面（壁のテクスチャの 1 点）
+const OVERPASS_DEPTH = 1.6; // 陸の上の高架の桁の深さ（利用者のストリートビュー: A620 の桁は約 1.5 m の平らなコンクリート）
 const PARAPET = 1.05; // 欄干の高さ
 const PONT_NEUF_HALF = 10.5; // ポン・ヌフの幅の半分（実物は欄干の外まで約 21 m）
 // ポン・ヌフ: 左岸（西）から右岸へ、7 つのアーチの径間と 6 つの橋脚の厚み（m、水の区間の長さに合わせて伸縮）
@@ -60,6 +62,7 @@ const COL = {
   coping: T('#e3dacb'),
   flat: T('#c58a6e'),
   concrete: T('#b7b3ab'),
+  soffit: T('#8f979c'),
   concreteDark: T('#9a978f'),
   railing: T('#56697c'), // 高架の鉄の手すり（青灰色）
   steel: T('#7f8a93'), // サン・ピエール橋の鋼のトラス（利用者の写真 NCM_0105: 明るい灰色 #7a8590）
@@ -536,6 +539,18 @@ export function abutmentWalls(terrain, roads, waterDepthAt = () => 0) {
       const [r, cx, cz, dx, dz] = segs[k];
       if (!hit && r !== w.road && segmentsCross(w.ax, w.az, w.bx, w.bz, cx, cz, dx, dz)) hit = true;
     });
+    // 壁の裏（盛り土の側）のすぐそばを別の車道が壁の足元と同じ高さで通るなら、そこは盛り土ではなく分離帯（上下線の分かれた通りの
+    // 真ん中。利用者のストリートビュー 225619: Grande-Bretagne 通りの高架の下に、車線のあいだの壁はない）
+    const mx = (w.ax + w.bx) / 2, mz = (w.az + w.bz) / 2;
+    for (const d of [1.5, 4, 7, 10]) {
+      if (hit) break;
+      const qx = mx - w.nx * d, qz = mz - w.nz * d;
+      all.queryPoint(qx, qz, 20, (k) => {
+        const [r, cx, cz, dx, dz] = segs[k];
+        if (hit || r === w.road || r.bridge || !CAR_ROADS.has(r.type)) return;
+        if (closestOnSegment(qx, qz, cx, cz, dx, dz).d2 < (r.width / 2 + 0.5) ** 2 && terrain.h(qx, qz) < (w.ab + w.bb) / 2 + 1.5) hit = true;
+      });
+    }
     delete w.road;
     return !hit;
   });
@@ -572,7 +587,8 @@ export function buildAbutments(list, mats) {
 
 // 橋 root の頂点の高さの置き換え: 蛇腹より上（相対 y ≥ −1.5）は縦断面に載せ、下（アーチ・橋脚）は縦断面の 1.5 m 下から
 // 水面（陸の上なら地面）まで引き延ばす。wet: 水の区間（相対の高さで作った水面の深さ depth。区間の外は最大の深さ）
-function deckMap(terrain, prof, wet, waterDepthAt) {
+// slab: 橋面からこの深さまでは橋面の縦断面に沿わせる（その下は水面・地面まで伸ばす）。陸の上の高架は桁の下面まで
+function deckMap(terrain, prof, wet, waterDepthAt, slab = 1.5) {
   const dMax = Math.max(2, ...wet.map((w) => w.depth));
   const fr = polyFrame(prof.pts);
   const sAt = (x, z) => {
@@ -588,7 +604,7 @@ function deckMap(terrain, prof, wet, waterDepthAt) {
   };
   return (x, y, z) => {
     const s = sAt(x, z), D = terrain.deckY(prof, s);
-    if (y >= -1.5) return D + y;
+    if (y >= -slab) return D + y;
     const dRef = Math.max(2, wet.find((w) => s >= w.s0 - 4 && s <= w.s1 + 4)?.depth ?? dMax);
     const low = waterDepthAt(x, z) > 0 ? terrain.waterLevel(x, z) : terrain.h(x, z);
     if (y < -dRef) return low + (y + dRef);
@@ -613,14 +629,15 @@ export function buildBridges(bridges, allRoads, mats, waterDepthAt, clipRect, te
     const prof = decks?.get(v.root);
     if (!root.style) root.style = bridgeStyle(v.root, root, waterDepthAt, prof ? (x, z) => terrain.waterLevel(x, z) : null, prof && ((s) => terrain.deckY(prof, s)));
     if (prof) {
-      const map = deckMap(terrain, prof, root.style.wet, waterDepthAt);
+      const map = deckMap(terrain, prof, root.style.wet, waterDepthAt, root.style.kind === 'overpass' ? OVERPASS_DEPTH + 0.01 : 1.5);
       for (const w of writers) w.map = map;
     }
     withPalette(PALE_NAME.test(v.root.name || '') ? PALE : null, () => {
       writeDeck({ deck, body, walk, marks }, road, v.half, root.style.kind, info, clipRect);
       if (v.root === road) {
         writeStructure(body, road, root, walk);
-        if (prof) writeLandPiers(body, road, root, prof, terrain, waterDepthAt, Math.max(2, ...root.style.wet.map((w) => w.depth)));
+        // 陸の上の高架（A620 の Grande-Bretagne 通りの上。利用者のストリートビュー）は橋台から橋台まで 1 径間で、通りの中に橋脚はない
+        if (prof && root.style.kind !== 'overpass') writeLandPiers(body, road, root, prof, terrain, waterDepthAt, Math.max(2, ...root.style.wet.map((w) => w.depth)));
       }
     });
     for (const w of writers) w.map = null;
@@ -854,24 +871,33 @@ function writeStructure(w, road, v, stone = w) {
     const [x, z] = fr.at(lines[sd], s);
     return [x, y, z];
   };
-  // 側面の 2 次元の四角形（a..d: [s, y]）。stone: 石の目地の大きさのテクスチャ
+  // 側面の 2 次元の四角形（a..d: [s, y]）。stone: 石の目地の大きさのテクスチャ、'panel': 模様のない打ち放しのコンクリート
+  // （テクスチャの 1 点だけを使う）
   const fq = (sd, a, b, c, d, color, stone = false) => {
     if (Math.abs((b[0] - a[0]) * (d[1] - a[1]) - (b[1] - a[1]) * (d[0] - a[0])) + Math.abs((c[0] - b[0]) * (d[1] - b[1]) - (c[1] - b[1]) * (d[0] - b[0])) < 1e-4) return;
-    const uv = (q) => (stone ? [(q[0] * sd) / 8, q[1] / 20] : [(q[0] * sd) / 4, q[1] / 4]);
+    const uv = (q) => (stone === 'panel' ? FLAT_UV : stone ? [(q[0] * sd) / 8, q[1] / 20] : [(q[0] * sd) / 4, q[1] / 4]);
     w.quad(P(sd, ...a), P(sd, ...b), P(sd, ...c), P(sd, ...d), N(sd, (a[0] + c[0]) / 2), uv(a), uv(b), uv(c), uv(d), color);
   };
   const fl = fr.length;
-  const plainSides = (bottom, color) => {
+  const plainSides = (bottom, color, panel = false, under = color) => {
     // 平らな側面（bottom〜蛇腹）と底面
     const ss = [...fr.cum];
-    for (const sd of [1, -1]) for (let i = 0; i + 1 < ss.length; i++) fq(sd, [ss[i], bottom], [ss[i + 1], bottom], [ss[i + 1], CORNICE], [ss[i], CORNICE], color);
+    for (const sd of [1, -1]) for (let i = 0; i + 1 < ss.length; i++) fq(sd, [ss[i], bottom], [ss[i + 1], bottom], [ss[i + 1], CORNICE], [ss[i], CORNICE], color, panel && 'panel');
     for (let i = 0; i + 1 < ss.length; i++) {
       const a = P(1, ss[i], bottom), b = P(-1, ss[i], bottom), c = P(-1, ss[i + 1], bottom), d = P(1, ss[i + 1], bottom);
-      w.quad(a, b, c, d, [0, -1, 0], [0, 0], [1, 0], [1, 1], [0, 1], color);
+      // 打ち放しの下面: 法線を上向きにして、空の明るさ（青みの灰色）で照らす（下向きの面は地面の照り返しの茶色だけになり、
+      // 写真の灰色の下面より暗く茶色い）。桁の上面の影の中なので日は当たらない。面は下から見えるように並べる
+      if (panel) {
+        const n0 = w.nor.length;
+        w.quad(a, b, c, d, [0, -1, 0], FLAT_UV, FLAT_UV, FLAT_UV, FLAT_UV, under);
+        for (let j = n0; j < w.nor.length; j += 3) [w.nor[j], w.nor[j + 1], w.nor[j + 2]] = [0, 1, 0];
+      }
+      else w.quad(a, b, c, d, [0, -1, 0], [0, 0], [1, 0], [1, 1], [0, 1], under);
     }
   };
   if (kind === 'flat') return plainSides(LAND_BOTTOM, COL.flat);
-  if (kind === 'overpass') return plainSides(SLAB_BOTTOM - 0.4, COL.concrete); // 桁の高さ（写真の A620 は淡いコンクリートの厚い桁）
+  // 桁の高さ（写真の A620 は淡いコンクリートの厚い桁）。下面は日陰の灰色（暖かい色の照り返しで茶色くならないよう青みに寄せる）
+  if (kind === 'overpass') return plainSides(-OVERPASS_DEPTH, COL.concrete, true, COL.soffit);
   if (kind === 'truss') {
     // 桁の側面（鋼）と、両側の弧の下弦・縦材・斜材のトラス。径間の真ん中で浅く（1.2 m）、橋脚で深い（5 m）
     plainSides(SLAB_BOTTOM, COL.steel);
