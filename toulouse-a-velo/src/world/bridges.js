@@ -91,6 +91,8 @@ function withPalette(pal, fn) {
 }
 
 export function deckHalf(road) {
+  // ポン・ヌフは欄干の外まで約 21 m（歩道の上も橋面の高さ。地図の車道の幅だけだと歩道の所で橋の下の地面に落ちた）
+  if (road.name === 'Pont Neuf' && CAR_ROADS.has(road.type)) return PONT_NEUF_HALF;
   return road.width / 2 + (CAR_ROADS.has(road.type) ? 2 : 0.3);
 }
 
