@@ -39,6 +39,13 @@ export const MONUMENTS = [
   // サン・テティエンヌ大聖堂の石の内陣（利用者の写真 NCM_0095）: 石の壁（buildings.js）の外に、控え壁と尖塔飾り、
   // 2 段の尖頭アーチの高い窓、足元のすすけた帯、軒の手すり。landmarkfacades.js の STONE_CHOIRS と同じ所・向き
   { id: 'saint-etienne-choir', kind: 'choir', lat: 43.59988, lon: 1.45046, r: 30, east: [43.59996, 1.4515], split: 1 },
+  // オーギュスタン美術館のダルシー棟（利用者の Street View 211548）: Rue d'Alsace-Lorraine に面した壁は、灰色の砂岩の
+  // 腰石（1.5 m）の上に背の高い半円アーチのアーケード（幅 3.5 m・高さ 7 m、ガラス）、7.5 m の石の帯、2 つ並びの半円アーチの窓、
+  // 12 m の持ち送りの軒（Rue de Metz の側も同じ）。建物の、facing のどれかの方を向いた長さ 10 m 以上の壁に重ねて描く
+  { id: 'augustins', kind: 'arcades', lat: 43.60101, lon: 1.44620, r: 40, minArea: 3000, facing: [[43.60101, 1.44533], [43.60030, 1.44620]] },
+  // オテル・デューの川側（利用者の写真 NCM_0107・0125・0136）: 真ん中の張り出しの三角の破風、水際の 2 つの大きなアーチ、
+  // 正面の前の川の中に残るポン・ヴィユー（古い橋）の橋脚の跡（幅約 8 m、アーチの付け根）
+  { id: 'hotel-dieu-river', kind: 'riverfront', lat: 43.59988, lon: 1.43720, r: 45, minArea: 5000, facing: [43.59994, 1.43851] },
   { id: 'patte-oie', kind: 'roundabout', lat: 43.59640, lon: 1.42303, radius: 9 },
   // ノートルダム・ド・ラ・ドラード大聖堂の川側の正面（利用者の写真 NCM_0110・0112）: 灰色の石の 6 本の円柱（約 12 m）と
   // 三角の破風の柱廊。教会の建物の、川（facing）の方を向いたいちばん長い壁の前に建てる
@@ -376,6 +383,35 @@ export function findMonuments(proj, { buildings = [], areas = [], facade = null,
       const e1 = [ob.e1[0] * sg, ob.e1[1] * sg], e2 = [-e1[1], e1[0]];
       const sc = (x - ob.cx) * e1[0] + (z - ob.cz) * e1[1];
       out.push({ spec, kind: 'basilica', cx: ob.cx, cz: ob.cz, e1, e2, a: ob.a, b: ob.b, sc, height: b.info.height, replaced: [b] });
+    } else if (spec.kind === 'riverfront') {
+      const b = buildings.find((q) => q.info.area >= spec.minArea && Math.hypot(q.inside[0] - x, q.inside[1] - z) < spec.r);
+      if (!b) continue;
+      const [fx, fz] = proj.project(...spec.facing);
+      const fl = Math.hypot(fx - x, fz - z) || 1, f = [(fx - x) / fl, (fz - z) / fl];
+      const sg = signedArea(b.outer) > 0 ? 1 : -1;
+      let best = null;
+      for (let i = 0; i < b.outer.length; i++) {
+        const p = b.outer[i], q = b.outer[(i + 1) % b.outer.length], L = Math.hypot(q[0] - p[0], q[1] - p[1]);
+        const n = [((q[1] - p[1]) / L) * sg, (-(q[0] - p[0]) / L) * sg];
+        if (L >= 15 && n[0] * f[0] + n[1] * f[1] > 0.6 && (!best || L > best.L)) best = { p, q, L, n };
+      }
+      if (best) out.push({ spec, kind: 'riverfront', ...best, height: b.info.height || 18, replaced: [] });
+    } else if (spec.kind === 'arcades') {
+      const b = buildings.find((q) => q.info.area >= spec.minArea && Math.hypot(q.inside[0] - x, q.inside[1] - z) < spec.r);
+      if (!b) continue;
+      const fs = spec.facing.map((ll) => {
+        const [fx, fz] = proj.project(...ll), fl = Math.hypot(fx - x, fz - z) || 1;
+        return [(fx - x) / fl, (fz - z) / fl];
+      });
+      const sg = signedArea(b.outer) > 0 ? 1 : -1, edges = [];
+      for (let i = 0; i < b.outer.length; i++) {
+        const p = b.outer[i], q = b.outer[(i + 1) % b.outer.length], L = Math.hypot(q[0] - p[0], q[1] - p[1]);
+        const n = [((q[1] - p[1]) / L) * sg, (-(q[0] - p[0]) / L) * sg];
+        if (L >= 10 && fs.some((f) => n[0] * f[0] + n[1] * f[1] > 0.8)) edges.push({ p, q, L, n });
+      }
+      if (!edges.length) continue;
+      b.blank = true; // 建物の壁は窓のないレンガ（窓・アーケードはこのモデルで描く。buildings.js）
+      out.push({ spec, kind: 'arcades', edges, replaced: [] });
     } else if (spec.kind === 'choir') {
       const b = buildings.find((q) => q.info.isChurch && Math.hypot(q.inside[0] - x, q.inside[1] - z) < spec.r);
       if (!b) continue;
@@ -1767,6 +1803,59 @@ function writeBasilica(m, W, groundAt) {
   }
 }
 
+// ---- 川に面した正面: 破風・水際のアーチ・古い橋脚の跡
+function writeRiverfront(m, W, groundAt) {
+  const w = W.main;
+  const { p, q, L, n, height: H } = m;
+  const STONE = col('#d8ccb8'), DARK = col('#262322'), BRICK = col('#b78268'), PIER = col('#9a7262');
+  const t = [(q[0] - p[0]) / L, (q[1] - p[1]) / L], N = [n[0], 0, n[1]];
+  const at = (s, o) => [p[0] + t[0] * s + n[0] * o, p[1] + t[1] * s + n[1] * o];
+  const y0 = groundAt(...at(L / 2, -2));
+  // 真ん中の張り出し（幅 14 m の淡い石の枠）と三角の破風
+  const c = at(L / 2, 0.08);
+  vpoly(w, c, t, [[-7, y0 + H - 1.2], [7, y0 + H - 1.2], [7, y0 + H], [-7, y0 + H]], N, STONE);
+  vpoly(w, at(L / 2, 0.1), t, [[-7.4, y0 + H], [7.4, y0 + H], [0, y0 + H + 3.4]], N, STONE);
+  vpoly(w, at(L / 2, 0.12), t, [[-5.6, y0 + H + 0.4], [5.6, y0 + H + 0.4], [0, y0 + H + 2.7]], N, BRICK);
+  for (const sx of [-7, 7]) vpoly(w, at(L / 2 + sx, 0.09), t, [[-0.5, y0], [0.5, y0], [0.5, y0 + H], [-0.5, y0 + H]], N, STONE);
+  // 水際の 2 つの大きなアーチ（真ん中の左）
+  const yw = groundAt(...at(L / 2, 6));
+  for (const sx of [-14, -7.5]) {
+    vpoly(w, at(L / 2 + sx, 0.08), t, archShape(5.0, 5.8, yw - 0.5, 10), N, STONE);
+    vpoly(w, at(L / 2 + sx, 0.11), t, archShape(4.2, 5.3, yw - 0.5, 10), N, DARK);
+  }
+  // 川の中の古い橋脚の跡（正面から 14 m 沖）: 尖った水切りの付いた台と、片側に残るアーチの付け根
+  const pc = at(L / 2 + 4, 14), yb = groundAt(...pc) - 0.5, yt = y0 - 0.6;
+  if (yt - yb > 1) {
+    box(w, [pc[0], (yb + yt) / 2, pc[1]], [t[0] * 4, 0, t[1] * 4], [0, (yt - yb) / 2, 0], [n[0] * 2.6, 0, n[1] * 2.6], PIER);
+    cylinder(w, pc[0] + n[0] * 2.6, pc[1] + n[1] * 2.6, 2.6, 0.2, yb, yt, { seg: 4, color: PIER });
+    vpoly(w, at(L / 2 + 8.05, 14), [n[0], n[1]], [[-2.6, yt], [2.6, yt], [2.6, yt + 2.2], [-2.6, yt + 0.6]], [t[0], 0, t[1]], BRICK);
+  }
+}
+
+// ---- ネオロマネスクのアーケードの正面（オーギュスタン美術館）
+function writeArcades(m, W, groundAt) {
+  const w = W.main;
+  const SAND = col('#8f877c'), STONE = col('#d2c7b6'), DARK = col('#2a2624'), GLASS = col('#46525a'), TRIM = col('#c98c6c');
+  for (const { p, q, L, n } of m.edges) {
+    const t = [(q[0] - p[0]) / L, (q[1] - p[1]) / L], N = [n[0], 0, n[1]];
+    const y0 = groundAt((p[0] + q[0]) / 2, (p[1] + q[1]) / 2);
+    const at = (s, o) => [p[0] + t[0] * s + n[0] * o, p[1] + t[1] * s + n[1] * o];
+    const band = (ya, yb, o, color) => vpoly(w, at(L / 2, o), t, [[-L / 2, y0 + ya], [L / 2, y0 + ya], [L / 2, y0 + yb], [-L / 2, y0 + yb]], N, color);
+    band(0, 1.5, 0.06, SAND); // 腰石
+    band(7.4, 7.9, 0.08, STONE); // 石の帯
+    band(11.7, 12.4, 0.12, STONE); // 軒の持ち送り
+    const nb = Math.max(1, Math.floor(L / 4.6));
+    for (let k = 0; k < nb; k++) {
+      const sm = (L * (k + 0.5)) / nb;
+      vpoly(w, at(sm, 0.07), t, archShape(4.1, 7.0, y0 + 0.2, 10), N, TRIM); // アーチの迫石
+      vpoly(w, at(sm, 0.1), t, archShape(3.4, 6.6, y0 + 0.2, 10), N, GLASS); // ガラスの開口
+      vpoly(w, at(sm, 0.11), t, [[-0.06, y0 + 0.2], [0.06, y0 + 0.2], [0.06, y0 + 6.6], [-0.06, y0 + 6.6]], N, DARK);
+      for (const dx of [-0.75, 0.75]) vpoly(w, at(sm + dx, 0.09), t, archShape(1.0, 2.6, y0 + 8.6, 6), N, DARK); // 2 つ並びの窓
+      for (const dx of [-0.6, 0, 0.6]) vpoly(w, at(sm + dx, 0.13), t, [[-0.12, y0 + 11.2], [0.12, y0 + 11.2], [0.12, y0 + 11.7], [-0.12, y0 + 11.7]], N, STONE); // 持ち送り
+    }
+  }
+}
+
 // ---- ゴシックの石の内陣: 辺ごとに控え壁（尖塔飾り付き）と、そのあいだの 2 段の尖頭アーチの窓
 const lancet = (wd, ht, y0) => {
   const r = wd / 2, ys = y0 + ht - wd * 0.95;
@@ -1918,7 +2007,7 @@ function writeStatue(m, W, groundAt, colliders, onRoad, keepOut) {
   keepOut.push([x, z, 6]);
 }
 
-const WRITERS = { choir: writeChoir, ramblas: writeRamblas, basilica: writeBasilica, island: writeIsland, roundabout: writeRoundabout, portico: writePortico, donjon: writeDonjon, statue: writeStatue, dome: writeDome, chateau: writeChateau, stadium: writeStadium, cabanis: writeCabanis, coq: writeCoq, cross: writeCross, fastfood: writeFastfood, jgarden: writeJgarden, parterre: writeParterre };
+const WRITERS = { riverfront: writeRiverfront, arcades: writeArcades, choir: writeChoir, ramblas: writeRamblas, basilica: writeBasilica, island: writeIsland, roundabout: writeRoundabout, portico: writePortico, donjon: writeDonjon, statue: writeStatue, dome: writeDome, chateau: writeChateau, stadium: writeStadium, cabanis: writeCabanis, coq: writeCoq, cross: writeCross, fastfood: writeFastfood, jgarden: writeJgarden, parterre: writeParterre };
 
 // 名所のモデルを作る。colliders: 足す当たり判定の円 [x, z, r] か線分 [ax, az, bx, bz]、
 // keepOut: 街の小物を置かない円 [x, z, r]（像の台・シャトー・ドーの柵の内側。monumentSolid）

@@ -172,6 +172,7 @@ const STREET_STYLES = [
   { name: /^Rue de la R[ée]publique$/i, styles: [[STYLE.ochre, 0.25], [STYLE.salmon, 0.25], [STYLE.cream, 0.2], [STYLE.brickStone, 0.15], [STYLE.brickShutters, 0.15]] },
 ];
 const STREET_REACH = 10;
+const STREET_MAX_AREA = 2500; // これより大きい建物（美術館・大きな施設）は通りの様式にしない
 export function markStreetStyles(buildings, roads) {
   for (const rule of STREET_STYLES) {
     const segs = [];
@@ -181,7 +182,7 @@ export function markStreetStyles(buildings, roads) {
     }
     if (!segs.length) continue;
     for (const b of buildings) {
-      if (b.style === STYLE.arcade || b.info.height < 10 || b.info.isChurch || (rule.keepBrick && b.tags['building:material'] === 'brick') || !facesStreet(b, segs)) continue;
+      if (b.style === STYLE.arcade || b.info.height < 10 || b.info.isChurch || b.info.area > STREET_MAX_AREA || (rule.keepBrick && b.tags['building:material'] === 'brick') || !facesStreet(b, segs)) continue;
       let r = hash01(b.id, 24);
       b.style = rule.styles.find(([, p]) => (r -= p) < 0)?.[0] ?? rule.styles[0][0];
       if (rule.slate) {

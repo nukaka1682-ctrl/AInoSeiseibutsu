@@ -271,7 +271,7 @@ function writeWalls(W, ring, sign, b, plainColor, facade, covers = null) {
         W.church.quad(P(t0, y0), P(t1, y0), P(t1, y1), P(t0, y1), nrm, [s0, y0 / CHURCH_TILE.h], [s1, y0 / CHURCH_TILE.h], [s1, y1 / CHURCH_TILE.h], [s0, y1 / CHURCH_TILE.h], tint);
         continue;
       }
-      if (info.isChurch || L < 1.6 || info.kind === 'roof' || l < 1.2) {
+      if (info.isChurch || L < 1.6 || info.kind === 'roof' || l < 1.2 || b.blank) {
         W.plain.quad(P(t0, y0), P(t1, y0), P(t1, y1), P(t0, y1), nrm, [t0 / 4, y0 / 4], [t1 / 4, y0 / 4], [t1 / 4, y1 / 4], [t0 / 4, y1 / 4], plainColor);
         continue;
       }
