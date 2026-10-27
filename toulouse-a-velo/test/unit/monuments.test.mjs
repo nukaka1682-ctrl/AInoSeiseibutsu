@@ -242,3 +242,11 @@ test('入市税の門の小屋: 2 つ、正面は広場（東）を向き、壁�
   const { colliders } = buildMonuments(list, {}, { groundAt: () => 0 });
   assert.equal(colliders.length, 8);
 });
+
+test('メトロ Jean-Jaurès のエレベーターの小屋: 1 つ、ガラスの壁と当たり判定の 4 辺', () => {
+  const proj = new LocalProjection(43.6056, 1.4486);
+  const list = findMonuments(proj, { buildings: [], areas: [], roads: [], bounds: null }).filter((m) => m.kind === 'lift');
+  assert.equal(list.length, 1);
+  const { colliders } = buildMonuments(list, {}, { groundAt: () => 0 });
+  assert.equal(colliders.length, 4);
+});

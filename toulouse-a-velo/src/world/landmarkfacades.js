@@ -1,7 +1,7 @@
 // 名所の建物の正面に、専用のテクスチャ（facades.js）を貼る場所を決める。
 // いまはキャピトル（市庁舎）: キャピトル広場に面した、いちばん長い建物の壁を正面とする。
 // あわせて、旧市街の建物・レンガ造りの歴史的な建物群・キャピトル広場を囲む建物に印を付ける（ファサードの様式を選ぶため）。
-import { closestOnSegment, hash01, pointInPolygon, signedArea } from '../geo.js';
+import { closestOnSegment, hash01, pointInPolygon, pointInRing, signedArea } from '../geo.js';
 import { oldTownTest } from '../config.js';
 import { CAPITOLE_HEIGHT, STYLE } from './facades.js';
 
@@ -92,6 +92,20 @@ const BRICK_SITES = [
 // 石の内陣の教会（利用者の写真 NCM_0095: サン・テティエンヌ大聖堂の東の内陣はレンガではなく、風雨にさらされた灰色がかった
 // ベージュの石灰岩）。建物の中心から east の向きに split m より先の壁を石の色にする（buildings.js の教会の壁）
 const STONE_CHOIRS = [{ name: 'Cathédrale Saint-Étienne', lat: 43.59988, lon: 1.45046, r: 30, east: [43.59996, 1.4515], split: 1 }];
+// 写真で様式が決まる建物（[緯度, 経度] の点を含む建物）。利用者の写真・ストリートビュー:
+// 225056 Rue du Docteur Louis Delherm の Auchan の角の白い漆喰の集合住宅、225323 Avenue de Grande-Bretagne の白い高い集合住宅と
+// 赤レンガの現代の集合住宅、210635 A620 の脇のコンクリートの格子にレンガの板の事務所、212318 Jean-Jaurès の奥の青いガラスの塔、
+// NCM_0095 サン・テティエンヌの北の赤レンガの建物
+const PHOTO_STYLES = [
+  { at: [43.594344, 1.434192], style: 'whiteModern' },
+  { at: [43.598925, 1.417837], style: 'whiteModern' },
+  { at: [43.598673, 1.417451], style: 'brickGrid' },
+  { at: [43.603912, 1.404937], style: 'brickGrid' },
+  { at: [43.604125, 1.405007], style: 'brickGrid' },
+  { at: [43.60405, 1.405277], style: 'brickGrid' },
+  { at: [43.606767, 1.450911], style: 'glass' },
+  { at: [43.600288, 1.451383], style: 'brickStone' },
+];
 // 屋根の材料がデータにない名所の屋根
 const SLATE_ROOFS = [{ name: 'Donjon du Capitole', lat: 43.60442, lon: 1.44478, r: 10, colour: '#5f5f61' }];
 // areas: 広場など（キャピトル広場に面した建物を見つけるのに使う）
@@ -120,6 +134,16 @@ export function markBrickSites(proj, buildings, areas = []) {
     const l = Math.hypot(ex - x, ez - z) || 1, e = [(ex - x) / l, (ez - z) / l];
     for (const b of buildings) {
       if (b.info.isChurch && Math.hypot(b.inside[0] - x, b.inside[1] - z) < c.r) b.stoneFrom = { e, s0: x * e[0] + z * e[1] + c.split };
+    }
+  }
+  for (const ps of PHOTO_STYLES) {
+    const [x, z] = proj.project(...ps.at);
+    for (const b of buildings) {
+      const bb = b.bounds;
+      if (bb && (x < bb.minX || x > bb.maxX || z < bb.minZ || z > bb.maxZ)) continue;
+      if (!pointInRing(x, z, b.outer)) continue;
+      b.style = STYLE[ps.style];
+      if (ps.style !== 'brickStone') b.info.roofShape = 'flat'; // 現代の建物は陸屋根
     }
   }
   // キャピトルの主塔（donjon）は急なスレートの屋根
@@ -177,6 +201,8 @@ const STREET_STYLES = [
   // Rue de Metz・Esquirol はレンガの建物も混じる（利用者の写真: Esquirol のブラッスリー、Rue Bertrand de l'Isle の角）。
   // IGN の壁の材料がレンガの建物はそのまま
   { name: /^(Rue de Metz|Place [EÉ]tienne[- ]Esquirol)$/i, styles: [[STYLE.haussmann, 1]], slate: true, keepBrick: true },
+  // 利用者の写真 NCM_0096: Place Jeanne d'Arc の角の建物は黄土色の切り石のオスマン様式（通しの鉄のバルコニー・灰色のマンサード）
+  { name: /^Place Jeanne[- ]d'Arc$/i, styles: [[STYLE.haussmann, 1]], slate: true },
   { name: /^Rue de la R[ée]publique$/i, styles: [[STYLE.ochre, 0.25], [STYLE.salmon, 0.25], [STYLE.cream, 0.2], [STYLE.brickStone, 0.15], [STYLE.brickShutters, 0.15]] },
 ];
 const STREET_REACH = 10;
