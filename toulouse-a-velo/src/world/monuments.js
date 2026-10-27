@@ -644,10 +644,16 @@ export function monumentClearance(list, proj = null) {
     if (m.kind === 'statue') circles.push([m.x, m.z, 6]);
     if (m.kind === 'pavilion') circles.push([m.x, m.z, 5]);
   }
+  // オテル・デューの川側の壁の前（壁から 14 m）には植えない（利用者の写真 NCM_0107・0136: 壁は水際から立ち、前に木はない）
+  const bands = list.filter((m) => m.kind === 'riverfront').map((m) => ({ p: m.p, t: [(m.q[0] - m.p[0]) / m.L, (m.q[1] - m.p[1]) / m.L], n: m.n, L: m.L }));
+  const inBand = (x, z) => bands.some(({ p, t, n, L }) => {
+    const dx = x - p[0], dz = z - p[1], u = dx * t[0] + dz * t[1], v = dx * n[0] + dz * n[1];
+    return u > -4 && u < L + 4 && v > -1 && v < 14;
+  });
   // 中庭の刈り込んだ木は専用の形で描くので、地形モデルの木（丸い樹冠）は植えない。日本庭園の枯山水の砂利の面にも
   // 植えない（利用者の写真 NCM_0117: 砂利の面には石組みのそばの小さな松だけ）
   const rings = list.filter((m) => m.kind === 'parterre').map((m) => m.outer).concat(list.filter((m) => m.kind === 'jgarden').map((m) => m.gravel));
-  return (x, z) => circles.some(([cx, cz, r]) => Math.hypot(x - cx, z - cz) < r) || rings.some((r) => pointInRing(x, z, r));
+  return (x, z) => circles.some(([cx, cz, r]) => Math.hypot(x - cx, z - cz) < r) || rings.some((r) => pointInRing(x, z, r)) || inBand(x, z);
 }
 
 // 名所の台・柵の内側（街の小物 furniture.js を置かない所）。buildMonuments の keepOut の円 [x, z, r]

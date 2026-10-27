@@ -160,6 +160,7 @@ const PORT_SAUVEUR = { latlon: [43.59634, 1.4564], hx: 70, hz: 270 };
 // 運河 Canal de Brienne（利用者の写真 NCM_0186）: 両岸とも水際から並木道まで約 3 m の草の斜面（壁はない）。この線から 30 m 以内の岸
 // （運河の芯線に沿った折れ線。閘門の上で北へ曲がってから北西へ）
 const BRIENNE = { line: [[43.604413, 1.434409], [43.604811, 1.434372], [43.605083, 1.434089], [43.605282, 1.433639], [43.606512, 1.430163]], reach: 30 };
+const JGARDEN_POND = [43.6119432, 1.4318864]; // 日本庭園（Jardin japonais Pierre Baudis）の池の中心のあたり
 const WATER_TILE = 6; // 波の法線マップ 1 枚の大きさ（m）
 // 利用者の写真では、晴れた日の川と運河の港は空を映して青みがかった灰色（ガロンヌ川 #3e5f86 前後、Port Saint-Sauveur
 // #5c7189〜#a0afbe）。水の色は灰緑から青灰色に寄せ、映り込みの空の青も半分ほど残す
@@ -645,6 +646,8 @@ export function buildGroundBase(parsed, rect, mats, terrain = FLAT_TERRAIN, layo
     const inPort = (x, z) => port && Math.abs(x - port[0]) < PORT_SAUVEUR.hx && Math.abs(z - port[1]) < PORT_SAUVEUR.hz;
     const brienne = parsed.proj ? BRIENNE.line.map((ll) => parsed.proj.project(...ll)) : null;
     const inBrienne = (x, z) => brienne && brienne.some((p, i) => i + 1 < brienne.length && closestOnSegment(x, z, ...p, ...brienne[i + 1]).d2 < BRIENNE.reach ** 2);
+    const jg = parsed.proj ? parsed.proj.project(...JGARDEN_POND) : null;
+    const inJGarden = (x, z) => jg && Math.hypot(x - jg[0], z - jg[1]) < 45;
     // 閘門の閘室（monuments.js の writeLock が石の壁を作る）の岸には土手を作らない
     const locks = parsed.proj ? LOCKS.map((l) => ({ l, f: lockFrame(parsed.proj.project(...l.a), parsed.proj.project(...l.b)) })) : [];
     const inLock = (x, z) => locks.some(({ l, f }) => {
@@ -686,6 +689,8 @@ export function buildGroundBase(parsed, rect, mats, terrain = FLAT_TERRAIN, layo
         if (!isHole && Math.hypot(mx - quayCentre[0], mz - quayCentre[1]) < QUAY_RADIUS) return 'quay';
         return nearBridge(mx, mz, 9) ? 'wall' : 'natural';
       }
+      // 日本庭園の池は芝と石の自然な岸（利用者の写真 NCM_0122）
+      if (a.kind === 'pond' && inJGarden(mx, mz)) return 'slope';
       if (a.kind === 'canal') {
         if (inLock(mx, mz)) return null;
         if (a.tags.water !== 'canal' || nearBridge(mx, mz, 14) || inPort(mx, mz)) return 'wall';
