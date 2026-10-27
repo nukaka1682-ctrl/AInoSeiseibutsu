@@ -101,7 +101,8 @@ export const MONUMENTS = [
     spit: [[43.6120992, 1.4319915], [43.6121306, 1.4320332], [43.6121194, 1.4321105], [43.6120947, 1.4321182], [43.6120633, 1.4320564], [43.6120689, 1.4320023]],
     lantern: [43.6121059, 1.432044],
     rocks: [[43.6121082, 1.4316082], [43.6120992, 1.4316236], [43.6121306, 1.4317318], [43.6121216, 1.4317442], [43.6120296, 1.4316855], [43.6120633, 1.43201], [43.6120296, 1.4319636], [43.6118725, 1.4321491], [43.6119286, 1.4322264], [43.6119174, 1.4322728], [43.6121194, 1.4321337], [43.6120633, 1.4322418]],
-    pines: [[43.6121172, 1.4315927], [43.6121351, 1.431755], [43.6120128, 1.4317009], [43.6120296, 1.4322032], [43.6119398, 1.4322805], [43.6118725, 1.4319636], [43.612097, 1.4322264], [43.6120633, 1.4323037]],
+    // [緯度, 経度, 高さ m（なければ 2.2〜3.8 m）]。利用者の写真 NCM_0117: 砂利の手前の右は低く刈り込んだ丸い植え込み
+    pines: [[43.6121172, 1.4315927], [43.6121351, 1.431755], [43.6120128, 1.4317009, 1.1], [43.6120296, 1.4322032], [43.6119398, 1.4322805], [43.6118725, 1.4319636], [43.612097, 1.4322264], [43.6120633, 1.4323037]],
   },
 ];
 
@@ -584,7 +585,7 @@ export function findMonuments(proj, { buildings = [], areas = [], facade = null,
       }
       out.push({
         spec, kind: 'jgarden', x: gx, z: gz, gravel, wall: spec.wall.map(ll), deck: spec.deck.map(ll), bridge: spec.bridge.map(ll), spit: spec.spit.map(ll),
-        lantern: ll(spec.lantern), rocks: spec.rocks.map(ll), pines: spec.pines.map(ll), tea: tea ? tea.b.outer : null, replaced: tea ? [tea.b] : [],
+        lantern: ll(spec.lantern), rocks: spec.rocks.map(ll), pines: spec.pines.map((p) => [...ll(p), p[2]]), tea: tea ? tea.b.outer : null, replaced: tea ? [tea.b] : [],
       });
     } else if (spec.kind === 'cross') {
       const plaza = areas.find((a) => spec.plaza.test(a.name || ''));
@@ -1512,9 +1513,13 @@ function writeJgarden(m, W, groundAt, colliders, onRoad, keepOut) {
       ellipsoid(w, [x, groundAt(x, z) + r * 0.35, z], r * (1 + rnd() * 0.5), r * 0.7, r, ROCK[k % ROCK.length], 8);
     }
   }
-  // 玉作りの松: 細い幹に平たい葉の玉を 3〜4 段
-  for (const [px, pz] of m.pines) {
-    const g = groundAt(px, pz), h = 2.2 + rnd() * 1.6;
+  // 玉作りの松: 細い幹に平たい葉の玉を 3〜4 段。低いもの（1.6 m 未満）は地面から丸く刈り込んだ植え込み
+  for (const [px, pz, ph] of m.pines) {
+    const g = groundAt(px, pz), h = ph || 2.2 + rnd() * 1.6;
+    if (h < 1.6) {
+      ellipsoid(w, [px, g + h * 0.45, pz], h * 0.75, h * 0.5, h * 0.7, PINE[1], 8);
+      continue;
+    }
     box(w, [px, g + h / 2, pz], [0.09, 0, 0], [0, h / 2, 0], [0, 0, 0.09], TRUNK);
     const n = 3 + Math.floor(rnd() * 2);
     for (let k = 0; k < n; k++) {
