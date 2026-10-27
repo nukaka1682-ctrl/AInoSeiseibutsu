@@ -571,11 +571,11 @@ export function buildGroundBase(parsed, rect, mats, terrain = FLAT_TERRAIN, layo
   if (!T.flat && !T.conditioned) {
     T.conditioned = true;
     // メトロの出入口: 地形モデルに写った吹き抜けの穴を周りの高さで埋める（穴は下でステンシルにして、中に階段を作る）
-    // 車道の中に落ちたメトロの階段は捨てる（LiDAR の穴の見誤り。利用者の写真 NCM_0095: Rue Bertrand de l'Isle の車道の真ん中に
-    // 階段ができていた。駐車場の坂は車道から下りるので残す）
+    // 狭い通りの車道の中に落ちたメトロの階段は捨てる（LiDAR の穴の見誤り。利用者の写真 NCM_0095: Rue Bertrand de l'Isle の車道の
+    // 真ん中に階段ができていた）。駐車場の坂は車道から下りるので残す。広い通り・並木道は真ん中の遊歩道に出入口があるので見ない
     const carSegs = [];
     for (const r of parsed.roads) {
-      if (!CAR_ROADS.has(r.type) || r.bridge || r.tunnel) continue;
+      if (!CAR_ROADS.has(r.type) || r.bridge || r.tunnel || r.width > 5) continue;
       for (let i = 0; i + 1 < r.pts.length; i++) carSegs.push([...r.pts[i], ...r.pts[i + 1], r.width / 2]);
     }
     const inCarriageway = (x, z) => carSegs.some(([ax, az, bx, bz, h]) => x > Math.min(ax, bx) - h && x < Math.max(ax, bx) + h && z > Math.min(az, bz) - h && z < Math.max(az, bz) + h && closestOnSegment(x, z, ax, az, bx, bz).d2 < h * h);
