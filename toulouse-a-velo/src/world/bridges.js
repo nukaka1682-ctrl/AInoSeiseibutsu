@@ -67,7 +67,7 @@ const COL = {
   railing: T('#56697c'), // 高架の鉄の手すり（青灰色）
   steel: T('#7f8a93'), // サン・ピエール橋の鋼のトラス（利用者の写真 NCM_0105: 明るい灰色 #7a8590）
   pierBrick: T('#9a7464'),
-  lamp: T('#858b84'), // 明るい灰緑の鋳鉄（利用者の写真 0310_160523254: #8f948c 前後）
+  lamp: T('#8a9890'), // 明るい灰緑の鋳鉄（利用者の写真 0310_160523254: #8f948c 前後。日なたで茶色く見えないよう緑に寄せる）
   globe: T('#f1eee4'),
   brass: T('#b08d4a'), // 灯具の真鍮の帯
 };
@@ -805,13 +805,15 @@ function writeDeck({ deck, body, walk, marks }, road, half, kind, info, clipRect
         // 2.4 m で 1 周: 長さ 1.2 m・高さ 0.6 m の石。目地は細い横の線）に暖かい白の色をかける
         const sq = (p, q, y0, y1, nn) => walk.quad([p[0], y0, p[1]], [q[0], y0, q[1]], [q[0], y1, q[1]], [p[0], y1, p[1]], nn, [0, y0 / 2.4], [l / 2.4, y0 / 2.4], [l / 2.4, y1 / 2.4], [0, y1 / 2.4], PARAPET_STONE);
         sq(pa, pb, ct, top, n);
-        hq(pa, pb, ib, ia, top, up, COL.coping);
+        // 笠石: 欄干の面と同じ切り石のテクスチャ（体のテクスチャのレンガの縞にしない。利用者の写真: 平らな淡い石の笠）
+        walk.quad([pa[0], top, pa[1]], [pb[0], top, pb[1]], [ib[0], top, ib[1]], [ia[0], top, ia[1]], up, [0, 0.1], [l / 2.4, 0.1], [l / 2.4, 0.3], [0, 0.3], COPING_STONE);
         sq(ia, ib, topY, top, ni);
       }
     }
   }
 }
 
+const COPING_STONE = c3('#f0e8da'); // 欄干の笠石
 const PARAPET_STONE = c3('#fbf3e6'); // 欄干・街灯の台座の淡い切り石（花崗岩の板のテクスチャにかける色）
 // 花崗岩の板と、縁石の濃い帯。利用者の写真（ポン・ヌフの歩道）: 板は中くらいの灰色 #8f8b84 前後（テクスチャの淡い色を暗くする）
 // 歩道の花崗岩（利用者の写真・Street View: ポン・ヌフの歩道は灰色の花崗岩、車道の縁に濃い帯）
@@ -1279,14 +1281,19 @@ function writeLamp(w, x, z, [ux, uz], baseY, [ix, iz], stone = w) {
     for (let i = 0; i < 4; i++) {
       const a = P4[i], b = P4[(i + 1) % 4];
       const mx = (a[0] + b[0]) / 2 - cx, mz = (a[1] + b[1]) / 2 - cz, ml = Math.hypot(mx, mz) || 1;
-      out.quad([a[0], y0, a[1]], [b[0], y0, b[1]], [b[0], y1, b[1]], [a[0], y1, a[1]], [mx / ml, 0, mz / ml], [0, y0 * uvk], [0.2, y0 * uvk], [0.2, y1 * uvk || 0.3], [0, y1 * uvk || 0.3], color);
+      // uvk 0: 塗った鋳鉄（模様なし）
+      if (!uvk) out.quad([a[0], y0, a[1]], [b[0], y0, b[1]], [b[0], y1, b[1]], [a[0], y1, a[1]], [mx / ml, 0, mz / ml], FLAT_UV, FLAT_UV, FLAT_UV, FLAT_UV, color);
+      else out.quad([a[0], y0, a[1]], [b[0], y0, b[1]], [b[0], y1, b[1]], [a[0], y1, a[1]], [mx / ml, 0, mz / ml], [0, y0 * uvk], [0.2, y0 * uvk], [0.2, y1 * uvk], [0, y1 * uvk], color);
     }
-    out.quad([P4[0][0], y1, P4[0][1]], [P4[1][0], y1, P4[1][1]], [P4[2][0], y1, P4[2][1]], [P4[3][0], y1, P4[3][1]], [0, 1, 0], [0, 0], [0.2, 0], [0.2, 0.2], [0, 0.2], color);
+    out.quad([P4[0][0], y1, P4[0][1]], [P4[1][0], y1, P4[1][1]], [P4[2][0], y1, P4[2][1]], [P4[3][0], y1, P4[3][1]], [0, 1, 0], FLAT_UV, FLAT_UV, FLAT_UV, FLAT_UV, color);
   };
   const y0 = baseY;
-  // 台座: 欄干と同じ淡い切り石（stone: 花崗岩の板のテクスチャ。写真 10・11 の街灯の下の白い石の柱）
-  box(x, z, y0, y0 + PARAPET + 0.3, 0.38, 0.38, stone === w ? COL.coping : PARAPET_STONE, stone, stone === w ? 0 : 1 / 2.4);
-  box(x, z, y0 + PARAPET + 0.3, y0 + PARAPET + 0.9, 0.2, 0.2, COL.lamp); // 柱の根元
+  // 台座: 歩道の上に立つ鋳鉄の四角い足と、輪の付いた太い根元（利用者の写真 0310_160523254・NCM_0123・0124: 欄干に石の
+  // 柱はなく、灰緑の鋳鉄の柱が歩道に直に立つ）
+  box(x, z, y0, y0 + 0.32, 0.27, 0.27, COL.lamp);
+  box(x, z, y0 + 0.32, y0 + 0.42, 0.22, 0.22, COL.lamp);
+  box(x, z, y0 + 0.42, y0 + PARAPET + 0.9, 0.15, 0.15, COL.lamp); // 柱の根元
+  for (const yr of [y0 + 1.15, y0 + PARAPET + 0.9]) box(x, z, yr - 0.06, yr + 0.06, 0.19, 0.19, COL.lamp); // 輪
   // 柱（6 角、上ほど細い）
   const yb = y0 + PARAPET + 0.9, yt = y0 + 6.6;
   for (let i = 0; i < 6; i++) {
