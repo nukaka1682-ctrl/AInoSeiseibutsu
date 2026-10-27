@@ -47,7 +47,7 @@ export function laneLayout(road, { x = 0, z = 0, old = false } = {}) {
     return out;
   }
   const cur = LANE_LIST.find((l) => l.match.test(road.name || '')) || {};
-  if (!CAR_ROADS.has(road.type) || road.type === 'service' || road.width < (cur.bike ? 3.5 : 4)) return out;
+  if (road.bare || !CAR_ROADS.has(road.type) || road.type === 'service' || road.width < (cur.bike ? 3.5 : 4)) return out;
   const W = road.width, h = W / 2, two = !road.oneway;
   let lo = -h, hi = h;
   // 名前の一覧にある通りは、そのレーンを優先する（ユーザーの写真の Rue de Metz の BUS レーン・Billières の自転車レーン）:

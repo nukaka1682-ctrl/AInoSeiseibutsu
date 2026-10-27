@@ -111,12 +111,15 @@ export function projectTrees(trees, proj) {
 // Rue Laganne の東の歩道沿いの、Cours Dillon を支える高さ約 3.2 m の漆喰の擁壁（上に Cours Dillon のプラタナス）。
 // Rue Marie Magne より北（224901）は、擁壁が縦列駐車の車のすぐ脇まで寄り、西は庭を囲む古い赤レンガの高い塀
 // （北の端の建物から南の集合住宅まで。parse.js の ROAD_FIXES で通りの線も実際の位置へずらす）。tint: 面の色に掛ける色
-// （擁壁は写真では灰色の粗い漆喰）
+// （擁壁は写真では灰色の粗い漆喰）。rail: 高い側の地面からの高さ（既定は低い側から h、高い側から 1 m の胸壁）
 const LAGANNE_GREY = [0.6, 0.72, 1]; // 漆喰のテクスチャ（ベージュ）を灰色に
 const FIXED_WALLS = [
   { pts: [[43.595281, 1.435751], [43.5945, 1.435416], [43.594186, 1.43528], [43.593359, 1.434932], [43.593153, 1.434846]], h: 3.2, kind: 'render', tint: LAGANNE_GREY },
   { pts: [[43.595281, 1.435751], [43.595441, 1.435768], [43.596323, 1.436135], [43.59672, 1.436308]], h: 3.2, kind: 'render', tint: LAGANNE_GREY },
   { pts: [[43.59655, 1.436127], [43.595812, 1.435823]], h: 3.6, kind: 'brick' },
+  // 利用者の Street View 225653: Avenue de Grande-Bretagne の西行きの北の歩道沿いの、Purpan の病院の敷地の高さ約 2.5 m の
+  // サーモンピンクの漆喰の塀（航空写真で位置を決める。車道は盛り土で敷地より最大 1.7 m 高いが、塀は歩道から約 2.5 m）
+  { pts: [[43.605966, 1.402092], [43.605769, 1.402484], [43.605545, 1.402931], [43.60551, 1.403]], h: 2.5, kind: 'render', tint: [0.95, 0.72, 0.62], rail: 2.5 },
 ];
 // 塀のない広場（利用者の写真: Square Charles-de-Gaulle とキャピトル広場は平らな舗装で、LiDAR で見つかる塀は
 // 地下鉄の出入口・植え込みの縁・日よけ）。中点がこの名前の地図の多角形の中にある塀を除く
@@ -134,7 +137,7 @@ export function clearNamedAreas(segs, areas, proj = null) {
   });
 }
 
-// 範囲 bounds に中点が入る区間を [ax, az, bx, bz, h, kind, tint] にして返す
+// 範囲 bounds に中点が入る区間を [ax, az, bx, bz, h, kind, { tint, rail }] にして返す
 export function fixedWalls(proj, bounds = null) {
   const out = [];
   for (const w of FIXED_WALLS) {
@@ -142,7 +145,7 @@ export function fixedWalls(proj, bounds = null) {
     for (let i = 0; i + 1 < p.length; i++) {
       const mx = (p[i][0] + p[i + 1][0]) / 2, mz = (p[i][1] + p[i + 1][1]) / 2;
       if (bounds && !(mx >= bounds.minX && mx < bounds.maxX && mz >= bounds.minZ && mz < bounds.maxZ)) continue;
-      out.push([p[i][0], p[i][1], p[i + 1][0], p[i + 1][1], w.h, w.kind, w.tint]);
+      out.push([p[i][0], p[i][1], p[i + 1][0], p[i + 1][1], w.h, w.kind, { tint: w.tint, rail: w.rail }]);
     }
   }
   return out;
@@ -155,7 +158,7 @@ export function buildEnclosures(segs, materials, collision = null, terrain = nul
   const brick = new MeshWriter(o), render = new MeshWriter(o), cap = new MeshWriter(o);
   const sloped = terrain && !terrain.flat;
   const plain = sloped ? { brick: new MeshWriter(), render: new MeshWriter(), cap: new MeshWriter(), fill: new MeshWriter() } : null;
-  for (const [ax, az, bx, bz, h, kind, tint] of segs) {
+  for (const [ax, az, bx, bz, h, kind, { tint, rail } = {}] of segs) {
     const L = Math.hypot(bx - ax, bz - az);
     if (L < 0.5) continue;
     // 塀の面: kind（'render' | 'brick'）が決まっていなければ 4 本に 3 本はレンガ
@@ -164,7 +167,7 @@ export function buildEnclosures(segs, materials, collision = null, terrain = nul
       // 地形の上: 地面にそのまま沿わせると、段差（河岸・土手）を斜めに横切る塀の上端が 5 m の格子ごとにのこぎりの歯になる。
       // 上端はなめらかな線（wallProfile）、下端は地面より下まで（地面に隠れる）の普通の面で作る
       const seed = Math.floor(ax * 3.1) * 7919 + Math.floor(az * 2.3);
-      writeSlopedWall(pick(seed) ? plain.render : plain.brick, plain.cap, wallProfile(terrain, ax, az, bx, bz, h), seed, plain.fill, undefined, tint);
+      writeSlopedWall(pick(seed) ? plain.render : plain.brick, plain.cap, wallProfile(terrain, ax, az, bx, bz, h, rail ? { rail } : undefined), seed, plain.fill, undefined, tint);
       if (collision) collision.addSegment(ax, az, bx, bz);
       continue;
     }

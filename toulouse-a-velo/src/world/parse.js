@@ -77,7 +77,7 @@ export const CAR_ROADS = new Set([
 ]);
 
 // データの誤りを写真に合わせて直す道（IGN の道の番号 → 置き換えるタグ。shift: 線を進む向きの右へずらす m、
-// parkSide: 路上駐車する側 'right' / 'left'）。利用者の Street View: Purpan の近くの
+// parkSide: 路上駐車する側 'right' / 'left'、bare: 路面の標示（車線・自転車レーン・絵）を描かない）。利用者の Street View: Purpan の近くの
 // Avenue de Grande-Bretagne の西行き（北側）の車道は 1 車線（約 4 m）。データは 4〜5 車線・14〜15 m
 const ROAD_FIXES = {
   41226: { lanes: '1', width: '4' },
@@ -86,6 +86,9 @@ const ROAD_FIXES = {
   // 利用者の Street View 224901: Rue Laganne（Prairie des Filtres の西）は、西の庭の塀から東の擁壁まで約 8 m で、
   // 1 車線＋東の擁壁沿いの縦列駐車（約 5.5 m）と西の約 2 m の歩道。データの線は通りの中心より約 2 m 東（航空写真）
   37419: { width: '5.5', shift: -2, parkSide: 'right' },
+  // 利用者の Street View 225653: Purpan の脇の Avenue de Grande-Bretagne の西行きは標示のない 1 車線（約 4.5 m）。
+  // データの線はトラムの軌道の縁にあり、実際の車線の中心はもう少し北（航空写真。軌道の芝との間をあけすぎないよう 2 m）
+  99386: { lanes: '1', width: '4.5', shift: 2, bare: true },
 };
 
 // 折れ線 pts（と頂点の番号 ids）を進む向きの右へ d m ずらす。両端（交差点）はそのままで、端から ramp m かけてずらしきる
@@ -394,6 +397,7 @@ export function parseOsm(osm, proj, rect, bdtopo = []) {
         lanes: Math.round(parseLength(t.lanes)) || 0, // 車線の数（IGN の nombre_de_voies・OSM の lanes。路面の車線の破線）
         cycleway: t.cycleway || '', // OSM の自転車レーン（lane など）
         parkSide: ROAD_FIXES[w.id]?.parkSide || '', // 路上駐車する側（写真で決めた道だけ）
+        bare: !!ROAD_FIXES[w.id]?.bare, // 路面の標示を描かない（写真で決めた道だけ）
       });
       if (t.name) named.push({ name: t.name, tags: t, x: pts[0][0], z: pts[0][1], pts, line: true });
     } else if (t.railway && !(t.tunnel && t.tunnel !== 'no')) {

@@ -13,7 +13,7 @@ import { ramblasLayout } from './ramblas.js';
 import { LOCKS, lockFrame } from './locks.js';
 import { RaisedIndex, oldTownBase, planStreets, streetSteps, writePrism } from './streets.js';
 import { CAR_ROADS } from './parse.js';
-import { catenaryStations, slicePolyline, subtract, tramCrossCuts } from './markings.js';
+import { catenaryStations, mergeIntervals, slicePolyline, subtract, tramCrossCuts } from './markings.js';
 import { bridgeGroups, buildAbutments, buildBridges, setupDecks } from './bridges.js';
 import { DRAPE_LIFT, FLAT_TERRAIN } from './terrain.js';
 import { buildFarTerrain, createTerrainMaterials, splitGeometry, TERRAIN_ORDER } from './terrainmesh.js';
@@ -1126,9 +1126,11 @@ function* groundDetailSteps(parsed, clip, mats, waterDepthAt, opts) {
   // 車道・横断歩道を横切る所には立てない）と架線（高さ 5.8 m）
   let near = null;
   const carRoads = () => near || (near = plan.roadsNear(clip, 30).filter((r) => CAR_ROADS.has(r.type) && r.type !== 'service' && !r.bridge && !r.tunnel));
+  let decks = null;
+  const deckRoads = () => decks || (decks = plan.roadsNear(clip, 30).filter((r) => r.bridge && (CAR_ROADS.has(r.type) || /^motorway/.test(r.type))));
   const nearXs = plan.crossings.filter((c) => c.x > clip.minX - 30 && c.x < clip.maxX + 30 && c.z > clip.minZ - 30 && c.z < clip.maxZ + 30);
-  // 架線柱は車道・横断歩道を横切る所（芝を切る所と同じ区間）に立てない
-  const tramPts = writeCatenary(parsed.rails, clip, W(ORDER.raised + 0.2, 'post', 'raised'), (t) => tramCrossCuts(t.pts, carRoads(), nearXs));
+  // 架線柱は車道・横断歩道を横切る所（芝を切る所と同じ区間）と高架の車道の下に立てない
+  const tramPts = writeCatenary(parsed.rails, clip, W(ORDER.raised + 0.2, 'post', 'raised'), (t) => mergeIntervals(tramCrossCuts(t.pts, carRoads(), nearXs).concat(tramCrossCuts(t.pts, deckRoads()))));
   streetStats.postPts.push(...tramPts);
   for (const r of parsed.rails) {
     if (r.bridge) continue;
@@ -1138,9 +1140,15 @@ function* groundDetailSteps(parsed, clip, mats, waterDepthAt, opts) {
       else if (r.type === 'tram') {
         // 車道・横断歩道を横切る所は芝を切る（路面のアスファルトと横断歩道が見える）。レールだけ通す
         const cum = pts.reduce((c, p, i) => (i ? [...c, c[i - 1] + Math.hypot(p[0] - pts[i - 1][0], p[1] - pts[i - 1][1])] : [0]), []);
-        const cuts = tramCrossCuts(pts, carRoads(), nearXs);
+        // 高架の車道の下は芝でなくコンクリートの軌道敷（利用者の Street View 225619: A620 の下）
+        const under = tramCrossCuts(pts, deckRoads());
+        const cuts = mergeIntervals(tramCrossCuts(pts, carRoads(), nearXs).concat(under));
         for (const [a, b] of subtract(0, cum[cum.length - 1], cuts)) {
           if (b - a > 0.3) writeRibbon(W(ORDER.marking + 0.7, 'grass'), slicePolyline(pts, cum, a, b), 1.75, 0, GREEN_COLOR.grass, 6);
+        }
+        for (const [a, b] of under) {
+          const lo = Math.max(0, a), hi = Math.min(cum[cum.length - 1], b);
+          if (hi - lo > 0.3) writeRibbon(W(ORDER.marking + 0.7, 'plain'), slicePolyline(pts, cum, lo, hi), 1.75, 0, c3('#8e8c88'));
         }
       }
       const { L, R } = offsets(pts, 0.72);

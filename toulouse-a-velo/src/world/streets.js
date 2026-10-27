@@ -176,6 +176,9 @@ export function planStreets(parsed, inOld = notOld) {
   // 横断歩道: 旧市街の交差点と、2 本の幹線道路が交わる交差点（信号のある交差点の代わり）で、縁石のある車道を横切る。
   // 交差する道の端から約 1.2 m あけて置く。郊外の住宅街の交差点には引かない
   const crossings = [];
+  // 高架の車道の下には引かない（利用者の Street View 225619: A620 の下の Avenue de Grande-Bretagne には横断歩道がない）
+  const decks = parsed.roads.filter((r) => r.bridge && (CAR_ROADS.has(r.type) || /^motorway/.test(r.type)));
+  const underDeck = (x, z) => decks.some((r) => r.pts.some((p, i) => i + 1 < r.pts.length && closestOnSegment(x, z, p[0], p[1], r.pts[i + 1][0], r.pts[i + 1][1]).d2 < (r.width / 2 + 2) ** 2));
   const sameStreet = (a, b) => a.road === b.road || info.get(a.road).cont.has(b.road) || (a.road.name && a.road.name === b.road.name);
   for (const n of junctions) {
     if (n.arms.length < 3) continue;
@@ -199,7 +202,7 @@ export function planStreets(parsed, inOld = notOld) {
       const d = reach + CURB_W + 1.2 + len / 2;
       if (a.len < d + len / 2 + 4) continue;
       const c = alongFrom(a.road.pts, a.i, a.dir, d);
-      if (!c) continue;
+      if (!c || underDeck(c.x, c.z)) continue;
       // 停止線は交差点へ向かう車線（右側通行）。一方通行は道の向き（頂点の順）に走る車だけ。
       // 信号のある交差点の腕と、格の高い道（優先道路）に出る腕だけ（優先道路の側には引かない）
       let stop = null;
