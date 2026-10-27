@@ -62,6 +62,8 @@ export const MONUMENTS = [
   // サン・シプリアンの入市税の門の小屋（Pavillons de l'octroi。利用者のストリートビュー 2026-10-02 210226、航空写真）:
   // Place Intérieure Saint-Cyprien の西の端、噴水のロータリーの両脇に、淡い石の小さな平屋（約 6 m 四方）。正面は広場（東）を向き、
   // 三角の破風と頂の壺の飾り。at: 2 つの小屋の真ん中、face: 正面が向く点
+  // Port Saint-Pierre の下の段の川の縁の白い係船柱（利用者の写真 NCM_0103。約 3.5 m おき）
+  { id: 'port-saint-pierre-bornes', kind: 'bollards', line: [[43.603738, 1.434135], [43.603391, 1.434889]], step: 3.5 },
   // Purpan の病院の門（利用者のストリートビュー 225754）: 入口の道の両脇の白い飾りの門柱と淡い緑の鉄の柵、道の南の
   // 平屋の高さのクリーム色の漆喰の長い塀（四角い開口が並び、上は瓦）。北の端に赤レンガの半円アーチの通り抜けと、
   // 木の持ち送りの小さな瓦の切妻のひさし。位置は航空写真・IGN の建物（アーチの小屋）
@@ -487,6 +489,10 @@ export function findMonuments(proj, { buildings = [], areas = [], facade = null,
       if (!inB((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)) continue;
       const water = areas.find((q) => q.type === 'water' && pointInPolygon((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, q));
       out.push({ spec, kind: 'lock', a, b, width: spec.width, from: spec.from, area: water || null, replaced: [] });
+    } else if (spec.kind === 'bollards') {
+      const P = spec.line.map((ll) => proj.project(...ll));
+      if (!P.some(([x, z]) => inB(x, z))) continue;
+      out.push({ spec, kind: 'bollards', pts: P, step: spec.step, replaced: [] });
     } else if (spec.kind === 'hgate') {
       const [ax, az] = proj.project(...spec.wall[0]), [bx, bz] = proj.project(...spec.wall[1]);
       if (!inB((ax + bx) / 2, (az + bz) / 2)) continue;
@@ -2349,6 +2355,20 @@ function writePavilion(m, W, groundAt, colliders) {
   for (let i = 0; i < 4; i++) colliders.push([...C[i], ...C[(i + 1) % 4]]);
 }
 
+// ---- 係船柱の列: 白い短い円柱に丸い頭
+function writeBollards(m, W, groundAt, colliders) {
+  const WHITE_B = col('#e8e7e2');
+  for (let i = 0; i + 1 < m.pts.length; i++) {
+    const [ax, az] = m.pts[i], [bx, bz] = m.pts[i + 1], L = Math.hypot(bx - ax, bz - az);
+    for (let t = m.step / 2; t < L; t += m.step) {
+      const x = ax + ((bx - ax) * t) / L, z = az + ((bz - az) * t) / L, g = groundAt(x, z);
+      cylinder(W.main, x, z, 0.17, 0.17, g - 0.1, g + 0.42, { seg: 10, color: WHITE_B });
+      cylinder(W.main, x, z, 0.17, 0.06, g + 0.42, g + 0.55, { seg: 10, color: WHITE_B });
+      colliders.push([x - 0.17, z, x + 0.17, z], [x, z - 0.17, x, z + 0.17]);
+    }
+  }
+}
+
 // ---- 病院の門: 長い塀（四角い開口・瓦の笠）と北の端のレンガのアーチの通り抜け・瓦のひさし、門柱と鉄の柵
 function writeHospitalGate(m, W, groundAt, colliders) {
   const w = W.main;
@@ -2641,7 +2661,7 @@ function writeStatue(m, W, groundAt, colliders, onRoad, keepOut) {
   keepOut.push([x, z, 6]);
 }
 
-const WRITERS = { hgate: writeHospitalGate, lift: writeLift, pavilion: writePavilion, lock: writeLock, equestrian: writeEquestrian, wallFountain: writeWallFountain, capitainerie: writeCapitainerie, moorings: writeMoorings, riverfront: writeRiverfront, arcades: writeArcades, choir: writeChoir, ramblas: writeRamblas, basilica: writeBasilica, island: writeIsland, roundabout: writeRoundabout, portico: writePortico, donjon: writeDonjon, statue: writeStatue, dome: writeDome, chateau: writeChateau, stadium: writeStadium, cabanis: writeCabanis, coq: writeCoq, cross: writeCross, fastfood: writeFastfood, jgarden: writeJgarden, parterre: writeParterre };
+const WRITERS = { bollards: writeBollards, hgate: writeHospitalGate, lift: writeLift, pavilion: writePavilion, lock: writeLock, equestrian: writeEquestrian, wallFountain: writeWallFountain, capitainerie: writeCapitainerie, moorings: writeMoorings, riverfront: writeRiverfront, arcades: writeArcades, choir: writeChoir, ramblas: writeRamblas, basilica: writeBasilica, island: writeIsland, roundabout: writeRoundabout, portico: writePortico, donjon: writeDonjon, statue: writeStatue, dome: writeDome, chateau: writeChateau, stadium: writeStadium, cabanis: writeCabanis, coq: writeCoq, cross: writeCross, fastfood: writeFastfood, jgarden: writeJgarden, parterre: writeParterre };
 
 // 名所のモデルを作る。colliders: 足す当たり判定の円 [x, z, r] か線分 [ax, az, bx, bz]、
 // keepOut: 街の小物を置かない円 [x, z, r]（像の台・シャトー・ドーの柵の内側。monumentSolid）

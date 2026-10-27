@@ -165,6 +165,7 @@ const JGARDEN_POND = [43.6119432, 1.4318864];
 // LOCK_BASIN m 以内の運河の岸。地形モデルは水面を V 字に補間するので、岸から BASIN_REACH m の陸の格子点を岸の上の高さ
 // （岸から BASIN_OUT m 先の地面）まで上げ、水の中の格子点を水面より下げて、水の縁に岸壁（sharpenQuays の岸壁と同じ形）を立てる
 const LOCK_BASIN = 80, BASIN_REACH = 14, BASIN_OUT = 18;
+const QUAY_BACK = 5.5; // 岸壁の裏で下の段の高さにする幅（格子 1 マス。岸壁の上の歩道の板 WALK_DEF m より狭く）
 function lockBasinTest(proj) {
   const ends = LOCKS.map((l) => {
     const f = lockFrame(proj.project(...l.a), proj.project(...l.b));
@@ -172,6 +173,66 @@ function lockBasinTest(proj) {
   });
   return (x, z) => ends.some(({ f, end }) => Math.hypot(x - end[0], z - end[1]) < LOCK_BASIN && f.uv(x, z)[0] > f.L - 1);
 }
+// 写真で決まる岸壁（sharpenQuays が見つけない所）: line の折れ線 [緯度, 経度] に壁、low（低い側の点）の側が下の段。
+// 下の段は水面から lowAbove m の平らな面（壁から lowReach m まで）、上の段は壁から 6 m まで岸の上の高さにそろえる。
+// Port Saint-Pierre（利用者の写真 NCM_0103・航空写真）: 並木の上の段（約 140 m）の縁から約 5.5 m 下に、幅 5〜6 m の平らな
+// 石畳の下の段（水面から約 1.8 m、川の側は垂直の縁）。地形モデルでは川へ傾いた斜面
+// setts: 下の段は大きな石の板でなく小舗石（写真）
+const FIXED_QUAYS = [{ line: [[43.603782, 1.434159], [43.603425, 1.434934]], low: [43.603541, 1.43436], lowAbove: 1.8, lowReach: 9, setts: true }];
+export function fixedQuayWalls(T, proj, inWater) {
+  const out = [];
+  const g = T.near, D = g.data, DAT = T.datum;
+  for (const fq of FIXED_QUAYS) {
+    const P = fq.line.map((ll) => proj.project(...ll)), [lx, lz] = proj.project(...fq.low);
+    const segs = [];
+    for (let i = 0; i + 1 < P.length; i++) {
+      const [ax, az] = P[i], [bx, bz] = P[i + 1], L = Math.hypot(bx - ax, bz - az);
+      let nx = -(bz - az) / L, nz = (bx - ax) / L;
+      if ((lx - ax) * nx + (lz - az) * nz < 0) [nx, nz] = [-nx, -nz]; // 下の段の側
+      const k = Math.ceil(L / 4);
+      for (let j = 0; j < k; j++) segs.push({ ax: ax + ((bx - ax) * j) / k, az: az + ((bz - az) * j) / k, bx: ax + ((bx - ax) * (j + 1)) / k, bz: az + ((bz - az) * (j + 1)) / k, nx, nz });
+    }
+    for (const sq of segs) {
+      sq.at = T.h(sq.ax - sq.nx * 6, sq.az - sq.nz * 6);
+      sq.bt = T.h(sq.bx - sq.nx * 6, sq.bz - sq.nz * 6);
+    }
+    const R = Math.max(fq.lowReach, 6) + 1;
+    let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+    for (const [x, z] of P) [x0, z0, x1, z1] = [Math.min(x0, x), Math.min(z0, z), Math.max(x1, x), Math.max(z1, z)];
+    const c0 = Math.max(0, Math.floor(g.ax * (x0 - R) + g.bx)), c1 = Math.min(g.cols - 1, Math.ceil(g.ax * (x1 + R) + g.bx));
+    const r0 = Math.max(0, Math.floor(g.az * (z0 - R) + g.bz)), r1 = Math.min(g.rows - 1, Math.ceil(g.az * (z1 + R) + g.bz));
+    const writes = [];
+    for (let r = r0; r <= r1; r++) {
+      const z = (r - g.bz) / g.az;
+      for (let c = c0; c <= c1; c++) {
+        const x = (c - g.bx) / g.ax, k = r * g.cols + c;
+        if (Number.isNaN(D[k])) continue;
+        let best = null;
+        for (const sq of segs) {
+          const cs = closestOnSegment(x, z, sq.ax, sq.az, sq.bx, sq.bz);
+          if (!best || cs.d2 < best.cs.d2) best = { sq, cs };
+        }
+        const { sq, cs } = best;
+        if (((sq === segs[0] && cs.t <= 0) || (sq === segs[segs.length - 1] && cs.t >= 1)) && cs.d2 > 1) continue; // 線の両端の外は触らない
+        // 壁は下の段の格子点の上に立つ（sharpenQuays と同じ）: 壁の裏の 1 マス（QUAY_BACK m）も下の段の高さにし、その先の斜面は
+        // 岸壁の上の歩道の板（buildQuayWalls）で隠す。そのさらに裏は岸の上の高さ
+        const d = (x - cs.x) * sq.nx + (z - cs.z) * sq.nz;
+        if (d > -QUAY_BACK && d < fq.lowReach && !inWater(x, z)) writes.push([k, T.waterLevel(x, z) + fq.lowAbove + DAT]);
+        else if (d <= -QUAY_BACK && d > -QUAY_BACK - 6) {
+          const top = sq.at + (sq.bt - sq.at) * cs.t;
+          if (D[k] < top + DAT) writes.push([k, top + DAT]);
+        }
+      }
+    }
+    for (const [k, y] of writes) D[k] = y;
+    for (const sq of segs) {
+      const ya = T.waterLevel(sq.ax, sq.az) + fq.lowAbove, yb = T.waterLevel(sq.bx, sq.bz) + fq.lowAbove;
+      out.push({ ax: sq.ax, az: sq.az, at: sq.at, ab: ya, bx: sq.bx, bz: sq.bz, bt: sq.bt, bb: yb, nx: sq.nx, nz: sq.nz, wa: WALK_DEF, wb: WALK_DEF, setts: !!fq.setts });
+    }
+  }
+  return out;
+}
+
 export function lockBasinWalls(T, water, proj, inWater) {
   const inBasin = lockBasinTest(proj);
   const segs = [];
@@ -230,10 +291,11 @@ export function lockBasinWalls(T, water, proj, inWater) {
       }
       if (!best) continue;
       const { sq, cs } = best, top = sq.at + (sq.bt - sq.at) * cs.t;
+      const d = (x - cs.x) * sq.nx + (z - cs.z) * sq.nz; // 岸壁から水の側へ
       // 閘室の脇: 閘室の側（法線の側）の格子点はそのまま（閘室の切り抜き）
-      if (sq.lockSide && (x - cs.x) * sq.nx + (z - cs.z) * sq.nz > 0) continue;
-      if (inWater(x, z)) {
-        // 水の中: 水面より 1 m 下（岸壁の前に土の斜面を出さない）
+      if (sq.lockSide && d > 0) continue;
+      if (!sq.lockSide && (inWater(x, z) || d > -QUAY_BACK)) {
+        // 水の中と岸壁の裏の 1 マス: 水面より 1 m 下（岸壁の前に土の斜面を出さない。裏は岸壁の上の歩道の板で隠す）
         const wl = T.waterLevel(x, z) - 1;
         if (D[k] > wl + DAT) writes.push([k, wl + DAT]);
       } else if (D[k] < top + DAT) writes.push([k, top + DAT]);
@@ -684,7 +746,8 @@ export function buildGroundBase(parsed, rect, mats, terrain = FLAT_TERRAIN, layo
     const quays = sharpenQuays(T, parsed.proj ? parsed.proj.project(...QUAY_LATLON) : [-250, 0], QUAY_RADIUS + 150, { inWater, paths: parsed.roads })
       .filter((q) => !onBrienne((q.ax + q.bx) / 2, (q.az + q.bz) / 2) && !inBasin0((q.ax + q.bx) / 2, (q.az + q.bz) / 2));
     const basin = parsed.proj ? lockBasinWalls(T, water, parsed.proj, inWater) : [];
-    T.setQuayWalls(parsed.proj ? quays.concat(quayLinks(quays, parsed.proj), basin) : quays);
+    const fixedQ = parsed.proj ? fixedQuayWalls(T, parsed.proj, inWater) : [];
+    T.setQuayWalls(parsed.proj ? quays.concat(quayLinks(quays, parsed.proj), basin, fixedQ) : quays);
     despike(T);
   }
   if (!T.flat && T.quayWalls.length) group.add(buildQuayWalls(T.quayWalls, mats, parsed.proj));

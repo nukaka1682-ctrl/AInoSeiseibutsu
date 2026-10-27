@@ -179,7 +179,7 @@ export class Terrain {
       const px = q.ax + dx * t, pz = q.az + dz * t, d = (x - px) * q.nx + (z - pz) * q.nz; // 壁から下の段へ
       if (d <= 0 || d > reach || (best && d >= best.d)) return;
       const drop = q.at + (q.bt - q.at) * t - (q.ab + (q.bb - q.ab) * t);
-      best = { x: px, z: pz, nx: q.nx, nz: q.nz, d, drop };
+      best = { x: px, z: pz, nx: q.nx, nz: q.nz, d, drop, setts: !!q.setts };
     });
     return best;
   }
