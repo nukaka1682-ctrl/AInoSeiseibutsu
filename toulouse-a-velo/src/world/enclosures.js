@@ -108,9 +108,15 @@ export function projectTrees(trees, proj) {
 }
 
 // 写真で決まる塀（データにない擁壁など）: [緯度, 経度] の折れ線と高さ・面。利用者の写真 225015・224901:
-// Rue Laganne の東の歩道沿いの、Cours Dillon を支える高さ約 3.2 m の漆喰の擁壁（上に Cours Dillon のプラタナス）
+// Rue Laganne の東の歩道沿いの、Cours Dillon を支える高さ約 3.2 m の漆喰の擁壁（上に Cours Dillon のプラタナス）。
+// Rue Marie Magne より北（224901）は、擁壁が縦列駐車の車のすぐ脇まで寄り、西は庭を囲む古い赤レンガの高い塀
+// （北の端の建物から南の集合住宅まで。parse.js の ROAD_FIXES で通りの線も実際の位置へずらす）。tint: 面の色に掛ける色
+// （擁壁は写真では灰色の粗い漆喰）
+const LAGANNE_GREY = [0.6, 0.72, 1]; // 漆喰のテクスチャ（ベージュ）を灰色に
 const FIXED_WALLS = [
-  { pts: [[43.595281, 1.435751], [43.5945, 1.435416], [43.594186, 1.43528], [43.593359, 1.434932], [43.593153, 1.434846]], h: 3.2, kind: 'render' },
+  { pts: [[43.595281, 1.435751], [43.5945, 1.435416], [43.594186, 1.43528], [43.593359, 1.434932], [43.593153, 1.434846]], h: 3.2, kind: 'render', tint: LAGANNE_GREY },
+  { pts: [[43.595281, 1.435751], [43.595441, 1.435768], [43.596323, 1.436135], [43.59672, 1.436308]], h: 3.2, kind: 'render', tint: LAGANNE_GREY },
+  { pts: [[43.59655, 1.436127], [43.595812, 1.435823]], h: 3.6, kind: 'brick' },
 ];
 // 塀のない広場（利用者の写真: Square Charles-de-Gaulle とキャピトル広場は平らな舗装で、LiDAR で見つかる塀は
 // 地下鉄の出入口・植え込みの縁・日よけ）。中点がこの名前の地図の多角形の中にある塀を除く
@@ -128,7 +134,7 @@ export function clearNamedAreas(segs, areas, proj = null) {
   });
 }
 
-// 範囲 bounds に中点が入る区間を [ax, az, bx, bz, h, kind] にして返す
+// 範囲 bounds に中点が入る区間を [ax, az, bx, bz, h, kind, tint] にして返す
 export function fixedWalls(proj, bounds = null) {
   const out = [];
   for (const w of FIXED_WALLS) {
@@ -136,7 +142,7 @@ export function fixedWalls(proj, bounds = null) {
     for (let i = 0; i + 1 < p.length; i++) {
       const mx = (p[i][0] + p[i + 1][0]) / 2, mz = (p[i][1] + p[i + 1][1]) / 2;
       if (bounds && !(mx >= bounds.minX && mx < bounds.maxX && mz >= bounds.minZ && mz < bounds.maxZ)) continue;
-      out.push([p[i][0], p[i][1], p[i + 1][0], p[i + 1][1], w.h, w.kind]);
+      out.push([p[i][0], p[i][1], p[i + 1][0], p[i + 1][1], w.h, w.kind, w.tint]);
     }
   }
   return out;
@@ -149,7 +155,7 @@ export function buildEnclosures(segs, materials, collision = null, terrain = nul
   const brick = new MeshWriter(o), render = new MeshWriter(o), cap = new MeshWriter(o);
   const sloped = terrain && !terrain.flat;
   const plain = sloped ? { brick: new MeshWriter(), render: new MeshWriter(), cap: new MeshWriter(), fill: new MeshWriter() } : null;
-  for (const [ax, az, bx, bz, h, kind] of segs) {
+  for (const [ax, az, bx, bz, h, kind, tint] of segs) {
     const L = Math.hypot(bx - ax, bz - az);
     if (L < 0.5) continue;
     // 塀の面: kind（'render' | 'brick'）が決まっていなければ 4 本に 3 本はレンガ
@@ -158,7 +164,7 @@ export function buildEnclosures(segs, materials, collision = null, terrain = nul
       // 地形の上: 地面にそのまま沿わせると、段差（河岸・土手）を斜めに横切る塀の上端が 5 m の格子ごとにのこぎりの歯になる。
       // 上端はなめらかな線（wallProfile）、下端は地面より下まで（地面に隠れる）の普通の面で作る
       const seed = Math.floor(ax * 3.1) * 7919 + Math.floor(az * 2.3);
-      writeSlopedWall(pick(seed) ? plain.render : plain.brick, plain.cap, wallProfile(terrain, ax, az, bx, bz, h), seed, plain.fill);
+      writeSlopedWall(pick(seed) ? plain.render : plain.brick, plain.cap, wallProfile(terrain, ax, az, bx, bz, h), seed, plain.fill, undefined, tint);
       if (collision) collision.addSegment(ax, az, bx, bz);
       continue;
     }
@@ -166,8 +172,7 @@ export function buildEnclosures(segs, materials, collision = null, terrain = nul
     const nx = -uz * (THICK / 2), nz = ux * (THICK / 2);
     const seed = Math.floor(ax * 3.1) * 7919 + Math.floor(az * 2.3);
     const w = pick(seed) ? render : brick;
-    const k = 0.9 + hash01(seed, 2) * 0.15;
-    const color = [k, k * (0.97 + hash01(seed, 3) * 0.03), k * (0.94 + hash01(seed, 4) * 0.06)];
+    const color = wallColor(seed, tint);
     const u0 = hash01(seed, 5) * 4; // 塀ごとにテクスチャの位置をずらす
     const top = h - 0.12;
     // 両側の面
@@ -244,9 +249,15 @@ export function wallProfile(terrain, ax, az, bx, bz, h, { step = 2, win = 4, rai
 }
 
 // wallProfile の点で塀を書く（地形の上。w: 壁の面、cap: 笠木）
-function writeSlopedWall(w, cap, P, seed, fillW = null, reach = 5.5) {
+// 塀の面の色（塀ごとに少し変える）。tint があれば掛ける
+function wallColor(seed, tint) {
   const k = 0.9 + hash01(seed, 2) * 0.15;
-  const color = [k, k * (0.97 + hash01(seed, 3) * 0.03), k * (0.94 + hash01(seed, 4) * 0.06)];
+  const c = [k, k * (0.97 + hash01(seed, 3) * 0.03), k * (0.94 + hash01(seed, 4) * 0.06)];
+  return tint ? c.map((v, i) => v * tint[i]) : c;
+}
+
+function writeSlopedWall(w, cap, P, seed, fillW = null, reach = 5.5, tint = null) {
+  const color = wallColor(seed, tint);
   const u0 = hash01(seed, 5) * 4;
   const A = P[0], Z = P[P.length - 1], L = Math.hypot(Z.x - A.x, Z.z - A.z);
   const ux = (Z.x - A.x) / L, uz = (Z.z - A.z) / L, nx = -uz * (THICK / 2), nz = ux * (THICK / 2);

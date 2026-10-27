@@ -56,7 +56,7 @@ await page.route('https://data.geopf.fr/**', async (r) => {
   r.fulfill({ body, contentType: type, headers: { 'access-control-allow-origin': '*' } });
 });
 const t0 = Date.now();
-await page.goto(`http://game.test/?area=${process.env.AREA || 'light'}&autostart=1${process.env.REAL === '0' ? '&real=0' : ''}`);
+await page.goto(`http://game.test/?area=${process.env.AREA || 'light'}&autostart=1${process.env.REAL === '0' ? '&real=0' : ''}`, { timeout: 180000 }); // ほかの撮影と同時に動かすと読み込みが遅い
 const ticker = setInterval(async () => {
   try {
     const t = await page.textContent('#loading-text');

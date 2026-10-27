@@ -367,7 +367,7 @@ export function planFurniture({ parsed, plan, clip, curbs = [], inOldTown = () =
     const lane = lay && (right ? lay.right : lay.left);
     const mode = lane ? null : parkMode(road, curbAt(rows, (s0 + s1) / 2).e);
     if (mode && !road.bridge) {
-      if (mode === 'both' || (hash01(id, 60) < 0.5) === right) {
+      if (mode === 'both' || (road.parkSide ? road.parkSide === 'right' : hash01(id, 60) < 0.5) === right) {
         const kerb = mode === 'kerb';
         const off = kerb ? -KERB_OVER + CAR_W / 2 : CURB_GAP + CAR_W / 2; // 縁石の車道側の縁から車の中心まで（車道の側へ）
         for (const { k, s: sk } of slotsAlong(s0 - CAR_PITCH, s1 + CAR_PITCH, CAR_PITCH, hash01(id, 61) * CAR_PITCH)) {
