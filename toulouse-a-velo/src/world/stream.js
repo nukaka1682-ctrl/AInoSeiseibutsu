@@ -279,7 +279,7 @@ class TileStreamer {
       treePts = fillParkTrees(parks, [], free).concat(streetTrees(roads, (x, z) => inB(x, z) && !this.roadnet.onRoad(x, z, 0.2) && !this.inWater(x, z) && !insideBuilding(x, z)));
     }
     treePts = treePts.concat(this.bankTrees.filter((t) => inB(t.x, t.z))); // 街の外れの川岸の土手の木
-    const clear = monumentClearance(monuments);
+    const clear = monumentClearance(monuments, this.proj);
     treePts = liftQuayTrees(treePts, T); // 岸壁の下の段の木は上の段へ
     this.treeless ||= treelessTest(this.parsed.areas);
     treePts = treePts.filter((p) => !clear(p.x ?? p[0], p.z ?? p[1]) && !this.treeless(p.x ?? p[0], p.z ?? p[1])); // 像・塔のまわり・木のない広場には植えない

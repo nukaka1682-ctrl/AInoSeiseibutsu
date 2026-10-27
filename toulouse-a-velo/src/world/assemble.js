@@ -137,7 +137,7 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   const towers = findTowers(proj, parsed.buildings); // 八角形の鐘楼は専用のモデル
   markBrickSites(proj, parsed.buildings, parsed.areas);
   markStreetStyles(parsed.buildings, parsed.roads);
-  const clear = monumentClearance(monuments);
+  const clear = monumentClearance(monuments, proj);
   treePts = liftQuayTrees(treePts, terrain); // 岸壁の下の段の木は上の段へ
   const treeless = treelessTest(parsed.areas);
   treePts = treePts.filter((p) => !clear(p.x ?? p[0], p.z ?? p[1]) && !treeless(p.x ?? p[0], p.z ?? p[1])); // 像・塔のまわり・木のない広場には植えない

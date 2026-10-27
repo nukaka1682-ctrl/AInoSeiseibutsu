@@ -37,7 +37,7 @@ export const MONUMENTS = [
   // サン・セルナン大聖堂（利用者の写真 NCM_0099）: 地図の外形を押し出しただけの箱の代わりに、身廊・側廊・袖廊の
   // 低い勾配の瓦屋根と、東の端の段々の後陣（放射状の 5 つの小礼拝堂 8 m → 周歩廊 13 m → 後陣の円筒 20 m、どれも
   // 半円錐の瓦屋根）。crossing: 交差部（八角形の鐘楼 towers.js）、apex: 東の端の方向
-  { id: 'saint-sernin', kind: 'basilica', lat: 43.60848, lon: 1.442154, r: 40, apex: [43.60863, 1.44250] },
+  { id: 'saint-sernin', kind: 'basilica', lat: 43.60848, lon: 1.442154, r: 40, apex: [43.60863, 1.44250], chevet: [43.608545, 1.442328] },
   // サン・テティエンヌ大聖堂の石の内陣（利用者の写真 NCM_0095）: 石の壁（buildings.js）の外に、控え壁と尖塔飾り、
   // 2 段の尖頭アーチの高い窓、足元のすすけた帯、軒の手すり。landmarkfacades.js の STONE_CHOIRS と同じ所・向き
   { id: 'saint-etienne-choir', kind: 'choir', lat: 43.59988, lon: 1.45046, r: 30, east: [43.59996, 1.4515], split: 1 },
@@ -632,8 +632,11 @@ export function findMonuments(proj, { buildings = [], areas = [], facade = null,
 }
 
 // 木を植えない所（像・塔のまわり）
-export function monumentClearance(list) {
+// proj: あれば、タイルの外の名所の所も（隣のタイルの木を名所の前に植えない）
+export function monumentClearance(list, proj = null) {
   const circles = [];
+  // サン・セルナンの東の端（後陣・周歩廊・礼拝堂）の前は開けた広場（利用者の写真 NCM_0099）。chevet: 後陣の中心
+  if (proj) for (const spec of MONUMENTS) if (spec.kind === 'basilica' && spec.chevet) circles.push([...proj.project(...spec.chevet), 30]);
   for (const m of list) {
     if (m.kind === 'chateau') circles.push([m.x, m.z, m.rBase + 9]); // 柵の外の歩道まで（交差点から塔が見えるように）
     if (m.kind === 'coq') circles.push([m.x, m.z, 3]);
@@ -1827,7 +1830,8 @@ function writeBasilica(m, W, groundAt) {
   const P2 = (u, v) => [cx + e1[0] * u + e2[0] * v, cz + e1[1] * u + e2[1] * v];
   const N = (du, dv) => [e1[0] * du + e2[0] * dv, 0, e1[1] * du + e2[1] * dv];
   const side = (p, q, ya, yb, n) => wall(w, P2(...p), P2(...q), y0 + ya, y0 + yb, n, CELL.brick, BRICK_CW, BRICK_CW, BR);
-  const win = (p, n, along, yb, ht, wd = 1.3) => vpoly(w, P2(p[0] + n[0] * 0.06, p[1] + n[1] * 0.06), along, archShape(wd, ht, y0 + yb, 6), N(n[0], n[1]), DARK);
+  // 窓: p・n・along は世界の座標（P2・T で変換したもの）
+  const win = (p, n, along, yb, ht, wd = 1.3) => vpoly(w, [p[0] + n[0] * 0.06, p[1] + n[1] * 0.06], along, archShape(wd, ht, y0 + yb, 6), [n[0], 0, n[1]], DARK);
   const T = (dir) => [e1[0] * dir[0] + e2[0] * dir[1], e1[1] * dir[0] + e2[1] * dir[1]]; // (u, v) の向き → 世界
   // 箱（u0..u1 × v0..v1、高さ h）の 4 面と、窓（step m おき）
   const block = (u0, u1, v0, v1, h, winY = null, winH = 3.5, skip = '') => {
@@ -1908,6 +1912,14 @@ function writeBasilica(m, W, groundAt) {
       mt.quad(P(ou + ca * ro, ov + sa * ro, ye), P(ou + cb * ro, ov + sb * ro, ye), P(ou + cb * rIn, ov + sb * rIn, yt), P(ou + ca * rIn, ov + sa * rIn, yt), n.map((t) => t / l), PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, TILE);
     }
   };
+  // 半円の壁に沿った白い石の帯（半径 r、高さ ya〜yb）
+  const band = (ou, ov, r, t0, t1, ya, yb, seg) => {
+    for (let k = 0; k < seg; k++) {
+      const ta = t0 + ((t1 - t0) * k) / seg, tb = t0 + ((t1 - t0) * (k + 1)) / seg, tm = (ta + tb) / 2;
+      const [ca, sa] = dir(ta), [cb, sb] = dir(tb), [cm, sm] = dir(tm);
+      w.quad(P(ou + ca * r, ov + sa * r, ya), P(ou + cb * r, ov + sb * r, ya), P(ou + cb * r, ov + sb * r, yb), P(ou + ca * r, ov + sa * r, yb), N(cm, sm), PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, STONE);
+    }
+  };
   const H = Math.PI / 2;
   // 後陣の円筒（20 m）と半円錐の屋根、半円アーチの窓
   arc(sA, 0, vN, -H, H, 20, 10, hA);
@@ -1921,14 +1933,28 @@ function writeBasilica(m, W, groundAt) {
   arc(sA, 0, rAm, -H, H, 13, 16);
   for (const [sgn] of [[-1], [1]]) side([sA, sgn * vA], [sA, sgn * rAm], 0, hA, N(-1, 0));
   cone(sA, 0, rAm, -H, H, 13, 15.5, 16, vN);
-  // 放射状の 5 つの小礼拝堂（直径 6 m・8 m）と半円錐の屋根
+  // 放射状の 5 つの小礼拝堂（直径 6 m・8 m）と半円錐の屋根。窓は 3 つ（利用者の写真 NCM_0099: 礼拝堂・周歩廊・後陣が
+  // 段々に重なり、どの段にも半円アーチの窓と白い石の帯）
   for (let k = 0; k < 5; k++) {
     const t = -H + ((k + 0.5) / 5) * Math.PI, [c, sn] = dir(t);
     const ou = sA + c * (rAm + 0.6), ov = sn * (rAm + 0.6);
     arc(ou, ov, 3, t - H, t + H, 8, 8);
     cone(ou, ov, 3, t - H, t + H, 8, 10.2, 8);
-    win(P2(ou + c * 3, ov + sn * 3), T([c, sn]), T([-sn, c]), 3.2, 2.6, 0.8);
+    for (const dt of [-0.75, 0, 0.75]) {
+      const [cw, sw] = dir(t + dt);
+      win(P2(ou + cw * 3, ov + sw * 3), T([cw, sw]), T([-sw, cw]), 3.0, 3.0, 0.85);
+    }
+    // 周歩廊の、礼拝堂の屋根の上の窓
+    win(P2(sA + c * rAm, sn * rAm), T([c, sn]), T([-sn, c]), 10.5, 2.2, 1.0);
+    band(ou, ov, 3.06, t - H, t + H, 7.5, 7.8, 8);
   }
+  // 周歩廊の、礼拝堂のあいだの窓と、白い石の帯
+  for (let k = 1; k < 5; k++) {
+    const t = -H + (k / 5) * Math.PI, [c, sn] = dir(t);
+    win(P2(sA + c * rAm, sn * rAm), T([c, sn]), T([-sn, c]), 4.5, 3.6, 1.2);
+  }
+  band(sA, 0, rAm + 0.06, -H, H, 12.4, 12.8, 16);
+  band(sA, 0, vN + 0.06, -H, H, 19.4, 19.8, 10);
   // 白い石の帯（側廊の窓の下）
   for (const [v, n] of [[-vA, [0, -1]], [vA, [0, 1]]]) {
     const p = P2(W0, v), q = P2(sc - tH, v);
