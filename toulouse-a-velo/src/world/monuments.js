@@ -1824,7 +1824,7 @@ function writeDonjon(m, W, groundAt, colliders) {
 function writeBasilica(m, W, groundAt) {
   const { cx, cz, e1, e2, a, b, sc } = m;
   const y0 = groundAt(cx, cz) - 0.3;
-  const w = W.main, mt = W.metal;
+  const w = W.main;
   const BR = col('#efc1a8'), TILE = col('#a35c47'), DARK = col('#3a2c26'), STONE = col('#ddd2c2');
   const P = (u, v, y) => [cx + e1[0] * u + e2[0] * v, y0 + y, cz + e1[1] * u + e2[1] * v];
   const P2 = (u, v) => [cx + e1[0] * u + e2[0] * v, cz + e1[1] * u + e2[1] * v];
@@ -1852,7 +1852,7 @@ function writeBasilica(m, W, groundAt) {
         const c = [uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx], l = Math.hypot(...c) || 1;
         return c[1] < 0 ? c.map((t) => -t / l) : c.map((t) => t / l);
       })();
-      mt.quad(A, B, C, D, n, PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, TILE);
+      w.quad(A, B, C, D, n, PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, TILE);
     };
     const tri = (A, B, C, n) => w.tri(A, B, C, n, PLAIN_UV, PLAIN_UV, PLAIN_UV, BR);
     if (along === 'u') {
@@ -1875,7 +1875,7 @@ function writeBasilica(m, W, groundAt) {
     const n = N(0, Math.sign(vo - vi) * (yi - yo));
     n[1] = Math.abs(vi - vo);
     const l = Math.hypot(...n);
-    mt.quad(A, B, C, D, n.map((t) => t / l), PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, TILE);
+    w.quad(A, B, C, D, n.map((t) => t / l), PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, TILE);
   };
   const tan = Math.tan((20 * Math.PI) / 180);
   const W0 = -a + 1, tH = 9, sA = sc + 16, vN = 6.5, vA = 16, hA = 12, hN = 21, hT = 21;
@@ -1909,7 +1909,7 @@ function writeBasilica(m, W, groundAt) {
       const ro = r + 0.5, n = N(cm * (yt - ye), sm * (yt - ye));
       n[1] = ro - rIn;
       const l = Math.hypot(...n);
-      mt.quad(P(ou + ca * ro, ov + sa * ro, ye), P(ou + cb * ro, ov + sb * ro, ye), P(ou + cb * rIn, ov + sb * rIn, yt), P(ou + ca * rIn, ov + sa * rIn, yt), n.map((t) => t / l), PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, TILE);
+      w.quad(P(ou + ca * ro, ov + sa * ro, ye), P(ou + cb * ro, ov + sb * ro, ye), P(ou + cb * rIn, ov + sb * rIn, yt), P(ou + ca * rIn, ov + sa * rIn, yt), n.map((t) => t / l), PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, TILE);
     }
   };
   // 半円の壁に沿った白い石の帯（半径 r、高さ ya〜yb）
