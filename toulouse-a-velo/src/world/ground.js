@@ -456,7 +456,13 @@ export function quayLinks(walls, proj) {
 // 旧市街のまわりの岸壁（terraincond.js の sharpenQuays の線）: 上の河岸から下の遊歩道まで垂直のレンガの壁と手すり壁、
 // 壁の上から河岸の車道の縁までの歩道の板（壁の裏の 1 マスの斜面を隠す）
 const QUAY_PARAPET = 1.0; // 岸壁の上のレンガの手すり壁の高さ（m）
-function buildQuayWalls(list, mats) {
+// 石の岸壁（利用者の写真 NCM_0111・0112: ポン・ヌフの南の左岸、Cours Dillon の下の岸壁は、レンガでなく淡い灰色の
+// 切石の壁と手すり壁）。[緯度, 経度, 半径 m] の円の中の岸壁
+const STONE_QUAYS = [[43.598547, 1.437515, 55]];
+const STONE_QUAY = c3('#c6bca8', 1.16);
+function buildQuayWalls(list, mats, proj = null) {
+  const stoneDiscs = proj ? STONE_QUAYS.map(([lat, lon, r]) => [...proj.project(lat, lon), r]) : [];
+  const stoneAt = (x, z) => stoneDiscs.some(([cx, cz, r]) => Math.hypot(x - cx, z - cz) < r);
   const w = new MeshWriter(), walk = new MeshWriter();
   // 端の点の向き: まわり NEAR_N m の壁の向き（n）の長さの重みの平均（壁の線は格子の三角形の辺の階段なので、1 本ずつの向きは
   // 45° ずつ違う。つながる壁で同じ向きを使うので、手すり壁・歩道の板の角もすき間なく合い、板の外の縁もなめらかになる）
@@ -487,21 +493,24 @@ function buildQuayWalls(list, mats) {
     if ((bx - ax) * nz - (bz - az) * nx < 0) [ax, az, at, ab, ka, bx, bz, bt, bb, kb] = [bx, bz, bt, bb, kb, ax, az, at, ab, ka];
     const L = Math.hypot(bx - ax, bz - az), h0 = ab - 0.4, ha = at - h0, hb = bt - h0;
     const t = hash01(Math.round(ax * 7 + az * 13), 3);
-    const brick = BANK.brickA.map((c, j) => c * (1 - t) + BANK.brickB[j] * t);
+    // 石の岸壁: 石の色で、レンガの目地を横 4 倍・縦 10 倍に広げて大きな切石（約 0.9 × 0.5 m）に見せる
+    // （us・vs: テクスチャの横・縦の 1 m あたり）
+    const stone = stoneAt((ax + bx) / 2, (az + bz) / 2), us = stone ? 0.06 : 0.25, vs = stone ? 0.025 : 0.25;
+    const brick = stone ? STONE_QUAY.map((c) => c * (0.95 + t * 0.1)) : BANK.brickA.map((c, j) => c * (1 - t) + BANK.brickB[j] * t);
     // 端の点の向き（手すり壁の厚さは壁の面に垂直に保つので、向きの違いの分だけ 1.6 倍まで伸ばす）
     const [aex, aez] = dirAt(ax, az) || [nx, nz], [bex, bez] = dirAt(bx, bz) || [nx, nz];
     const am = Math.min(1.6, 1 / Math.max(0.3, aex * nx + aez * nz)), bm = Math.min(1.6, 1 / Math.max(0.3, bex * nx + bez * nz));
     const [anx, anz, bnx, bnz] = [aex * am, aez * am, bex * bm, bez * bm];
     // 壁の面は上の河岸の高さ + 胸壁（QUAY_PARAPET m）まで（写真: ドラード河岸・トゥニ河岸は上の歩道の縁にレンガの手すり壁）
     const P = QUAY_PARAPET, ta = at + P, tb = bt + P;
-    w.quad([ax, h0, az], [bx, h0, bz], [bx, tb, bz], [ax, ta, az], [nx, 0, nz], [0, 0], [L / 4, 0], [L / 4, (hb + P) / 4], [0, (ha + P) / 4], brick);
+    w.quad([ax, h0, az], [bx, h0, bz], [bx, tb, bz], [ax, ta, az], [nx, 0, nz], [0, 0], [L * us, 0], [L * us, (hb + P) * vs], [0, (ha + P) * vs], brick);
     // 手すり壁の内側の面と上面（厚さ 0.45 m、レンガの笠）
     const T = 0.45, pax = ax - anx * T, paz = az - anz * T, pbx = bx - bnx * T, pbz = bz - bnz * T;
-    w.quad([pbx, bt, pbz], [pax, at, paz], [pax, ta, paz], [pbx, tb, pbz], [-nx, 0, -nz], [0, 0], [L / 4, 0], [L / 4, P / 4], [0, P / 4], brick);
-    w.quad([ax, ta, az], [pax, ta, paz], [pbx, tb, pbz], [bx, tb, bz], [0, 1, 0], [0, 0], [0, T / 4], [L / 4, T / 4], [L / 4, 0], brick.map((c) => c * 0.85));
+    w.quad([pbx, bt, pbz], [pax, at, paz], [pax, ta, paz], [pbx, tb, pbz], [-nx, 0, -nz], [0, 0], [L * us, 0], [L * us, P * vs], [0, P * vs], brick);
+    w.quad([ax, ta, az], [pax, ta, paz], [pbx, tb, pbz], [bx, tb, bz], [0, 1, 0], [0, 0], [0, T * vs], [L * us, T * vs], [L * us, 0], brick.map((c) => c * (stone ? 0.95 : 0.85)));
     // 足元の石積みの帯（遊歩道から 1.3 m。写真では淡い石の切石の土台の上にレンガが積まれている）。壁の面より 3 cm 手前
     const sa = Math.min(at, ab + 1.3), sb = Math.min(bt, bb + 1.3), ox = nx * 0.03, oz = nz * 0.03;
-    if (sa > h0 + 0.5 && sb > h0 + 0.5) w.quad([ax + ox, h0, az + oz], [bx + ox, h0, bz + oz], [bx + ox, sb, bz + oz], [ax + ox, sa, az + oz], [nx, 0, nz], [0, 0], [L / 2, 0], [L / 2, (sb - h0) / 2], [0, (sa - h0) / 2], BANK.quayBase);
+    if (!stone && sa > h0 + 0.5 && sb > h0 + 0.5) w.quad([ax + ox, h0, az + oz], [bx + ox, h0, bz + oz], [bx + ox, sb, bz + oz], [ax + ox, sa, az + oz], [nx, 0, nz], [0, 0], [L / 2, 0], [L / 2, (sb - h0) / 2], [0, (sa - h0) / 2], BANK.quayBase);
     // 手すり壁の内側から河岸の車道の縁までの歩道の板（淡い花崗岩。写真: 河岸の上の歩道。壁の裏の 1 マスの斜面と、並木の下の
     // 航空写真の緑を隠す。上の段の地面より 2 cm 下なので、平らな所では地面の下に隠れる）。板の先の縁は 3 m 下まで垂らす
     const cy = (y) => y - 0.02;
@@ -591,7 +600,7 @@ export function buildGroundBase(parsed, rect, mats, terrain = FLAT_TERRAIN, layo
     T.setQuayWalls(parsed.proj ? quays.concat(quayLinks(quays, parsed.proj)) : quays);
     despike(T);
   }
-  if (!T.flat && T.quayWalls.length) group.add(buildQuayWalls(T.quayWalls, mats));
+  if (!T.flat && T.quayWalls.length) group.add(buildQuayWalls(T.quayWalls, mats, parsed.proj));
   if (!T.flat && T.metro.length) {
     // メトロの出入口の吹き抜け: 水と同じステンシルの穴（地面のあとに深度テスト付きで印を付け、その所の深度を一番奥に戻す）
     const hole = new MeshWriter();
