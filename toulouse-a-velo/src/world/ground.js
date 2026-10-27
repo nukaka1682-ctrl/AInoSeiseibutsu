@@ -582,7 +582,11 @@ export function buildGroundBase(parsed, rect, mats, terrain = FLAT_TERRAIN, layo
     orientRamps(T.metro, parsed.roads);
     fillMetroPits(T, T.metro);
     conditionRoads(T, parsed.roads, inWater);
-    const quays = sharpenQuays(T, parsed.proj ? parsed.proj.project(...QUAY_LATLON) : [-250, 0], QUAY_RADIUS + 150, { inWater, paths: parsed.roads });
+    // ブリエンヌ運河の岸は草の土手（利用者の写真 NCM_0186）。地形の段を岸壁にしない
+    const brienne = parsed.proj ? BRIENNE.line.map((ll) => parsed.proj.project(...ll)) : [];
+    const onBrienne = (x, z) => brienne.some((p, i) => i + 1 < brienne.length && closestOnSegment(x, z, ...p, ...brienne[i + 1]).d2 < 25 * 25);
+    const quays = sharpenQuays(T, parsed.proj ? parsed.proj.project(...QUAY_LATLON) : [-250, 0], QUAY_RADIUS + 150, { inWater, paths: parsed.roads })
+      .filter((q) => !onBrienne((q.ax + q.bx) / 2, (q.az + q.bz) / 2));
     T.setQuayWalls(parsed.proj ? quays.concat(quayLinks(quays, parsed.proj)) : quays);
     despike(T);
   }
@@ -611,8 +615,9 @@ export function buildGroundBase(parsed, rect, mats, terrain = FLAT_TERRAIN, layo
     };
     const tf = !T.flat;
     const bankOpts = tf ? { map: bankY, maxEdge: 8 } : {};
-    // 水の穴の形: 地面（川の上は岸から延ばしたなめらかな面）から 0.5 m 浮かせ、辺 30 m 以下に分けて載せる
-    // （地面より下だと穴があかない。地面の格子どおりに切るとガロンヌ川全体で 80 万枚を超える）
+    // 水の穴の形: 地面（川の上は岸から延ばしたなめらかな面）から 0.5 m 浮かせ、辺 15 m 以下に分けて載せる
+    // （地面より下だと穴があかない。辺 30 m では三角形の間で地面が穴の面より上に出て、水面に細い線が見えた。
+    // 地面の格子どおりに切るとガロンヌ川全体で 80 万枚を超える）
     // 地面が三角形の平面より上に出る所（岸・堰の近く）だけ、辺 4 m まで細かく分ける
     const bulge = (A, B, C) => {
       const ha = T.h(A[0], A[2]), hb = T.h(B[0], B[2]), hc = T.h(C[0], C[2]);
@@ -622,7 +627,7 @@ export function buildGroundBase(parsed, rect, mats, terrain = FLAT_TERRAIN, layo
       }
       return false;
     };
-    const mask = new MeshWriter(tf ? { map: (x, y, z) => T.h(x, z) + 0.5, maxEdge: 4, split: (A, B, C) => bulge(A, B, C) || Math.max((A[0] - B[0]) ** 2 + (A[2] - B[2]) ** 2, (B[0] - C[0]) ** 2 + (B[2] - C[2]) ** 2, (C[0] - A[0]) ** 2 + (C[2] - A[2]) ** 2) > 900 } : {});
+    const mask = new MeshWriter(tf ? { map: (x, y, z) => T.h(x, z) + 0.5, maxEdge: 4, split: (A, B, C) => bulge(A, B, C) || Math.max((A[0] - B[0]) ** 2 + (A[2] - B[2]) ** 2, (B[0] - C[0]) ** 2 + (B[2] - C[2]) ** 2, (C[0] - A[0]) ** 2 + (C[2] - A[2]) ** 2) > 225 } : {});
     const surface = new MeshWriter(tf ? {
       // 堰・閘門の段差の所だけ細かく分ける（下流の流れる区間のゆるい傾きは三角形の平面のままでよい）
       map: (x, y, z) => T.waterLevel(x, z, cur), maxEdge: 6,
