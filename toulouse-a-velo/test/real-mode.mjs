@@ -173,6 +173,8 @@ for (const v of views) {
   });
   await page.screenshot({ path: join(out, `${v.name}.jpg`), type: 'jpeg', quality: 85, timeout: 240000 });
   console.log(`  ${v.name}: 自転車の高さ ${info}`);
+  // probe: ページで評価する式（例: 近くの小物の位置を調べる）。結果を JSON で表示する
+  if (v.probe) console.log(`  ${v.name} probe:`, JSON.stringify(await page.evaluate(v.probe)));
   if (v.cam) await page.evaluate(() => (window.__tav.phase = 'play'));
 }
 await browser.close();

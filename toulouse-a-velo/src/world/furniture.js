@@ -39,6 +39,8 @@ const BOULEVARD = new Set(['trunk', 'primary', 'secondary']);
 export const CAR_L = 4.2, CAR_W = 1.8;
 const CAR_PITCH = 5.6; // 縦列駐車の 1 台分の長さ（車＋前後のすき間）
 const CURB_GAP = 0.15; // 縁石と駐車の車のすき間
+const MAIN_BUS = /^(trunk|primary|secondary|tertiary)$/; // バス停の待合所を置く道
+const SHELTER_STEP = 200, MORRIS_STEP = 260;
 export const BIKE_LANE = 3; // 駐車の車の横に残す車道の幅（自転車が通れるように）
 const PARK_TYPES = new Set(['residential', 'unclassified', 'tertiary', 'secondary', 'road']);
 const KERB_TYPES = new Set(['residential', 'unclassified', 'road']); // 歩道に半分乗り上げて止める通り
@@ -269,7 +271,7 @@ function contextOf(parsed, plan) {
 // 戻り値: 種類ごとの { x, y, z, a（向き）, sx, sy（大きさ）, color } の列と、当たり判定（colliders）
 export function planFurniture({ parsed, plan, clip, curbs = [], inOldTown = () => false, heightAt = () => 0, onRoad = () => false, solid = () => false, trunks = [] }) {
   const ctx = contextOf(parsed, plan);
-  const out = { lights: [], discs: [], candelabra: [], bollards: [], blocks: [], planters: [], cars: [], bins: [], containers: [], terraces: [], colliders: [] };
+  const out = { lights: [], discs: [], candelabra: [], bollards: [], blocks: [], planters: [], cars: [], bins: [], containers: [], terraces: [], shelters: [], columns: [], colliders: [] };
   const inClip = (x, z) => x >= clip.minX && x < clip.maxX && z >= clip.minZ && z < clip.maxZ;
   // バス・自転車レーンの帯（markings.js の断面）にかかる車は、どこから置いた車でも置かない（縁石の列は隣の区間の車道・
   // 駐車場の区画が車道にかかる所も。Avenue de Grande-Bretagne の自転車レーン）
@@ -426,6 +428,38 @@ export function planFurniture({ parsed, plan, clip, curbs = [], inOldTown = () =
       out.bins.push({ x, z, y: heightAt(x, z), a: yaw(p.nx, p.nz) });
       take(x, z, 0.35);
       circle(x, z, 0.28);
+    }
+
+    // ---- バス停の待合所（旧市街の外の幹線道路の広い歩道に、片側ずつ 200 m おきの半分ほど。ガラスの背の壁・平らな屋根・広告の板・ベンチと
+    // 停留所の標識。開いた側を車道に向ける）。模型の +z が車道の側（向き yaw(-n_z, n_x)）
+    if (MAIN_BUS.test(road.type)) {
+      for (const { k, s } of slotsAlong(s0 + 8, s1 - 8, SHELTER_STEP, hash01(id, 90) * SHELTER_STEP)) {
+        const h = (id ^ Math.imul(k + 53 * side, 0x2f6b8a1d)) | 0;
+        if (hash01(h, 91) > 0.5) continue;
+        const p = curbAt(rows, s);
+        if (p.e < 2.8) continue;
+        const x = p.cx + p.nx * 1.3, z = p.cz + p.nz * 1.3;
+        const ax = -p.nz, az = p.nx; // 待合所の長い向き
+        if (inOldTown(x, z) || ctx.crossingZone(road, x, z, 7) || ctx.nearJunction(x, z, 15) || onLane(x, z)) continue;
+        // 待合所の足元（長い向きに 3 点）に小物がなく、両端まで歩道の上（縁石の際の車止めは前に残ってよい）
+        if ([-1, 0, 1].some((t) => !clear(x + ax * 1.4 * t, z + az * 1.4 * t, 0.85))) continue;
+        if ([-1, 1].some((t) => heightAt(x + ax * 1.9 * t, z + az * 1.9 * t) < 0.02)) continue;
+        out.shelters.push({ x, z, y: heightAt(x, z), a: yaw(ax, az) });
+        take(x, z, 2.2);
+        boxC(x, z, ax, az, 1.95, 0.75);
+      }
+    }
+    // ---- モリス柱（広告の円柱。旧市街の広い歩道に約 260 m おき、深緑の柱とドームの屋根）
+    for (const { k, s } of slotsAlong(s0 + 6, s1 - 6, MORRIS_STEP, hash01(id, 94) * MORRIS_STEP)) {
+      const h = (id ^ Math.imul(k + 1, 0x5bd1e995)) | 0;
+      if (hash01(h, 95) > 0.5 || (hash01(h, 97) < 0.5) !== right) continue; // 片側だけ
+      const p = curbAt(rows, s);
+      if (p.e < 3.5) continue;
+      const x = p.cx + p.nx * 1.3, z = p.cz + p.nz * 1.3;
+      if (!inOldTown(x, z) || heightAt(x, z) < 0.02 || ctx.crossingZone(road, x, z, 3) || ctx.nearJunction(x, z, 6) || !clear(x, z, 1.1)) continue;
+      out.columns.push({ x, z, y: heightAt(x, z), a: hash01(h, 96) * Math.PI * 2 });
+      take(x, z, 1.1);
+      circle(x, z, 0.62);
     }
   }
 
@@ -907,6 +941,38 @@ export function containerGeometry() {
   return toGeometry(w);
 }
 
+// バス停の待合所（長さ 3.9・奥行き 1.6・高さ 2.5 m。模型の x が長い向き、+z が開いた側＝車道）: 灰色の柱と平らな屋根、
+// 淡い青灰色のガラスの背の壁、端の広告の板（明るい絵）、金属のベンチ、開いた側の端に停留所の標識の柱
+export function shelterGeometry() {
+  const w = new MeshWriter();
+  const frame = rgb('#4b5156'), roof = rgb('#6d7377'), under = rgb('#a9adae'), glass = rgb('#a7bcc2'), poster = rgb('#e6dcc2'), bench = rgb('#3a3f42'), sign = rgb('#2c5a9e'), white = rgb('#f1f0ea');
+  for (const x of [-1.8, 1.8]) for (const z of [-0.68, 0.6]) box(w, x - 0.04, 0, z - 0.04, x + 0.04, 2.36, z + 0.04, frame);
+  box(w, -1.95, 2.36, -0.8, 1.95, 2.5, 0.85, roof, { bottom: under });
+  box(w, -1.76, 0.12, -0.7, 1.76, 2.3, -0.66, glass);
+  box(w, 1.74, 0.1, -0.64, 1.84, 2.25, 0.45, frame);
+  box(w, 1.73, 0.3, -0.58, 1.85, 2.1, 0.39, poster);
+  box(w, -1.3, 0.44, -0.62, 0.7, 0.5, -0.3, bench);
+  for (const x of [-1.2, 0.6]) box(w, x - 0.03, 0, -0.5, x + 0.03, 0.44, -0.44, bench);
+  column(w, -2.35, 0.55, 0.04, 0.04, 0, 2.7, 6, frame, { top: frame });
+  box(w, -2.6, 2.25, 0.52, -2.1, 2.62, 0.58, sign);
+  box(w, -2.55, 2.3, 0.585, -2.15, 2.45, 0.59, white);
+  return toGeometry(w);
+}
+
+// モリス柱（広告の円柱、高さ約 3.5 m）: 深緑の台座と帯、ポスターの胴、張り出した蛇腹とドーム、頂の飾り
+export function morrisGeometry() {
+  const w = new MeshWriter();
+  const green = rgb('#2e4a3b'), poster = rgb('#ddd2b6'), dark = rgb('#24392e');
+  column(w, 0, 0, 0.66, 0.62, 0, 0.4, 12, green, { top: green });
+  column(w, 0, 0, 0.56, 0.56, 0.4, 0.55, 12, dark);
+  column(w, 0, 0, 0.56, 0.56, 0.55, 2.45, 12, poster);
+  column(w, 0, 0, 0.58, 0.58, 2.45, 2.62, 12, green);
+  column(w, 0, 0, 0.7, 0.7, 2.62, 2.78, 12, green, { bottom: dark, top: green });
+  column(w, 0, 0, 0.64, 0.12, 2.78, 3.3, 12, green);
+  column(w, 0, 0, 0.06, 0.02, 3.3, 3.6, 6, dark, { top: dark });
+  return toGeometry(w);
+}
+
 function toGeometry(w) {
   const g = w.toGeometry();
   const uv = g.getAttribute('uv');
@@ -1046,6 +1112,8 @@ export function buildFurniture(opts, cw = null) {
   set.add('terraces', terraceGeometry(), mat, items.terraces);
   set.add('bins', binGeometry(), mat, items.bins);
   set.add('containers', containerGeometry(), mat, items.containers, { shadow: true });
+  set.add('shelters', shelterGeometry(), mat, items.shelters, { shadow: true });
+  set.add('morris', morrisGeometry(), mat, items.columns, { shadow: true });
   if (cw) {
     for (const c of items.colliders) {
       if (c.r) cw.addCircle(c.x, c.z, c.r);

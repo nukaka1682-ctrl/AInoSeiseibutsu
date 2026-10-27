@@ -88,7 +88,7 @@ test('小物の配置: 路上駐車は自転車の通る幅を残し、交差点
   for (let i = 1; i < bol.length; i++) assert.ok(Math.abs(bol[i].x - bol[i - 1].x - 1.4) < 0.05);
   // 駐車場の車と、当たり判定（車は箱、ほかは円）
   assert.ok(out.cars.some((c) => c.x > 40 && c.z < -40));
-  assert.equal(out.colliders.filter((c) => c.hl).length, out.cars.length + out.containers.length);
+  assert.equal(out.colliders.filter((c) => c.hl).length, out.cars.length + out.containers.length + out.shelters.length);
   // 旧市街では路上駐車も灰色の街灯もない
   const old = planFurniture(town(() => true).opts);
   assert.equal(old.lights.length, 0);
@@ -163,7 +163,7 @@ test('小物のメッシュ: 種類ごとに 1 つの InstancedMesh、近い物�
   const cw = { circles: 0, rings: 0, addCircle() { this.circles++; }, addRing() { this.rings++; } };
   const set = buildFurniture(opts, cw);
   assert.ok(set.group.children.length >= 4 && set.group.children.length <= 12);
-  assert.equal(cw.rings, set.stats.cars + set.stats.containers);
+  assert.equal(cw.rings, set.stats.cars + set.stats.containers + set.stats.shelters);
   set.cull(0, 0, true);
   const cars = set.group.children.find((m) => m.name === 'cars');
   assert.ok(cars.isInstancedMesh && cars.count === set.stats.cars && cars.visible);
@@ -206,4 +206,35 @@ test('バス・自転車レーンの上に路上駐車しない（markings.js �
     assert.ok(lanes.length > 0, r.name);
     for (const c of out.cars) for (const z of lanes) assert.ok(Math.abs(c.x) > 210 || Math.abs(c.z - z) > 1.5, `${r.name}: 車 ${c.x.toFixed(1)},${c.z.toFixed(1)} がレーンの上`);
   }
+});
+
+test('バス停の待合所は旧市街の外の幹線道路の広い歩道に、モリス柱は旧市街の広い歩道に', () => {
+  // 東西の幹線道路（8 m）を 6 本。両側 4 m 先に建物（歩道は建物の壁まで約 4 m）
+  const extra = [], buildings = [];
+  for (let i = 0; i < 6; i++) {
+    const z = -150 + i * 60;
+    extra.push(road(20 + i, 'secondary', 8, [[-195, z], [195, z]], { name: `Boulevard ${i}` }));
+  }
+  const make = (old) => {
+    const parsed = { roads: extra, areas: [], rails: [] };
+    const plan = planStreets(parsed, old);
+    const raised = new RaisedIndex();
+    const clip = { minX: -200, minZ: -200, maxX: 200, maxZ: 200 };
+    for (const r of extra) buildings.push(box(-190, r.pts[0][1] + 8, 190, r.pts[0][1] + 20), box(-190, r.pts[0][1] - 20, 190, r.pts[0][1] - 8));
+    const stats = writeStreets(parsed, plan, clip, { buildings }, () => new MeshWriter(), raised);
+    return { out: planFurniture({ parsed, plan, clip, curbs: stats.curbs, inOldTown: old, heightAt: (x, z) => raised.heightAt(x, z) }), raised };
+  };
+  const { out, raised } = make(() => false);
+  assert.ok(out.shelters.length > 0, '待合所がある');
+  assert.equal(out.columns.length, 0, '旧市街の外にモリス柱はない');
+  for (const sh of out.shelters) {
+    assert.ok(raised.heightAt(sh.x, sh.z) > 0, '歩道の上');
+    // 開いた側（模型の +z）が車道（最寄りの通りの中心線）を向く
+    const zr = extra.map((r) => r.pts[0][1]).reduce((a, b) => (Math.abs(b - sh.z) < Math.abs(a - sh.z) ? b : a));
+    const fz = Math.cos(sh.a); // 模型の +z の z 成分
+    assert.ok(fz * (zr - sh.z) > 0, `${sh.x},${sh.z} の待合所の向き`);
+  }
+  const old = make(() => true).out;
+  assert.equal(old.shelters.length, 0, '旧市街に待合所はない');
+  assert.ok(old.columns.length > 0, '旧市街のモリス柱');
 });
