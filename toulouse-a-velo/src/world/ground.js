@@ -160,7 +160,92 @@ const PORT_SAUVEUR = { latlon: [43.59634, 1.4564], hx: 70, hz: 270 };
 // 運河 Canal de Brienne（利用者の写真 NCM_0186）: 両岸とも水際から並木道まで約 3 m の草の斜面（壁はない）。この線から 30 m 以内の岸
 // （運河の芯線に沿った折れ線。閘門の上で北へ曲がってから北西へ）
 const BRIENNE = { line: [[43.604413, 1.434409], [43.604811, 1.434372], [43.605083, 1.434089], [43.605282, 1.433639], [43.606512, 1.430163]], reach: 30 };
-const JGARDEN_POND = [43.6119432, 1.4318864]; // 日本庭園（Jardin japonais Pierre Baudis）の池の中心のあたり
+const JGARDEN_POND = [43.6119432, 1.4318864];
+// 閘門の上の船だまり（利用者の写真 NCM_0185・航空写真）: 両岸は垂直の石の岸壁で、上は平らな河岸。閘門の運河の側の端から
+// LOCK_BASIN m 以内の運河の岸。地形モデルは水面を V 字に補間するので、岸から BASIN_REACH m の陸の格子点を岸の上の高さ
+// （岸から BASIN_OUT m 先の地面）まで上げ、水の中の格子点を水面より下げて、水の縁に岸壁（sharpenQuays の岸壁と同じ形）を立てる
+const LOCK_BASIN = 80, BASIN_REACH = 14, BASIN_OUT = 18;
+function lockBasinTest(proj) {
+  const ends = LOCKS.map((l) => {
+    const f = lockFrame(proj.project(...l.a), proj.project(...l.b));
+    return { f, end: f.at(f.L, 0) };
+  });
+  return (x, z) => ends.some(({ f, end }) => Math.hypot(x - end[0], z - end[1]) < LOCK_BASIN && f.uv(x, z)[0] > f.L - 1);
+}
+export function lockBasinWalls(T, water, proj, inWater) {
+  const inBasin = lockBasinTest(proj);
+  const segs = [];
+  for (const a of water) {
+    if (a.kind !== 'canal' || a.patch) continue;
+    const ring = a.outer, sg = signedArea(ring) > 0 ? 1 : -1;
+    for (let i = 0; i < ring.length; i++) {
+      const p = ring[i], q = ring[(i + 1) % ring.length], L = Math.hypot(q[0] - p[0], q[1] - p[1]);
+      if (L < 0.5 || !inBasin((p[0] + q[0]) / 2, (p[1] + q[1]) / 2)) continue;
+      // 水の側の向き（外周の内向き）
+      const nx = (-(q[1] - p[1]) / L) * sg, nz = ((q[0] - p[0]) / L) * sg;
+      const k = Math.ceil(L / 4);
+      for (let j = 0; j < k; j++) segs.push({ ax: p[0] + ((q[0] - p[0]) * j) / k, az: p[1] + ((q[1] - p[1]) * j) / k, bx: p[0] + ((q[0] - p[0]) * (j + 1)) / k, bz: p[1] + ((q[1] - p[1]) * (j + 1)) / k, nx, nz });
+    }
+  }
+  if (!segs.length) return [];
+  // 閘室の両脇も平らな河岸にする（地面を上げるだけ。閘室の壁は monuments.js の writeLock）
+  const raise = segs.slice();
+  for (const l of LOCKS) {
+    const f = lockFrame(proj.project(...l.a), proj.project(...l.b)), hw = l.width / 2 + 0.4;
+    for (const sd of [-1, 1]) {
+      const n = Math.max(1, Math.ceil((f.L - l.from) / 4));
+      for (let j = 0; j < n; j++) {
+        const [ax, az] = f.at(l.from + ((f.L - l.from) * j) / n, sd * hw), [bx, bz] = f.at(l.from + ((f.L - l.from) * (j + 1)) / n, sd * hw);
+        raise.push({ ax, az, bx, bz, nx: -f.v[0] * sd, nz: -f.v[1] * sd, lockSide: true });
+      }
+    }
+  }
+  // 岸の上の高さ: 岸から陸へ BASIN_OUT m 先の地面（手直しの前の高さ）
+  const topAt = (x, z, nx, nz) => T.h(x - nx * BASIN_OUT, z - nz * BASIN_OUT);
+  for (const sq of raise) {
+    sq.at = topAt(sq.ax, sq.az, sq.nx, sq.nz);
+    sq.bt = topAt(sq.bx, sq.bz, sq.nx, sq.nz);
+  }
+  const g = T.near, D = g.data, DAT = T.datum;
+  let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+  for (const sq of raise) {
+    x0 = Math.min(x0, sq.ax, sq.bx);
+    z0 = Math.min(z0, sq.az, sq.bz);
+    x1 = Math.max(x1, sq.ax, sq.bx);
+    z1 = Math.max(z1, sq.az, sq.bz);
+  }
+  const R = BASIN_REACH;
+  const c0 = Math.max(0, Math.floor(g.ax * (x0 - R) + g.bx)), c1 = Math.min(g.cols - 1, Math.ceil(g.ax * (x1 + R) + g.bx));
+  const r0 = Math.max(0, Math.floor(g.az * (z0 - R) + g.bz)), r1 = Math.min(g.rows - 1, Math.ceil(g.az * (z1 + R) + g.bz));
+  const writes = [];
+  for (let r = r0; r <= r1; r++) {
+    const z = (r - g.bz) / g.az;
+    for (let c = c0; c <= c1; c++) {
+      const x = (c - g.bx) / g.ax, k = r * g.cols + c;
+      if (Number.isNaN(D[k])) continue;
+      let best = null;
+      for (const sq of raise) {
+        const cs = closestOnSegment(x, z, sq.ax, sq.az, sq.bx, sq.bz);
+        if (cs.d2 < R * R && (!best || cs.d2 < best.cs.d2)) best = { sq, cs };
+      }
+      if (!best) continue;
+      const { sq, cs } = best, top = sq.at + (sq.bt - sq.at) * cs.t;
+      // 閘室の脇: 閘室の側（法線の側）の格子点はそのまま（閘室の切り抜き）
+      if (sq.lockSide && (x - cs.x) * sq.nx + (z - cs.z) * sq.nz > 0) continue;
+      if (inWater(x, z)) {
+        // 水の中: 水面より 1 m 下（岸壁の前に土の斜面を出さない）
+        const wl = T.waterLevel(x, z) - 1;
+        if (D[k] > wl + DAT) writes.push([k, wl + DAT]);
+      } else if (D[k] < top + DAT) writes.push([k, top + DAT]);
+    }
+  }
+  for (const [k, y] of writes) D[k] = y;
+  return segs.map((sq) => {
+    const wa = T.waterLevel(sq.ax, sq.az), wb = T.waterLevel(sq.bx, sq.bz);
+    return { ax: sq.ax, az: sq.az, at: sq.at, ab: wa, bx: sq.bx, bz: sq.bz, bt: sq.bt, bb: wb, nx: sq.nx, nz: sq.nz, wa: WALK_DEF, wb: WALK_DEF, stone: true };
+  });
+}
+ // 日本庭園（Jardin japonais Pierre Baudis）の池の中心のあたり
 const WATER_TILE = 6; // 波の法線マップ 1 枚の大きさ（m）
 // 利用者の写真では、晴れた日の川と運河の港は空を映して青みがかった灰色（ガロンヌ川 #3e5f86 前後、Port Saint-Sauveur
 // #5c7189〜#a0afbe）。水の色は灰緑から青灰色に寄せ、映り込みの空の青も半分ほど残す
@@ -495,7 +580,7 @@ function buildQuayWalls(list, mats, proj = null) {
     const t = hash01(Math.round(ax * 7 + az * 13), 3);
     // 石の岸壁: 石の色で、レンガの目地を横 4 倍・縦 10 倍に広げて大きな切石（約 0.9 × 0.5 m）に見せる
     // （us・vs: テクスチャの横・縦の 1 m あたり）
-    const stone = stoneAt((ax + bx) / 2, (az + bz) / 2), us = stone ? 0.06 : 0.25, vs = stone ? 0.025 : 0.25;
+    const stone = q.stone || stoneAt((ax + bx) / 2, (az + bz) / 2), us = stone ? 0.06 : 0.25, vs = stone ? 0.025 : 0.25;
     const brick = stone ? STONE_QUAY.map((c) => c * (0.95 + t * 0.1)) : BANK.brickA.map((c, j) => c * (1 - t) + BANK.brickB[j] * t);
     // 端の点の向き（手すり壁の厚さは壁の面に垂直に保つので、向きの違いの分だけ 1.6 倍まで伸ばす）
     const [aex, aez] = dirAt(ax, az) || [nx, nz], [bex, bez] = dirAt(bx, bz) || [nx, nz];
@@ -594,10 +679,12 @@ export function buildGroundBase(parsed, rect, mats, terrain = FLAT_TERRAIN, layo
     conditionRoads(T, parsed.roads, inWater);
     // ブリエンヌ運河の岸は草の土手（利用者の写真 NCM_0186）。地形の段を岸壁にしない
     const brienne = parsed.proj ? BRIENNE.line.map((ll) => parsed.proj.project(...ll)) : [];
+    const inBasin0 = parsed.proj ? lockBasinTest(parsed.proj) : () => false; // 船だまりの岸壁は lockBasinWalls
     const onBrienne = (x, z) => brienne.some((p, i) => i + 1 < brienne.length && closestOnSegment(x, z, ...p, ...brienne[i + 1]).d2 < 25 * 25);
     const quays = sharpenQuays(T, parsed.proj ? parsed.proj.project(...QUAY_LATLON) : [-250, 0], QUAY_RADIUS + 150, { inWater, paths: parsed.roads })
-      .filter((q) => !onBrienne((q.ax + q.bx) / 2, (q.az + q.bz) / 2));
-    T.setQuayWalls(parsed.proj ? quays.concat(quayLinks(quays, parsed.proj)) : quays);
+      .filter((q) => !onBrienne((q.ax + q.bx) / 2, (q.az + q.bz) / 2) && !inBasin0((q.ax + q.bx) / 2, (q.az + q.bz) / 2));
+    const basin = parsed.proj ? lockBasinWalls(T, water, parsed.proj, inWater) : [];
+    T.setQuayWalls(parsed.proj ? quays.concat(quayLinks(quays, parsed.proj), basin) : quays);
     despike(T);
   }
   if (!T.flat && T.quayWalls.length) group.add(buildQuayWalls(T.quayWalls, mats, parsed.proj));
@@ -659,6 +746,7 @@ export function buildGroundBase(parsed, rect, mats, terrain = FLAT_TERRAIN, layo
     const inJGarden = (x, z) => jg && Math.hypot(x - jg[0], z - jg[1]) < 45;
     // 閘門の閘室（monuments.js の writeLock が石の壁を作る）の岸には土手を作らない
     const locks = parsed.proj ? LOCKS.map((l) => ({ l, f: lockFrame(parsed.proj.project(...l.a), parsed.proj.project(...l.b)) })) : [];
+    const inLockBasin = parsed.proj ? lockBasinTest(parsed.proj) : () => false;
     const inLock = (x, z) => locks.some(({ l, f }) => {
       const [u, v] = f.uv(x, z);
       return u > l.from - 2 && u < f.L + 2 && Math.abs(v) < l.width / 2 + 4;
@@ -701,7 +789,7 @@ export function buildGroundBase(parsed, rect, mats, terrain = FLAT_TERRAIN, layo
       // 日本庭園の池は芝と石の自然な岸（利用者の写真 NCM_0122）
       if (a.kind === 'pond' && inJGarden(mx, mz)) return 'slope';
       if (a.kind === 'canal') {
-        if (inLock(mx, mz)) return null;
+        if (inLock(mx, mz) || inLockBasin(mx, mz)) return null; // 閘室と船だまりの岸は monuments.js・岸壁（lockBasinWalls）
         if (a.tags.water !== 'canal' || nearBridge(mx, mz, 14) || inPort(mx, mz)) return 'wall';
         if (inBrienne(mx, mz)) return 'slope';
         // 岸の形は 500 m ほどの区間ごとに（両岸で別々に決まる）
