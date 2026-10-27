@@ -125,8 +125,9 @@ const FIXED_WALLS = [
 // 地下鉄の出入口・植え込みの縁・日よけ）。中点がこの名前の地図の多角形の中にある塀を除く
 const WALL_FREE = /^(Square Charles de Gaulle|Place du Capitole)$/i;
 // 塀のない円 [緯度, 経度, 半径 m]（利用者のストリートビュー 210837: Route de Bayonne のマクドナルドの敷地は低い植え込みの島の
-// 駐車場で、LiDAR で見つかる塀は生け垣と車止め）
-const WALL_FREE_DISCS = [[43.60828, 1.39535, 40]];
+// 駐車場で、LiDAR で見つかる塀は生け垣と車止め。利用者の写真 NCM_0101: メディアテークの南の小さな広場は開けた舗装で、
+// LiDAR で見つかる短い高い塀は街灯・植え込み）
+const WALL_FREE_DISCS = [[43.60828, 1.39535, 40], [43.609749, 1.455105, 22]];
 export function clearNamedAreas(segs, areas, proj = null) {
   const rings = areas.filter((a) => WALL_FREE.test(a.name || '')).map((a) => a.outer);
   const discs = proj ? WALL_FREE_DISCS.map(([lat, lon, r]) => [...proj.project(lat, lon), r]) : [];

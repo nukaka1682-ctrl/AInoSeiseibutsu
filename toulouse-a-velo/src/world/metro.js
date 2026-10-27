@@ -39,11 +39,16 @@ const C = {
 };
 const RAMP_PORTAL_H = 2.3; // 駐車場のトンネルの口の高さ（m。高さ制限 2 m 前後）
 
+// 写真・航空写真で直す出入口の幅 [緯度, 経度, 幅 m]（地形モデルの穴が隣の植え込みとつながって広く見つかった所）。
+// キャピトル（Square Charles-de-Gaulle の東の縁。利用者のストリートビュー 211839・航空写真）: 階段の吹き抜けは幅約 5.5 m
+const ENTRANCE_WIDTHS = [[43.6046415, 1.4454812, 5.5]];
 // 事前取得の出入口（緯度経度）をローカル座標に。len・wid は扱える範囲に収める
 export function projectEntrances(list, proj) {
   return (list || []).map((e) => {
     const [x, z] = proj.project(e.lat, e.lon);
     const parking = e.kind === 'parking';
+    const fix = ENTRANCE_WIDTHS.find(([lat, lon]) => Math.abs(lat - e.lat) < 2e-6 && Math.abs(lon - e.lon) < 2e-6);
+    if (fix) e = { ...e, wid: fix[2] };
     return {
       kind: parking ? 'parking' : 'metro', station: e.station, name: e.name, x, z, ang: e.ang, down: e.down >= 0 ? 1 : -1,
       len: Math.min(parking ? 40 : 30, Math.max(6, e.len)), wid: Math.min(parking ? 12 : 9, Math.max(2.8, e.wid)), depth: e.depth,
