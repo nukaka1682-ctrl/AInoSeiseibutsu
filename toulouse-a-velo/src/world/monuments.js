@@ -1938,15 +1938,15 @@ function writeBasilica(m, W, groundAt) {
   for (let k = 0; k < 5; k++) {
     const t = -H + ((k + 0.5) / 5) * Math.PI, [c, sn] = dir(t);
     const ou = sA + c * (rAm + 0.6), ov = sn * (rAm + 0.6);
-    arc(ou, ov, 3, t - H, t + H, 8, 8);
-    cone(ou, ov, 3, t - H, t + H, 8, 10.2, 8);
+    arc(ou, ov, 3, t - H, t + H, 8, 12);
+    cone(ou, ov, 3, t - H, t + H, 8, 10.2, 12); // 12 に分けて半円錐に見せる（8 では角錐に見えた）
     for (const dt of [-0.75, 0, 0.75]) {
       const [cw, sw] = dir(t + dt);
       win(P2(ou + cw * 3, ov + sw * 3), T([cw, sw]), T([-sw, cw]), 3.0, 3.0, 0.85);
     }
     // 周歩廊の、礼拝堂の屋根の上の窓
     win(P2(sA + c * rAm, sn * rAm), T([c, sn]), T([-sn, c]), 10.5, 2.2, 1.0);
-    band(ou, ov, 3.06, t - H, t + H, 7.5, 7.8, 8);
+    band(ou, ov, 3.06, t - H, t + H, 7.5, 7.8, 12);
   }
   // 周歩廊の、礼拝堂のあいだの窓と、白い石の帯
   for (let k = 1; k < 5; k++) {
