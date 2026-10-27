@@ -250,3 +250,21 @@ test('メトロ Jean-Jaurès のエレベーターの小屋: 1 つ、ガラス�
   const { colliders } = buildMonuments(list, {}, { groundAt: () => 0 });
   assert.equal(colliders.length, 4);
 });
+
+test('Purpan の病院の門: 塀はアーチの所であいていて、門柱と柵に当たり判定', () => {
+  const proj = new LocalProjection(43.6081, 1.3977);
+  const [px, pz] = proj.project(43.608147, 1.397792);
+  const porch = { id: 1, tags: {}, info: { area: 21, height: 2.2 }, inside: [px, pz], outer: [[px - 2, pz - 3], [px + 2, pz - 3], [px + 2, pz + 3], [px - 2, pz + 3]], holes: [], bounds: { minX: px - 2, minZ: pz - 3, maxX: px + 2, maxZ: pz + 3 } };
+  const list = findMonuments(proj, { buildings: [porch], areas: [], roads: [], bounds: null }).filter((m) => m.kind === 'hgate');
+  assert.equal(list.length, 1);
+  assert.deepEqual(list[0].replaced, [porch]); // アーチの小屋はモデルで描く
+  const { colliders } = buildMonuments(list, {}, { groundAt: () => 0 });
+  // 塀の当たり判定は 2 本（アーチの通り抜けの両側）、門柱 2 本 × 4 辺、柵 1 本
+  assert.equal(colliders.length, 2 + 8 + 1);
+  const [cx, cz] = list[0].arch;
+  const wall = colliders.slice(0, 2);
+  for (const [x0, z0, x1, z1] of wall) {
+    const t = ((cx - x0) * (x1 - x0) + (cz - z0) * (z1 - z0)) / ((x1 - x0) ** 2 + (z1 - z0) ** 2);
+    assert.ok(t < 0 || t > 1, 'アーチの中心は塀の当たり判定の外');
+  }
+});

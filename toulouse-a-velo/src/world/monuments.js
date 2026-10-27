@@ -62,6 +62,13 @@ export const MONUMENTS = [
   // サン・シプリアンの入市税の門の小屋（Pavillons de l'octroi。利用者のストリートビュー 2026-10-02 210226、航空写真）:
   // Place Intérieure Saint-Cyprien の西の端、噴水のロータリーの両脇に、淡い石の小さな平屋（約 6 m 四方）。正面は広場（東）を向き、
   // 三角の破風と頂の壺の飾り。at: 2 つの小屋の真ん中、face: 正面が向く点
+  // Purpan の病院の門（利用者のストリートビュー 225754）: 入口の道の両脇の白い飾りの門柱と淡い緑の鉄の柵、道の南の
+  // 平屋の高さのクリーム色の漆喰の長い塀（四角い開口が並び、上は瓦）。北の端に赤レンガの半円アーチの通り抜けと、
+  // 木の持ち送りの小さな瓦の切妻のひさし。位置は航空写真・IGN の建物（アーチの小屋）
+  {
+    id: 'purpan-porte', kind: 'hgate', wall: [[43.608181, 1.397792], [43.607916, 1.397792]], arch: [43.608147, 1.397792], face: [43.608, 1.3970],
+    pillars: [[43.608092, 1.397657], [43.608162, 1.397637]], railing: [[43.608162, 1.397637], [43.608257, 1.39756]],
+  },
   // メトロ Jean-Jaurès のエレベーターのガラスの小屋（利用者のストリートビュー 212318: Allées Roosevelt の側の階段の出入口の脇、
   // 金属の枠のガラスの箱に平らな屋根と黄色い M の看板。位置は航空写真）
   { id: 'ascenseur-jean-jaures', kind: 'lift', at: [[43.60567, 1.448614]], face: [43.6060, 1.4490], size: [2.6, 2.6], h: 3.1 },
@@ -480,6 +487,13 @@ export function findMonuments(proj, { buildings = [], areas = [], facade = null,
       if (!inB((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)) continue;
       const water = areas.find((q) => q.type === 'water' && pointInPolygon((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, q));
       out.push({ spec, kind: 'lock', a, b, width: spec.width, from: spec.from, area: water || null, replaced: [] });
+    } else if (spec.kind === 'hgate') {
+      const [ax, az] = proj.project(...spec.wall[0]), [bx, bz] = proj.project(...spec.wall[1]);
+      if (!inB((ax + bx) / 2, (az + bz) / 2)) continue;
+      const [cx, cz] = proj.project(...spec.arch), [fx, fz] = proj.project(...spec.face);
+      // アーチの小屋（IGN の小さな建物）はこのモデルで描く
+      const replaced = buildings.filter((b) => b.info.area < 40 && Math.hypot(b.inside[0] - cx, b.inside[1] - cz) < 5);
+      out.push({ spec, kind: 'hgate', a: [ax, az], b: [bx, bz], arch: [cx, cz], face: [fx, fz], pillars: spec.pillars.map((ll) => proj.project(...ll)), railing: spec.railing.map((ll) => proj.project(...ll)), replaced });
     } else if (spec.kind === 'pavilion' || spec.kind === 'lift') {
       const [fx, fz] = proj.project(...spec.face);
       for (const ll of spec.at) {
@@ -650,6 +664,7 @@ export function monumentClearance(list, proj = null) {
     if (m.kind === 'roundabout') circles.push([m.x, m.z, m.radius + 0.5]); // 島の木は島のモデルで描く
     if (m.kind === 'statue') circles.push([m.x, m.z, 6]);
     if (m.kind === 'pavilion') circles.push([m.x, m.z, 5]);
+    if (m.kind === 'hgate') circles.push([...m.arch, 5], ...m.pillars.map(([x, z]) => [x, z, 3]));
     if (m.kind === 'lift') circles.push([m.x, m.z, 3]);
   }
   // 木を植えない帯: 線 a → b の川の側に depth m。オテル・デューの川側の正面の前（利用者の写真 NCM_0107・0136:
@@ -2334,6 +2349,98 @@ function writePavilion(m, W, groundAt, colliders) {
   for (let i = 0; i < 4; i++) colliders.push([...C[i], ...C[(i + 1) % 4]]);
 }
 
+// ---- 病院の門: 長い塀（四角い開口・瓦の笠）と北の端のレンガのアーチの通り抜け・瓦のひさし、門柱と鉄の柵
+function writeHospitalGate(m, W, groundAt, colliders) {
+  const w = W.main;
+  const RENDER = col('#e4d8bd'), SHADE = col('#d4c6a8'), TILE = col('#b0644a'), BRICK = [col('#a9563e'), col('#b8654a')], WOOD = col('#5b4030'), PILLAR = col('#ece7da'), GREEN = col('#a7cfbb');
+  const [ax, az] = m.a, [bx, bz] = m.b, L = Math.hypot(bx - ax, bz - az);
+  const u = [(bx - ax) / L, (bz - az) / L];
+  let n = [-u[1], u[0]];
+  if ((m.face[0] - ax) * n[0] + (m.face[1] - az) * n[1] < 0) n = [-n[0], -n[1]]; // 表（道の側）
+  const P2 = (s, t) => [ax + u[0] * s + n[0] * t, az + u[1] * s + n[1] * t];
+  let y0 = Infinity;
+  for (let s = 0; s <= L; s += 2) y0 = Math.min(y0, groundAt(...P2(s, 0)));
+  const T = 0.5, H = 3.6, HG = 5.0; // 塀の厚さ・高さ、アーチの所の高さ
+  // 塀の一片（s0〜s1、高さ ya〜yb）
+  const piece = (s0, s1, ya, yb, c = RENDER) => {
+    const p = P2((s0 + s1) / 2, 0);
+    box(w, [p[0], y0 + (ya + yb) / 2, p[1]], [u[0] * (s1 - s0) / 2, 0, u[1] * (s1 - s0) / 2], [0, (yb - ya) / 2, 0], [n[0] * T / 2, 0, n[1] * T / 2], c);
+  };
+  const sa = (m.arch[0] - ax) * u[0] + (m.arch[1] - az) * u[1]; // アーチの中心
+  const R = 1.6, SPRING = 2.3, PW = 1.2; // アーチの半径・起拱点の高さ・脇の柱の幅
+  // アーチの部分: 両脇の柱、アーチの上の壁（縦の細い帯で半円の開口を作る）、レンガの迫石の輪
+  piece(sa - R - PW, sa - R, -0.3, HG);
+  piece(sa + R, sa + R + PW, -0.3, HG);
+  const NS = 16;
+  for (let k = 0; k < NS; k++) {
+    const x0 = -R + (2 * R * k) / NS, x1 = -R + (2 * R * (k + 1)) / NS, xm = (x0 + x1) / 2;
+    piece(sa + x0, sa + x1, SPRING + Math.sqrt(Math.max(0, R * R - xm * xm)), HG);
+  }
+  for (let k = 0; k < 15; k++) {
+    const t0 = Math.PI - (Math.PI * k) / 15, t1 = Math.PI - (Math.PI * (k + 1)) / 15, tm = (t0 + t1) / 2;
+    const r = R + 0.18, cxp = sa + Math.cos(tm) * r, cy = SPRING + Math.sin(tm) * r;
+    const p = P2(cxp, 0), half = (R * (t0 - t1)) / 2 + 0.03;
+    box(w, [p[0], y0 + cy, p[1]], [u[0] * -Math.sin(tm) * half, Math.cos(tm) * half, u[1] * -Math.sin(tm) * half], [u[0] * Math.cos(tm) * 0.2, Math.sin(tm) * 0.2, u[1] * Math.cos(tm) * 0.2], [n[0] * (T / 2 + 0.03), 0, n[1] * (T / 2 + 0.03)], BRICK[k % 2]);
+  }
+  // 瓦の切妻のひさし（表へ 1.4 m）と木の持ち送り
+  {
+    const hw = R + PW, eave = HG - 0.9, ridge = HG + 0.1, out = 1.4;
+    const Q = (s, t, y) => { const p = P2(sa + s, t); return [p[0], y0 + y, p[1]]; };
+    for (const sd of [-1, 1]) {
+      const nrm = [u[0] * sd * 0.7, 0.7, u[1] * sd * 0.7];
+      w.quad(Q(sd * hw, T / 2, eave), Q(sd * hw, out, eave), Q(0, out, ridge), Q(0, T / 2, ridge), nrm, PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, TILE);
+      w.quad(Q(0, T / 2, ridge), Q(0, out, ridge), Q(sd * hw, out, eave), Q(sd * hw, T / 2, eave), [-nrm[0], -nrm[1], -nrm[2]], PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, WOOD);
+    }
+    vpoly(w, P2(sa, out), u, [[-hw, y0 + eave], [hw, y0 + eave], [0, y0 + ridge]], [n[0], 0, n[1]], SHADE);
+    for (const sd of [-1, 1]) {
+      const p = P2(sa + sd * (hw - 0.25), out / 2 + T / 4);
+      box(w, [p[0], y0 + eave - 0.35, p[1]], [n[0] * (out / 2), -0.3, n[1] * (out / 2)], [0, 0.07, 0], [u[0] * 0.07, 0, u[1] * 0.07], WOOD);
+    }
+  }
+  // 長い塀: アーチの北は無地、南は 3.4 m おきに四角い開口（幅 1.7 m・高さ 1.2〜2.8 m）
+  piece(0, sa - R - PW, -0.3, H);
+  let s = sa + R + PW;
+  const winW = 1.7;
+  while (s < L - 0.5) {
+    const s1 = Math.min(L, s + 3.4);
+    const w0 = s + (s1 - s - winW) / 2;
+    if (s1 - s > winW + 0.8) {
+      piece(s, w0, -0.3, H);
+      piece(w0, w0 + winW, -0.3, 1.2);
+      piece(w0, w0 + winW, 2.8, H);
+      piece(w0 + winW, s1, -0.3, H);
+    } else piece(s, s1, -0.3, H);
+    s = s1;
+  }
+  // 瓦の笠
+  const cap = (s0, s1, yb) => {
+    const p = P2((s0 + s1) / 2, 0);
+    box(w, [p[0], y0 + yb + 0.08, p[1]], [u[0] * (s1 - s0) / 2, 0, u[1] * (s1 - s0) / 2], [0, 0.08, 0], [n[0] * (T / 2 + 0.12), 0, n[1] * (T / 2 + 0.12)], TILE);
+  };
+  cap(0, sa - R - PW, H);
+  cap(sa + R + PW, L, H);
+  cap(sa - R - PW, sa + R + PW, HG);
+  colliders.push([...P2(0, 0), ...P2(sa - R, 0)], [...P2(sa + R, 0), ...P2(L, 0)]);
+  // 白い飾りの門柱（台座・柱・張り出した笠と丸い頂）
+  for (const [px, pz] of m.pillars) {
+    const g = groundAt(px, pz);
+    box(w, [px, g + 0.25, pz], [0.55, 0, 0], [0, 0.25, 0], [0, 0, 0.55], PILLAR);
+    box(w, [px, g + 1.9, pz], [0.4, 0, 0], [0, 1.4, 0], [0, 0, 0.4], PILLAR);
+    box(w, [px, g + 3.38, pz], [0.52, 0, 0], [0, 0.1, 0], [0, 0, 0.52], PILLAR);
+    cylinder(w, px, pz, 0.32, 0.12, g + 3.48, g + 4.0, { seg: 12, color: PILLAR });
+    colliders.push([px - 0.4, pz - 0.4, px + 0.4, pz - 0.4], [px + 0.4, pz - 0.4, px + 0.4, pz + 0.4], [px + 0.4, pz + 0.4, px - 0.4, pz + 0.4], [px - 0.4, pz + 0.4, px - 0.4, pz - 0.4]);
+  }
+  // 淡い緑の鉄の柵（上と下の横棒、0.14 m おきの縦棒）
+  for (let i = 0; i + 1 < m.railing.length; i++) {
+    const [x0, z0] = m.railing[i], [x1, z1] = m.railing[i + 1], RL = Math.hypot(x1 - x0, z1 - z0);
+    const e = [(x1 - x0) / RL, (z1 - z0) / RL], q = [-e[1], e[0]];
+    const g = Math.min(groundAt(x0, z0), groundAt(x1, z1));
+    for (const y of [0.15, 1.95]) box(w, [(x0 + x1) / 2, g + y, (z0 + z1) / 2], [e[0] * RL / 2, 0, e[1] * RL / 2], [0, 0.03, 0], [q[0] * 0.03, 0, q[1] * 0.03], GREEN);
+    for (let t = 0.5; t < RL - 0.3; t += 0.14) box(w, [x0 + e[0] * t, g + 1.05, z0 + e[1] * t], [e[0] * 0.012, 0, e[1] * 0.012], [0, 0.95, 0], [q[0] * 0.012, 0, q[1] * 0.012], GREEN);
+    colliders.push([x0, z0, x1, z1]);
+  }
+}
+
 // ---- メトロのエレベーターの小屋: 細い灰色の金属の枠のガラスの箱、張り出した平らな屋根、屋根の上の黄色い M の看板
 function writeLift(m, W, groundAt, colliders) {
   const { x, z, f, h: H } = m, [wd, dp] = m.size, a = wd / 2, b = dp / 2;
@@ -2534,7 +2641,7 @@ function writeStatue(m, W, groundAt, colliders, onRoad, keepOut) {
   keepOut.push([x, z, 6]);
 }
 
-const WRITERS = { lift: writeLift, pavilion: writePavilion, lock: writeLock, equestrian: writeEquestrian, wallFountain: writeWallFountain, capitainerie: writeCapitainerie, moorings: writeMoorings, riverfront: writeRiverfront, arcades: writeArcades, choir: writeChoir, ramblas: writeRamblas, basilica: writeBasilica, island: writeIsland, roundabout: writeRoundabout, portico: writePortico, donjon: writeDonjon, statue: writeStatue, dome: writeDome, chateau: writeChateau, stadium: writeStadium, cabanis: writeCabanis, coq: writeCoq, cross: writeCross, fastfood: writeFastfood, jgarden: writeJgarden, parterre: writeParterre };
+const WRITERS = { hgate: writeHospitalGate, lift: writeLift, pavilion: writePavilion, lock: writeLock, equestrian: writeEquestrian, wallFountain: writeWallFountain, capitainerie: writeCapitainerie, moorings: writeMoorings, riverfront: writeRiverfront, arcades: writeArcades, choir: writeChoir, ramblas: writeRamblas, basilica: writeBasilica, island: writeIsland, roundabout: writeRoundabout, portico: writePortico, donjon: writeDonjon, statue: writeStatue, dome: writeDome, chateau: writeChateau, stadium: writeStadium, cabanis: writeCabanis, coq: writeCoq, cross: writeCross, fastfood: writeFastfood, jgarden: writeJgarden, parterre: writeParterre };
 
 // 名所のモデルを作る。colliders: 足す当たり判定の円 [x, z, r] か線分 [ax, az, bx, bz]、
 // keepOut: 街の小物を置かない円 [x, z, r]（像の台・シャトー・ドーの柵の内側。monumentSolid）
