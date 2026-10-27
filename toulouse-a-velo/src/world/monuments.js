@@ -631,6 +631,9 @@ export function findMonuments(proj, { buildings = [], areas = [], facade = null,
   return out;
 }
 
+// 木を植えない帯（monumentClearance）。a・b: オテル・デューの川側の正面の南と北の端（帯は a → b の向きの (−t_z, t_x) の側）
+const TREELESS_BANDS = [{ a: [43.599373, 1.437639], b: [43.600559, 1.436138], depth: 40 }];
+
 // 木を植えない所（像・塔のまわり）
 // proj: あれば、タイルの外の名所の所も（隣のタイルの木を名所の前に植えない）
 export function monumentClearance(list, proj = null) {
@@ -644,11 +647,16 @@ export function monumentClearance(list, proj = null) {
     if (m.kind === 'statue') circles.push([m.x, m.z, 6]);
     if (m.kind === 'pavilion') circles.push([m.x, m.z, 5]);
   }
-  // オテル・デューの川側の壁の前（壁から 14 m）には植えない（利用者の写真 NCM_0107・0136: 壁は水際から立ち、前に木はない）
-  const bands = list.filter((m) => m.kind === 'riverfront').map((m) => ({ p: m.p, t: [(m.q[0] - m.p[0]) / m.L, (m.q[1] - m.p[1]) / m.L], n: m.n, L: m.L }));
-  const inBand = (x, z) => bands.some(({ p, t, n, L }) => {
+  // 木を植えない帯: 線 a → b の川の側に depth m。オテル・デューの川側の正面の前（利用者の写真 NCM_0107・0136:
+  // 壁は水際から立ち、前に木はない）
+  const bands = proj ? TREELESS_BANDS.map(({ a, b, depth }) => {
+    const p = proj.project(...a), q = proj.project(...b), L = Math.hypot(q[0] - p[0], q[1] - p[1]) || 1;
+    const t = [(q[0] - p[0]) / L, (q[1] - p[1]) / L];
+    return { p, t, n: [-t[1], t[0]], L, depth };
+  }) : [];
+  const inBand = (x, z) => bands.some(({ p, t, n, L, depth }) => {
     const dx = x - p[0], dz = z - p[1], u = dx * t[0] + dz * t[1], v = dx * n[0] + dz * n[1];
-    return u > -4 && u < L + 4 && v > -1 && v < 14;
+    return u > -4 && u < L + 4 && v > -2 && v < depth;
   });
   // 中庭の刈り込んだ木は専用の形で描くので、地形モデルの木（丸い樹冠）は植えない。日本庭園の枯山水の砂利の面にも
   // 植えない（利用者の写真 NCM_0117: 砂利の面には石組みのそばの小さな松だけ）
