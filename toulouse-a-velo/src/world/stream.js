@@ -215,7 +215,7 @@ class TileStreamer {
     // 地形: タイルの地面（地面の覆いは同じ三角形に描く）
     const tile = T.flat ? null : buildTerrainTile(T, B, this.groundMats, { quayCentre: this.quayCentre, inWater: this.inWater });
     if (tile) ground.group.add(tile.group);
-    const lowQuay = (x, z) => this.inGreySquare(x, z) || (T.quayBelow?.(x, z, 25)?.drop ?? 0) > 2; // 岸壁の下の段（石の板の河岸）と灰色の広場
+    const lowQuay = (x, z) => this.inGreySquare(x, z) || (T.quayBelow?.(x, z, 40)?.drop ?? 0) > 2; // 岸壁の下の段（石の板の河岸）と灰色の広場
     if (data.cover) ground.group.add(buildCoverMesh(data.cover, B, this.groundMats.cover, this.inOldTown, this.parsed, tile?.geometry, lowQuay));
     group.add(ground.group);
     await pause();
