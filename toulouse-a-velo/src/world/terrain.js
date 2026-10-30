@@ -122,6 +122,7 @@ export class Terrain {
     this.deckGrid = new Grid(40);
     this.deckSegs = [];
     this.areaLevels = new WeakMap();
+    this.levelOverride = null; // (x, z) => 水面の高さ y（決まった所だけ。ほかは null。ground.js の buildGroundBase）
     // 地面の格子の線（ローカル座標での間隔）
     const g = this.near;
     this.cellX = 1 / g.ax;
@@ -243,6 +244,8 @@ export class Terrain {
 
   // 水面の高さ（y）。水面の格子（20 m ごと、地形モデルの川の上の平らな値）から。area: 水域（あれば、格子の外の池の高さに使う）
   waterLevel(x, z, area = null) {
+    const o = this.levelOverride?.(x, z);
+    if (o != null) return o;
     const g = this.level;
     if (g) {
       const L = bilinear(g, g.ax * x + g.bx, g.az * z + g.bz);

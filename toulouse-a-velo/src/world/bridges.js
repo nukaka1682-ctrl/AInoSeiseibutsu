@@ -6,10 +6,11 @@
 //   白い石の迫石とレンガが交互のアーチの輪、橋脚の上を貫く丸い穴（デグロワール、直径約 4 m、石の縁取り）、
 //   橋脚の下の低い石の台、両側の欄干の白鳥の首の街灯（吊り下げの灯具 1 つ、25〜30 m おき）、淡い花崗岩の板の歩道。
 // - 近代の橋（ポン・サン・ピエール、ポン・サン・ミシェル、歩道橋、高速道路など、石の橋の一覧にないもの）: 薄いコンクリートの桁と細い橋脚。
-// - 浅い水（運河）や道路の上の橋: 平らな橋（側面と底）。
+// - 浅い水（運河）を渡る橋: 平らな橋（側面と底）。陸の上（道路・線路を越える）の橋: 高速道路を含めば厚いコンクリートの桁の高架
+//   （上下線の way ごとの桁）、ほかは薄いコンクリートの桁。どちらも縁に鉄の手すり。
 // 橋の側面は、橋の軸に沿った距離 s と高さ y の 2 次元で組み立てて、橋の折れ線に沿って 3D に置く。
 // 車道の橋に歩道の橋が並ぶ（別の way）ときは、いちばん主要な way（親）が並んだ way の分まで幅を広げて橋の本体を作り、
-// 並んだ way は橋面と欄干だけを作る（アーチや橋脚が重ならないように）。
+// 並んだ way は橋面と欄干だけを作る（アーチや橋脚が重ならないように。陸の上の高架だけは way ごとに桁を作る）。
 import * as THREE from 'three';
 import { MeshWriter } from './meshwriter.js';
 import { CAR_ROADS } from './parse.js';
@@ -446,19 +447,25 @@ export function setupDecks(terrain, roads, proj, waterDepthAt = () => 0) {
 
 // 陸の上の高速道路の高架の下をくぐる車道の両脇の擁壁（ユーザーのストリートビュー: A620 の下の Grande-Bretagne 通りは、
 // 盛り土を支える淡いコンクリートの垂直な壁に赤い帯）。高架と交わる車道に沿って、交わる所から前後 ABUT_REACH m まで
-// ABUT_STEP m ごとに道の縁から外へ地面を測り、道より 1 m 以上高くなる所（盛り土の斜面）があれば、その手前の足元に盛り土の上
-// （その先 10 m の最高）までの壁を立てる（道より ABUT_RISE m 以上高い所だけ）。ほかの道（盛り土を上る坂・階段）を横切る壁は捨てる。
-// 返り値: [{ ax, az, at, ab, bx, bz, bt, bb, nx, nz }]（at/ab: 上端・下端の y。n: 道の側に向く水平の向き）
+// ABUT_STEP m ごとに道の縁から外へ地面を測り、道より 1 m 以上高くなる所（盛り土の斜面）があれば、その手前（道の縁から歩道の幅
+// ABUT_WALK m 以上外）に盛り土の上（その先 10 m の最高）までの壁を立てる（道より ABUT_RISE m 以上高い所だけ）。ほかの道
+// （盛り土を上る坂・階段）を横切る壁・ほかの車道の上に立つ壁は捨てる。
 // 利用者のストリートビュー 210711: 擁壁は高架の下の短い橋台だけで、その手前は木と草の盛り土の斜面
-const ABUT_REACH = 30, ABUT_STEP = 2, ABUT_RISE = 1.8;
-export function abutmentWalls(terrain, roads, waterDepthAt = () => 0) {
-  if (!terrain || terrain.flat || !terrain.deck) return [];
+// 地形の手直し（conditionUnderpasses、ground.js の buildGroundBase）で壁を決め、5 m の格子では垂直の段を表せないので、岸壁と同じく
+// 壁は低い側の格子点の上に立てる: 壁の前と壁の裏 1 マス（UNDER_BACK m）の格子点を道の高さに下げ、その先 6 m を盛り土の上の高さに
+// そろえる（壁の裏の斜面は道からは壁に隠れて見えない）。利用者の Street View 225619: A620 の下は両側とも歩道の先に垂直の壁
+// （地形モデルは高架の下の地面を補間するので、道の端から斜面になり、車道が横に傾いて壁が斜面の途中に立っていた）
+// 返り値: [{ ax, az, at, ab, bx, bz, bt, bb, nx, nz }]（at/ab: 上端・下端の y。n: 道の側に向く水平の向き）
+const ABUT_REACH = 30, ABUT_STEP = 2, ABUT_RISE = 1.8, ABUT_WALK = 1.5, UNDER_BACK = 5.5, BRIDGE_END = 12;
+function findUnderpassWalls(terrain, roads, inWater) {
+  // 高架（両端の地面が交わる道より 3 m 以上高い高速道路の橋）の線
   const og = new Grid(50), osegs = [];
   for (const r of roads) {
     if (!r.bridge || r.tunnel || !MOTOR_TYPES.has(r.type)) continue;
+    const endY = Math.min(terrain.h(...r.pts[0]), terrain.h(...r.pts[r.pts.length - 1]));
     for (let i = 0; i + 1 < r.pts.length; i++) {
       og.insertSegment(...r.pts[i], ...r.pts[i + 1], osegs.length);
-      osegs.push([...r.pts[i], ...r.pts[i + 1]]);
+      osegs.push([...r.pts[i], ...r.pts[i + 1], endY]);
     }
   }
   if (!osegs.length) return [];
@@ -470,23 +477,30 @@ export function abutmentWalls(terrain, roads, waterDepthAt = () => 0) {
       segs.push([r, ...r.pts[i], ...r.pts[i + 1]]);
     }
   }
-  const out = [];
+  // ほかの車道（並ぶ上下線の車道）の上か
+  const onOtherCarriageway = (x, z, road) => {
+    let hit = false;
+    all.queryPoint(x, z, 20, (k) => {
+      const [r, cx, cz, dx, dz] = segs[k];
+      if (!hit && r !== road && !r.bridge && CAR_ROADS.has(r.type) && closestOnSegment(x, z, cx, cz, dx, dz).d2 < (r.width / 2 + 0.5) ** 2) hit = true;
+    });
+    return hit;
+  };
+  const walls = [];
   for (const road of roads) {
     if (!CAR_ROADS.has(road.type) || road.bridge || road.tunnel || road.pts.length < 2) continue;
     const fr = polyFrame(road.pts);
-    // 高架と交わる所（道からの距離 s）。橋面が道より 3 m 以上高いものだけ
+    // 高架と交わる所（道からの距離 s）
     const hits = [];
     for (let i = 0; i + 1 < road.pts.length; i++) {
       const [ax, az] = road.pts[i], [bx, bz] = road.pts[i + 1];
       og.query(Math.min(ax, bx), Math.min(az, bz), Math.max(ax, bx), Math.max(az, bz), (k) => {
-        const [cx, cz, dx, dz] = osegs[k];
+        const [cx, cz, dx, dz, endY] = osegs[k];
         if (!segmentsCross(ax, az, bx, bz, cx, cz, dx, dz)) return;
         const den = (bx - ax) * (dz - cz) - (bz - az) * (dx - cx);
         if (Math.abs(den) < 1e-9) return;
         const t = ((cx - ax) * (dz - cz) - (cz - az) * (dx - cx)) / den;
-        const x = ax + (bx - ax) * t, z = az + (bz - az) * t;
-        const D = terrain.deck(x, z);
-        if (D != null && D - terrain.h(x, z) > 3) hits.push(fr.cum[i] + t * Math.hypot(bx - ax, bz - az));
+        if (endY - terrain.h(ax + (bx - ax) * t, az + (bz - az) * t) > 3) hits.push(fr.cum[i] + t * Math.hypot(bx - ax, bz - az));
       });
     }
     if (!hits.length) continue;
@@ -501,7 +515,7 @@ export function abutmentWalls(terrain, roads, waterDepthAt = () => 0) {
         const tops = run.map((p, i) => (run[Math.max(0, i - 1)].top + p.top + run[Math.min(run.length - 1, i + 1)].top) / 3);
         for (let i = 0; i + 1 < run.length; i++) {
           const A = run[i], B = run[i + 1];
-          out.push({ ax: A.x, az: A.z, at: tops[i], ab: A.bot, bx: B.x, bz: B.z, bt: tops[i + 1], bb: B.bot, nx: A.nx, nz: A.nz, road });
+          walls.push({ ax: A.x, az: A.z, at: tops[i], ab: A.y0 - 0.3, bx: B.x, bz: B.z, bt: tops[i + 1], bb: B.y0 - 0.3, nx: A.nx, nz: A.nz, road });
         }
         run.length = 0;
       };
@@ -510,37 +524,35 @@ export function abutmentWalls(terrain, roads, waterDepthAt = () => 0) {
         prev = s;
         const [x, z] = fr.at(road.pts, s), [ux, uz] = fr.tangent(fr.locate(s)[0]);
         const nx = -uz * sd, nz = ux * sd, y0 = terrain.h(x, z);
-        if (waterDepthAt(x, z) > 0) {
+        if (inWater(x, z)) {
           flush();
           continue;
         }
-        let foot = hw + 0.5, rise = 0;
+        let rise = 0;
         for (let d = hw + 0.5; d <= hw + 25; d += 0.5) {
-          const y = terrain.h(x + nx * d, z + nz * d) - y0;
-          if (y < 0.4) foot = d;
-          else if (y > 1) {
+          if (terrain.h(x + nx * d, z + nz * d) - y0 > 1) {
             rise = d;
             break;
           }
         }
         let top = -Infinity;
         if (rise) for (let d = rise; d <= rise + 10; d += 1) top = Math.max(top, terrain.h(x + nx * d, z + nz * d));
-        if (!rise || top - y0 < ABUT_RISE) {
+        const dw = Math.max(hw + ABUT_WALK, rise - 1), px = x + nx * dw, pz = z + nz * dw;
+        if (!rise || top - y0 < ABUT_RISE || onOtherCarriageway(px, pz, road)) {
           flush();
           continue;
         }
-        const px = x + nx * foot, pz = z + nz * foot;
-        run.push({ x: px, z: pz, top, bot: terrain.h(px, pz) - 0.3, nx: -nx, nz: -nz });
+        run.push({ x: px, z: pz, y0, top, nx: -nx, nz: -nz });
       }
       flush();
     }
   }
-  // ほかの道（盛り土を上る坂・階段・歩道）を横切る壁は捨てる
-  return out.filter((w) => {
+  // ほかの道（盛り土を上る坂・階段・歩道）を横切る壁は捨てる（頭の上を渡る橋は除く）
+  return walls.filter((w) => {
     let hit = false;
     all.query(Math.min(w.ax, w.bx), Math.min(w.az, w.bz), Math.max(w.ax, w.bx), Math.max(w.az, w.bz), (k) => {
       const [r, cx, cz, dx, dz] = segs[k];
-      if (!hit && r !== w.road && segmentsCross(w.ax, w.az, w.bx, w.bz, cx, cz, dx, dz)) hit = true;
+      if (!hit && r !== w.road && !r.bridge && segmentsCross(w.ax, w.az, w.bx, w.bz, cx, cz, dx, dz)) hit = true;
     });
     // 壁の裏（盛り土の側）のすぐそばを別の車道が壁の足元と同じ高さで通るなら、そこは盛り土ではなく分離帯（上下線の分かれた通りの
     // 真ん中。利用者のストリートビュー 225619: Grande-Bretagne 通りの高架の下に、車線のあいだの壁はない）
@@ -557,6 +569,70 @@ export function abutmentWalls(terrain, roads, waterDepthAt = () => 0) {
     delete w.road;
     return !hit;
   });
+}
+export function conditionUnderpasses(terrain, roads, inWater = () => false) {
+  if (!terrain || terrain.flat || !terrain.near) return [];
+  const kept = findUnderpassWalls(terrain, roads, inWater);
+  // 格子点: 壁の前（3 m まで）と壁の裏 UNDER_BACK m を道の高さに下げ、その裏 6 m を壁の上端までそろえる。壁の裏の車道
+  // （盛り土の上を通る道。conditionRoads の重み 1）は触らない。下げる方を後に書く（道の側を平らに保つ）
+  const g = terrain.near, D = g.data, DAT = terrain.datum, roadW = terrain.roadW;
+  // 橋の端のまわり（BRIDGE_END m）も触らない（橋面の縦断面は端の地面の高さに合わせるので、壁の裏を下げると高架が下りてくる）
+  const ends = new Grid(30);
+  for (const r of roads) if (r.bridge && r.pts.length >= 2) for (const p of [r.pts[0], r.pts[r.pts.length - 1]]) ends.insertPoint(p[0], p[1], p);
+  const nearEnd = (x, z) => {
+    let hit = false;
+    ends.queryPoint(x, z, BRIDGE_END, (p) => {
+      if (!hit && Math.hypot(p[0] - x, p[1] - z) < BRIDGE_END) hit = true;
+    });
+    return hit;
+  };
+  const raise = new Map(), lower = new Map();
+  for (const w of kept) {
+    const R = UNDER_BACK + 6 + 3;
+    const c0 = Math.max(0, Math.floor(g.ax * (Math.min(w.ax, w.bx) - R) + g.bx)), c1 = Math.min(g.cols - 1, Math.ceil(g.ax * (Math.max(w.ax, w.bx) + R) + g.bx));
+    const r0 = Math.max(0, Math.floor(g.az * (Math.min(w.az, w.bz) - R) + g.bz)), r1 = Math.min(g.rows - 1, Math.ceil(g.az * (Math.max(w.az, w.bz) + R) + g.bz));
+    for (let r = r0; r <= r1; r++) {
+      const z = (r - g.bz) / g.az;
+      for (let c = c0; c <= c1; c++) {
+        const x = (c - g.bx) / g.ax, k = r * g.cols + c;
+        if (Number.isNaN(D[k])) continue;
+        // 壁の区間の横の点だけ（区間の端の点も含める。端より外は触らない）
+        const ex = w.bx - w.ax, ez = w.bz - w.az, t = ((x - w.ax) * ex + (z - w.az) * ez) / (ex * ex + ez * ez || 1);
+        if (t < -1e-6 || t > 1 + 1e-6) continue;
+        const cs = { x: w.ax + ex * t, z: w.az + ez * t, t };
+        const d = (x - cs.x) * w.nx + (z - cs.z) * w.nz;
+        if (d < 0 && ((roadW && roadW[k] >= 0.99) || nearEnd(x, z))) continue;
+        if (d > -UNDER_BACK && d <= 3) {
+          const y = w.ab + 0.3 + (w.bb - w.ab) * cs.t + DAT;
+          if (y < D[k] && !(lower.get(k) <= y)) lower.set(k, y);
+        } else if (d <= -UNDER_BACK && d > -UNDER_BACK - 6) {
+          const y = w.at + (w.bt - w.at) * cs.t + DAT;
+          if (y > D[k] && !(raise.get(k) >= y)) raise.set(k, y);
+        }
+      }
+    }
+  }
+  for (const [k, y] of raise) D[k] = y;
+  for (const [k, y] of lower) D[k] = y;
+  // 壁の裏の格子点を下げられなかった所（盛り土の上を通る車道）は壁の前から斜面になるので、壁を歩道の幅の中で斜面の足元へ寄せる
+  for (const w of kept) {
+    for (const e of ['a', 'b']) {
+      const x = w[e + 'x'], z = w[e + 'z'], y0 = w[e + 'b'] + 0.3;
+      let d = 0;
+      while (d < ABUT_WALK - 0.3 && terrain.h(x + w.nx * d, z + w.nz * d) - y0 > 0.25) d += 0.25;
+      w[e + 'x'] = x + w.nx * d;
+      w[e + 'z'] = z + w.nz * d;
+    }
+  }
+  return (terrain.underpass = kept);
+}
+
+// 高架の下の擁壁（setupDecks）。地形の手直しで決めた壁（conditionUnderpasses）を使う。手直しのない地形（テスト）は、高架と交わる
+// 車道の脇の盛り土をその場で調べる
+export function abutmentWalls(terrain, roads, waterDepthAt = () => 0) {
+  if (!terrain || terrain.flat || !terrain.deck) return [];
+  if (terrain.underpass) return terrain.underpass.map((w) => ({ ...w }));
+  return findUnderpassWalls(terrain, roads, (x, z) => waterDepthAt(x, z) > 0);
 }
 
 // 擁壁の形: 道の側の面（ベージュのコンクリートに、上から 0.5 m と 0.83 m の細いテラコッタの帯）、厚さ 0.4 m の笠と裏の面
@@ -637,7 +713,10 @@ export function buildBridges(bridges, allRoads, mats, waterDepthAt, clipRect, te
     }
     withPalette(PALE_NAME.test(v.root.name || '') ? PALE : null, () => {
       writeDeck({ deck, body, walk, marks }, road, v.half, root.style.kind, info, clipRect);
-      if (v.root === road) {
+      // 陸の上の高架は way ごとの桁（並んだ上下線の桁のあいだにすき間。利用者の Street View 225619: A620 の下から、上下線の
+      // 桁のあいだに空が細く見える）。川の橋は親の way がまとまりの幅の本体を作る（間の水にすき間ができないように）
+      if (root.style.kind === 'overpass') writeStructure(body, road, { ...root, extL: v.half, extR: v.half }, walk);
+      else if (v.root === road) {
         writeStructure(body, road, root, walk);
         // 陸の上の高架（A620 の Grande-Bretagne 通りの上。利用者のストリートビュー）は橋台から橋台まで 1 径間で、通りの中に橋脚はない
         if (prof && root.style.kind !== 'overpass') writeLandPiers(body, road, root, prof, terrain, waterDepthAt, Math.max(2, ...root.style.wet.map((w) => w.depth)));
@@ -700,7 +779,9 @@ export function bridgeStyle(road, v, waterDepthAt, levelAt = null, deckAt = null
   }
   const members = v.members || [road];
   // 陸の上の高速道路・幹線道路の高架（A620 の Grande-Bretagne 通りの上など。写真: 淡いコンクリートの桁と青灰色の鉄の手すり）
-  if (!wet.length) return { kind: members.some((m) => MOTOR_TYPES.has(m.type)) ? 'overpass' : 'flat', wet };
+  // ほかの陸の上の橋（道路・線路を越える坂・歩道橋。利用者の写真 NCM_0130: スタジアムの島へ下りる Allée Michel Viala の坂は、
+  // 薄いコンクリートの桁の縁に金属の手すり。石の欄干ではない）は 'land'
+  if (!wet.length) return { kind: members.some((m) => MOTOR_TYPES.has(m.type)) ? 'overpass' : 'land', wet };
   // サン・ピエール橋（利用者の写真 NCM_0105・0125）: レンガの橋脚 2 本の上の、下弦が弧になった鋼のトラス（3 径間）
   if (TRUSS_NAME.test(road.name || '')) return { kind: 'truss', wet };
   // 石の橋の一覧にない橋と、高速道路・幹線道路を含むまとまりは近代の橋
@@ -734,7 +815,7 @@ export function bridgeStyle(road, v, waterDepthAt, levelAt = null, deckAt = null
 function writeDeck({ deck, body, walk, marks }, road, half, kind, info, clipRect) {
   const topY = CAR_ROADS.has(road.type) ? 0.08 : 0.14; // 歩道橋は少し高くして、重なっても Z ファイティングしないように
   const st = roadStyle(road);
-  const modern = kind === 'modern' || kind === 'overpass' || kind === 'truss';
+  const modern = kind === 'modern' || kind === 'overpass' || kind === 'land' || kind === 'truss';
   const car = CAR_ROADS.has(road.type) && st.tex === 'asphalt';
   // 車道の標示（中央線・バスレーン・自転車レーン。ポン・ヌフは写真 10・11）。橋の両端 4 m はあける
   if (car) {
@@ -767,12 +848,14 @@ function writeDeck({ deck, body, walk, marks }, road, half, kind, info, clipRect
         const uvs = (y0, y1) => [[0, y0 / 20], [l / 8, y0 / 20], [l / 8, y1 / 20], [0, y1 / 20]]; // 石の目地の大きさ
         const vq = (p, q, y0, y1, nn, col) => body.quad([p[0], y0, p[1]], [q[0], y0, q[1]], [q[0], y1, q[1]], [p[0], y1, p[1]], nn, ...uvs(y0, y1), col);
         const hq = (p, q, r, s, y, nn, col) => body.quad([p[0], y, p[1]], [q[0], y, q[1]], [r[0], y, r[1]], [s[0], y, s[1]], nn, [0, 0], [l / 4, 0], [l / 4, 0.1], [0, 0.1], col);
-        if (kind === 'overpass') {
+        if (kind === 'overpass' || kind === 'land') {
           // コンクリートの縁（0.35 m）の上に青灰色の鉄の手すり（支柱 1.6 m おき・上と中の横桟、高さ 1.1 m）
+          // 縁は模様のない打ち放し（石の目地のテクスチャにしない。利用者の Street View 225619: 平らな淡いコンクリートの桁）
           const ct = topY + 0.35, rt = topY + 1.1;
-          vq(a, b, CORNICE, ct, n, COL.concrete);
-          hq(a, b, ib, ia, ct, up, COL.concrete);
-          vq(ia, ib, topY, ct, ni, COL.concrete);
+          const pq = (p, q, r, s, y0, y1, nn) => body.quad([p[0], y0, p[1]], [q[0], y0, q[1]], [r[0], y1, r[1]], [s[0], y1, s[1]], nn, FLAT_UV, FLAT_UV, FLAT_UV, FLAT_UV, COL.concrete);
+          pq(a, b, b, a, CORNICE, ct, n);
+          pq(a, b, ib, ia, ct, ct, up);
+          pq(ia, ib, ib, ia, topY, ct, ni);
           const ma = [(a[0] + ia[0]) / 2, (a[1] + ia[1]) / 2], mb = [(b[0] + ib[0]) / 2, (b[1] + ib[1]) / 2];
           const tx = (mb[0] - ma[0]) / l, tz = (mb[1] - ma[1]) / l, ox = n[0] * 0.03, oz = n[2] * 0.03;
           for (const y of [rt, topY + 0.7]) {
@@ -902,6 +985,7 @@ function writeStructure(w, road, v, stone = w) {
     }
   };
   if (kind === 'flat') return plainSides(LAND_BOTTOM, COL.flat);
+  if (kind === 'land') return plainSides(LAND_BOTTOM, COL.concrete, true, COL.soffit);
   // 桁の高さ（写真の A620 は淡いコンクリートの厚い桁）。下面は日陰の灰色（暖かい色の照り返しで茶色くならないよう青みに寄せる）
   if (kind === 'overpass') return plainSides(-OVERPASS_DEPTH, COL.concrete, true, COL.soffit);
   if (kind === 'truss') {

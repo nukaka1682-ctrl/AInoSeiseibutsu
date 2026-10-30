@@ -14,7 +14,7 @@ import { LOCKS, lockFrame } from './locks.js';
 import { RaisedIndex, oldTownBase, planStreets, streetSteps, writePrism } from './streets.js';
 import { CAR_ROADS } from './parse.js';
 import { catenaryStations, mergeIntervals, slicePolyline, subtract, tramCrossCuts } from './markings.js';
-import { bridgeGroups, buildAbutments, buildBridges, setupDecks } from './bridges.js';
+import { bridgeGroups, buildAbutments, buildBridges, conditionUnderpasses, setupDecks } from './bridges.js';
 import { DRAPE_LIFT, FLAT_TERRAIN } from './terrain.js';
 import { buildFarTerrain, createTerrainMaterials, splitGeometry, TERRAIN_ORDER } from './terrainmesh.js';
 import { conditionRoads, despike, sharpenQuays, WALK_DEF } from './terraincond.js';
@@ -56,6 +56,8 @@ const GREEN_COLOR = {
 // 写真 #a07f62 前後。砂利のテクスチャの平均 #c7b898 に掛けてその色になる色）
 const PLAZA_SURFACES = [
   { match: /^Place Olivier$/i, tex: 'gravel', uv: 3, color: c3('#cdb0a4') },
+  // メディアテーク南の広場（航空写真・利用者の写真 NCM_0101）: テラコッタ色の舗石
+  { match: /^Place de l'Ordre des Palmes Acad[ée]miques$/i, tex: 'paving', uv: 4, color: c3('#d99a82') },
   // キャピトル広場: 灰色の小舗石に淡い石の斜めの帯（textures.js の makeCapitoleSquareTexture）
   { match: /^Place du Capitole$/i, tex: 'capitole', uv: 8, color: c3('#ffffff') },
 ];
@@ -63,6 +65,10 @@ const namedSurface = (area) => PLAZA_SURFACES.find((p) => p.match.test(area.name
 // 壁から壁まで石の板の並木道（利用者の Street View 212222・212248: Allées Roosevelt は車の通らない、淡いばら色がかった
 // ベージュの石の板 #d8c8bb〜#e8dfd6 の広場。真ん中の道は streets.js で同じ石の板）。中心線から half m の帯
 const SLAB_ALLEES = [{ name: /^All[ée]es du Pr[ée]sident Franklin Roosevelt$/i, half: 14, color: c3('#f0e2d8') }];
+// 河岸の遊歩道と水際のあいだの小石の浜（利用者の写真 NCM_0138: Pont Saint-Pierre の下流の右岸は、遊歩道 Promenade Henri Martin
+// から水際まで淡い茶色の丸い小石の浜がゆるく水へ下りる。ラ・ドラードの前（maxX より東）は石の板の河岸）。遊歩道の中心から
+// 水の側へ from〜to m の帯（水に沈む分は水面に隠れる）
+const PEBBLE_BEACHES = [{ name: /^Promenade Henri Martin$/i, maxX: -150, from: 1.6, to: 16, color: c3('#d2c9bc') }];
 export function plazaSurface(area, inOldTown = () => false) {
   const s = namedSurface(area);
   if (s) return s;
@@ -160,6 +166,10 @@ const PORT_SAUVEUR = { latlon: [43.59634, 1.4564], hx: 70, hz: 270 };
 // 運河 Canal de Brienne（利用者の写真 NCM_0186）: 両岸とも水際から並木道まで約 3 m の草の斜面（壁はない）。この線から 30 m 以内の岸
 // （運河の芯線に沿った折れ線。閘門の上で北へ曲がってから北西へ）
 const BRIENNE = { line: [[43.604413, 1.434409], [43.604811, 1.434372], [43.605083, 1.434089], [43.605282, 1.433639], [43.606512, 1.430163]], reach: 30 };
+// 閘門より上流のブリエンヌ運河の水面（標高 m）。水面の格子は閘門の下のガロンヌ川と同じ高さ（132.5 m）になっていて、
+// 写真（NCM_0186: 曳舟道から水面まで 1 m たらず）より低かった。運河の水域のうち閘門の上流の扉より上だけをこの高さにする
+// （岸の土手は水面 + 0.3 m より下げない: bankY）
+const BRIENNE_LEVEL = 133.3;
 const JGARDEN_POND = [43.6119432, 1.4318864];
 // 閘門の上の船だまり（利用者の写真 NCM_0185・航空写真）: 両岸は垂直の石の岸壁で、上は平らな河岸。閘門の運河の側の端から
 // LOCK_BASIN m 以内の運河の岸。地形モデルは水面を V 字に補間するので、岸から BASIN_REACH m の陸の格子点を岸の上の高さ
@@ -178,12 +188,29 @@ function lockBasinTest(proj) {
 // Port Saint-Pierre（利用者の写真 NCM_0103・航空写真）: 並木の上の段（約 140 m）の縁から約 5.5 m 下に、幅 5〜6 m の平らな
 // 石畳の下の段（水面から約 1.8 m、川の側は垂直の縁）。地形モデルでは川へ傾いた斜面
 // setts: 下の段は大きな石の板でなく小舗石（写真）
-const FIXED_QUAYS = [{ line: [[43.603782, 1.434159], [43.603425, 1.434934]], low: [43.603541, 1.43436], lowAbove: 1.8, lowReach: 9, setts: true }];
+// cut: 水辺でなく線路の切り通しの縁（下の段は水面からでなく lowY の高さ。下の段の地面はそのまま、壁の裏の車道は触らない）。
+// stone: 淡い切石の壁。メディアテーク南の広場 Place de l'Ordre des Palmes Académiques（利用者の写真 NCM_0101・航空写真）:
+// 広場の西の縁は約 6 m 下の線路の切り通しへの垂直の壁（地形モデルでは 5 m の格子のなまりで斜面になり、広場の端が坂だった）
+const FIXED_QUAYS = [
+  { line: [[43.603782, 1.434159], [43.603425, 1.434934]], low: [43.603541, 1.43436], lowAbove: 1.8, lowReach: 9, setts: true },
+  { line: [[43.609802, 1.455031], [43.60974, 1.45513], [43.609641, 1.455254], [43.609533, 1.45539]], low: [43.609596, 1.454882], lowY: 0.2, lowReach: 6, cut: true, stone: true },
+];
+// 閘門より上流のブリエンヌ運河の水面の高さ（その外は null）
+function brienneLevel(water, proj, datum) {
+  const ref = proj.project(...BRIENNE.line[2]);
+  const canal = water.find((a) => a.kind === 'canal' && pointInPolygon(ref[0], ref[1], a));
+  if (!canal) return null;
+  const locks = LOCKS.map((l) => lockFrame(proj.project(...l.a), proj.project(...l.b)));
+  const y = BRIENNE_LEVEL - datum, b = canal.bounds;
+  return (x, z) => (x >= b.minX && x <= b.maxX && z >= b.minZ && z <= b.maxZ && locks.every((f) => f.uv(x, z)[0] > f.L) && pointInPolygon(x, z, canal) ? y : null);
+}
+
 export function fixedQuayWalls(T, proj, inWater) {
   const out = [];
   const g = T.near, D = g.data, DAT = T.datum;
   for (const fq of FIXED_QUAYS) {
     const P = fq.line.map((ll) => proj.project(...ll)), [lx, lz] = proj.project(...fq.low);
+    const lowAt = (x, z) => (fq.lowY != null ? fq.lowY : T.waterLevel(x, z) + fq.lowAbove);
     const segs = [];
     for (let i = 0; i + 1 < P.length; i++) {
       const [ax, az] = P[i], [bx, bz] = P[i + 1], L = Math.hypot(bx - ax, bz - az);
@@ -217,7 +244,8 @@ export function fixedQuayWalls(T, proj, inWater) {
         // 壁は下の段の格子点の上に立つ（sharpenQuays と同じ）: 壁の裏の 1 マス（QUAY_BACK m）も下の段の高さにし、その先の斜面は
         // 岸壁の上の歩道の板（buildQuayWalls）で隠す。そのさらに裏は岸の上の高さ
         const d = (x - cs.x) * sq.nx + (z - cs.z) * sq.nz;
-        if (d > -QUAY_BACK && d < fq.lowReach && !inWater(x, z)) writes.push([k, T.waterLevel(x, z) + fq.lowAbove + DAT]);
+        if (fq.cut && d <= 0 && T.roadW?.[k] >= 0.99) continue; // 切り通しの上を通る車道
+        if (d > -QUAY_BACK && d < fq.lowReach && !inWater(x, z)) writes.push([k, lowAt(x, z) + DAT]);
         else if (d <= -QUAY_BACK && d > -QUAY_BACK - 6) {
           const top = sq.at + (sq.bt - sq.at) * cs.t;
           if (D[k] < top + DAT) writes.push([k, top + DAT]);
@@ -226,8 +254,9 @@ export function fixedQuayWalls(T, proj, inWater) {
     }
     for (const [k, y] of writes) D[k] = y;
     for (const sq of segs) {
-      const ya = T.waterLevel(sq.ax, sq.az) + fq.lowAbove, yb = T.waterLevel(sq.bx, sq.bz) + fq.lowAbove;
-      out.push({ ax: sq.ax, az: sq.az, at: sq.at, ab: ya, bx: sq.bx, bz: sq.bz, bt: sq.bt, bb: yb, nx: sq.nx, nz: sq.nz, wa: WALK_DEF, wb: WALK_DEF, setts: !!fq.setts });
+      const ya = lowAt(sq.ax, sq.az), yb = lowAt(sq.bx, sq.bz);
+      // 切り通しの下（線路）は河岸の石の板にしない（setts と同じく岸壁の下の段の舗装から外す）
+      out.push({ ax: sq.ax, az: sq.az, at: sq.at, ab: ya, bx: sq.bx, bz: sq.bz, bt: sq.bt, bb: yb, nx: sq.nx, nz: sq.nz, wa: WALK_DEF, wb: WALK_DEF, setts: !!(fq.setts || fq.cut), stone: !!fq.stone });
     }
   }
   return out;
@@ -726,6 +755,7 @@ export function buildGroundBase(parsed, rect, mats, terrain = FLAT_TERRAIN, layo
   // 地形の手直し（エリアで 1 回だけ。地面・道路・橋を作る前に）: 車道の縦断面でならし、旧市街のまわりの岸壁を段差に戻す
   if (!T.flat && !T.conditioned) {
     T.conditioned = true;
+    T.levelOverride = parsed.proj ? brienneLevel(water, parsed.proj, T.datum) : null;
     // メトロの出入口: 地形モデルに写った吹き抜けの穴を周りの高さで埋める（穴は下でステンシルにして、中に階段を作る）
     // 狭い通りの車道の中に落ちたメトロの階段は捨てる（LiDAR の穴の見誤り。利用者の写真 NCM_0095: Rue Bertrand de l'Isle の車道の
     // 真ん中に階段ができていた）。駐車場の坂は車道から下りるので残す。広い通り・並木道は真ん中の遊歩道に出入口があるので見ない
@@ -749,6 +779,7 @@ export function buildGroundBase(parsed, rect, mats, terrain = FLAT_TERRAIN, layo
     const fixedQ = parsed.proj ? fixedQuayWalls(T, parsed.proj, inWater) : [];
     T.setQuayWalls(parsed.proj ? quays.concat(quayLinks(quays, parsed.proj), basin, fixedQ) : quays);
     despike(T);
+    conditionUnderpasses(T, parsed.roads, inWater); // 高架の下の擁壁の足元を道の高さに（bridges.js）
   }
   if (!T.flat && T.quayWalls.length) group.add(buildQuayWalls(T.quayWalls, mats, parsed.proj));
   if (!T.flat && T.metro.length) {
@@ -1224,6 +1255,20 @@ function* groundDetailSteps(parsed, clip, mats, waterDepthAt, opts) {
       writeDisc(w, pts[0], sa.half, 0, sa.color, 2.4, 16);
       writeDisc(w, pts[pts.length - 1], sa.half, 0, sa.color, 2.4, 16);
     }
+  }
+  // ---- 河岸の小石の浜 ----
+  for (const road of parsed.roads) {
+    const pb = !road.bridge && !road.tunnel && PEBBLE_BEACHES.find((b) => b.name.test(road.name || ''));
+    if (!pb) continue;
+    const pts = road.pts.filter(([x]) => x < pb.maxX);
+    if (pts.length < 2) continue;
+    const m = pts.length >> 1, probe = offsets(pts, 12);
+    const side = waterDepthAt(...probe.L[m]) > 0 ? 'L' : waterDepthAt(...probe.R[m]) > 0 ? 'R' : null;
+    if (!side) continue;
+    const ring = [...offsets(pts, pb.from)[side], ...offsets(pts, pb.to)[side].reverse()];
+    if (!overlaps(ringBounds(ring))) continue;
+    const outer = clipRingToRect(ring, clip.minX, clip.minZ, clip.maxX, clip.maxZ);
+    if (outer.length >= 3) writeFlatPolygon(W(ORDER.plaza, 'gravel'), outer, [], 0, 2, pb.color);
   }
   // ---- ジャン・ジョレス通りの遊歩道（ramblas.js）: 淡いベージュの固めた砂と、車道沿いの植え込みの帯（暗い土に低木）
   const rl = parsed.proj ? ramblasLayout(parsed.roads, parsed.proj) : null;
