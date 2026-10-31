@@ -13,7 +13,7 @@
 // 断面は道全体で同じ位置に置き（ANCHOR m ごとに必ず残す）、タイルの外へ少し延ばして計算してから範囲で切るので、
 // 隣のタイルとは境目で同じ形になる。
 import { CAR_ROADS } from './parse.js';
-import { bridgeGroups } from './bridges.js';
+import { PONT_NEUF_HALF, bridgeGroups, pontNeufApproaches } from './bridges.js';
 import { Grid, clipPolylineToRect, clipRingToRect, closestOnSegment, hash01, pointInPolygon, signedArea } from '../geo.js';
 import { laneLayout, mergeIntervals, writePicture, writeRoadMarkings } from './markings.js';
 
@@ -63,6 +63,9 @@ export function classifyStreet(road, old) {
   const h = strHash(road.name || `#${road.id}`);
   const near = NEAR_TYPES.has(t) || road.bridge;
   if (road.bridge) return { kind: 'bridge', band: road.width / 2 + (car ? 2 : 0.3), near };
+  // ポン・ヌフの両端の取り付け道路: 歩道は橋の歩道の続き（ground.js の PONT_NEUF_APRONS）が敷くので作らず、ほかの道の歩道を
+  // 橋と同じ幅で切る（利用者の指摘: 橋の付け根・歩道との際が雑。橋の 6 m の花崗岩の歩道が端で切れ、街の細い歩道と重なっていた）
+  if (road.pontNeufApproach) return { kind: 'bridge', band: PONT_NEUF_HALF + 0.3, near };
   // 車の通らない石の板の並木道（Allées Roosevelt。ground.js の SLAB_ALLEES）: 真ん中の道も段差のない石の板
   if (/^All[ée]es du Pr[ée]sident Franklin Roosevelt$/i.test(road.name || '')) return { kind: 'shared', slabs: true, band: road.width / 2 + 1.2, gutter: null, near };
   if (old && (t === 'pedestrian' || t === 'living_street') && road.width > 6.5) {
@@ -120,6 +123,7 @@ const notOld = () => false;
 export function planStreets(parsed, inOld = notOld) {
   let plan = plans.get(parsed);
   if (plan && plan.inOld === inOld) return plan;
+  for (const a of pontNeufApproaches(parsed.roads)) for (const r of a.ways) r.pontNeufApproach = true;
   const info = new Map();
   for (const road of parsed.roads) {
     if (road.tunnel || road.pts.length < 2) continue;

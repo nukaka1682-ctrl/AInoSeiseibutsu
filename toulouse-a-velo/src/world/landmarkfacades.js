@@ -194,8 +194,8 @@ export function facingSquare(square, buildings) {
 // 長さ 4 m 以上の壁が通りの方を向いている建物（高さ 10 m 以上）に、styles から建物ごとに選んだ様式を付ける
 // - 19 世紀末に切り開かれた通り（利用者の写真: Rue d'Alsace-Lorraine・Rue de Metz・Esquirol）: 砂色の切り石の
 //   建物（STYLE.haussmann）と灰色の亜鉛の屋根。Alsace-Lorraine の建物は IGN でレンガとされていても写真では石
-// - Rue de la République（サン・シプリアン。利用者の Street View）: 7 割はクリーム色・黄土色・サーモン色の漆喰に
-//   レンガの窓枠、3 割はレンガのまま
+// - Rue de la République（サン・シプリアン。利用者の Street View 210954）: 8 割はクリーム色・黄土色・サーモン色の漆喰に
+//   レンガの窓枠（半分ほどは灰色の板の鎧戸と 1 階の店の faubourg）、2 割はレンガの鎧戸の家
 const STREET_STYLES = [
   { name: /^(Rue d'Alsace[- ]Lorraine|Rue du Languedoc)$/i, styles: [[STYLE.haussmann, 1]], slate: true },
   // Rue de Metz・Esquirol はレンガの建物も混じる（利用者の写真: Esquirol のブラッスリー、Rue Bertrand de l'Isle の角）。
@@ -203,7 +203,7 @@ const STREET_STYLES = [
   { name: /^(Rue de Metz|Place [EÉ]tienne[- ]Esquirol)$/i, styles: [[STYLE.haussmann, 1]], slate: true, keepBrick: true },
   // 利用者の写真 NCM_0096: Place Jeanne d'Arc の角の建物は黄土色の切り石のオスマン様式（通しの鉄のバルコニー・灰色のマンサード）
   { name: /^Place Jeanne[- ]d'Arc$/i, styles: [[STYLE.haussmann, 1]], slate: true },
-  { name: /^Rue de la R[ée]publique$/i, styles: [[STYLE.ochre, 0.25], [STYLE.salmon, 0.25], [STYLE.cream, 0.2], [STYLE.brickStone, 0.15], [STYLE.brickShutters, 0.15]] },
+  { name: /^Rue de la R[ée]publique$/i, styles: [[STYLE.faubourg, 0.45], [STYLE.salmon, 0.2], [STYLE.ochre, 0.15], [STYLE.brickShutters, 0.2]] },
 ];
 const STREET_REACH = 10;
 const STREET_MAX_AREA = 2500; // これより大きい建物（美術館・大きな施設）は通りの様式にしない
