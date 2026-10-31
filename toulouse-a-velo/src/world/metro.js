@@ -3,15 +3,19 @@
 // - 地面にあいた長方形の吹き抜けを、階段とステンレスのエスカレーターで下りる（下の端にガラスの扉）
 // - 吹き抜けの 3 辺（入口の側を除く）にベージュの花崗岩張りの低い腰壁（約 1 m）とステンレスの手すり
 // - 入口の脇に灰色の柱の看板（上から、黄色地に紺の丸と「M」、駅名の黒い帯、黄色の駅の絵の板）
+// 地下駐車場の車の坂（kind: 'parking'。キャピトル広場など）は、灰色のコンクリートの壁のあいだをアスファルトの坂で下り、
+// 下の端に暗いトンネルの口と黄色と黒の高さ制限の梁、入口に高さ制限の門と青地に白い P の看板。腰壁はコンクリート
 // 地面には穴をあける: 地形の格子の穴（地形モデルに写った吹き抜け）は周りの高さで埋め、吹き抜けの長方形は
 // 水面と同じステンシルの穴（ground.js）にして、地面・地面の覆い・歩道を描かず、吹き抜けの中が見えるようにする
 import * as THREE from 'three';
 import { MeshWriter } from './meshwriter.js';
-import { hash01 } from '../geo.js';
+import { closestOnSegment, hash01 } from '../geo.js';
+import { CAR_ROADS } from './parse.js';
 
 const STEP_H = 0.16; // 段の高さ（m）
 const LANDING = 2.4; // 下の踊り場の長さ（m）
 const PARAPET = 1.0, PARAPET_T = 0.3; // 腰壁の高さ・厚さ
+const RAMP_PARAPET = 0.6; // 駐車場の坂の腰壁の高さ（利用者の写真: キャピトル・Esquirol の坂の縁は低いばら色の花崗岩）
 const ESCALATOR_W = 1.25;
 const C = {
   stone: [0.86, 0.79, 0.69], // ベージュの花崗岩
@@ -27,15 +31,27 @@ const C = {
   post: [0.42, 0.44, 0.46],
   yellow: [0.98, 0.72, 0.05],
   name: [0.16, 0.17, 0.2],
+  concrete: [0.68, 0.58, 0.53], // 駐車場の坂の壁・腰壁（利用者の写真: Esquirol・キャピトルの坂はばら色がかった灰色の花崗岩 #a68975・#9a8a85）
+  asphalt: [0.3, 0.3, 0.31],
+  line: [0.85, 0.85, 0.82],
+  black: [0.1, 0.1, 0.11],
+  tunnel: [0.05, 0.05, 0.06],
 };
+const RAMP_PORTAL_H = 2.3; // 駐車場のトンネルの口の高さ（m。高さ制限 2 m 前後）
 
+// 写真・航空写真で直す出入口の幅 [緯度, 経度, 幅 m]（地形モデルの穴が隣の植え込みとつながって広く見つかった所）。
+// キャピトル（Square Charles-de-Gaulle の東の縁。利用者のストリートビュー 211839・航空写真）: 階段の吹き抜けは幅約 5.5 m
+const ENTRANCE_WIDTHS = [[43.6046415, 1.4454812, 5.5]];
 // 事前取得の出入口（緯度経度）をローカル座標に。len・wid は扱える範囲に収める
 export function projectEntrances(list, proj) {
   return (list || []).map((e) => {
     const [x, z] = proj.project(e.lat, e.lon);
+    const parking = e.kind === 'parking';
+    const fix = ENTRANCE_WIDTHS.find(([lat, lon]) => Math.abs(lat - e.lat) < 2e-6 && Math.abs(lon - e.lon) < 2e-6);
+    if (fix) e = { ...e, wid: fix[2] };
     return {
-      station: e.station, x, z, ang: e.ang, down: e.down >= 0 ? 1 : -1,
-      len: Math.min(30, Math.max(6, e.len)), wid: Math.min(9, Math.max(2.8, e.wid)), depth: e.depth,
+      kind: parking ? 'parking' : 'metro', station: e.station, name: e.name, x, z, ang: e.ang, down: e.down >= 0 ? 1 : -1,
+      len: Math.min(parking ? 40 : 30, Math.max(6, e.len)), wid: Math.min(parking ? 12 : 9, Math.max(2.8, e.wid)), depth: e.depth,
     };
   });
 }
@@ -111,6 +127,33 @@ export function rimAt(e, u, v) {
   return e.rim + (e.slope ? e.slope[0] * u + e.slope[1] * v : 0);
 }
 
+// 駐車場の坂の向き: 入口（上の端）は車道に近い方の端（LiDAR の深さの傾きは坂の下の屋根の下が写らず逆になることがある）
+export function orientRamps(list, roads, { reach = 60 } = {}) {
+  const ramps = list.filter((e) => e.kind === 'parking');
+  if (!ramps.length) return;
+  const segs = [];
+  for (const r of roads) {
+    if (!CAR_ROADS.has(r.type) || r.bridge || r.tunnel) continue;
+    for (let i = 0; i + 1 < r.pts.length; i++) {
+      const [ax, az] = r.pts[i], [bx, bz] = r.pts[i + 1];
+      if (ramps.some((e) => Math.min(ax, bx) < e.x + reach && Math.max(ax, bx) > e.x - reach && Math.min(az, bz) < e.z + reach && Math.max(az, bz) > e.z - reach)) segs.push([ax, az, bx, bz]);
+    }
+  }
+  const dist = (x, z) => segs.reduce((m, [ax, az, bx, bz]) => Math.min(m, closestOnSegment(x, z, ax, az, bx, bz).d2), Infinity);
+  for (const e of ramps) {
+    const f = entranceFrame(e), [ax, az] = f.at(-e.len / 2, 0), [bx, bz] = f.at(e.len / 2, 0);
+    if (Math.sqrt(dist(bx, bz)) + 2 < Math.sqrt(dist(ax, az))) e.down = -e.down;
+  }
+}
+
+// (x, z) が出入口の吹き抜け（pad m 広げた長方形）の中か（木を植えない）
+export function inEntrance(list, x, z, pad = 0.5) {
+  return list.some((e) => {
+    const f = entranceFrame(e), u = (x - e.x) * f.dx + (z - e.z) * f.dz, v = (x - e.x) * f.sx + (z - e.z) * f.sz;
+    return Math.abs(u) < e.len / 2 + pad && Math.abs(v) < e.wid / 2 + pad;
+  });
+}
+
 // 出入口の吹き抜けのまわりの塀を除く（LiDAR で見つけた塀のうち、実際の出入口の腰壁だったもの。腰壁は buildMetroEntrances が作る）
 export function clearEntrances(segs, list, pad = 2) {
   if (!list.length) return segs;
@@ -131,15 +174,17 @@ export function entranceWalls(e) {
 
 // 吹き抜けの深さ（段の数は STEP_H ごと）
 export function entranceDepth(e) {
+  if (e.kind === 'parking') return Math.min(5.5, Math.max(RAMP_PORTAL_H + 0.6, (e.depth || 3) + 0.8));
   return Math.min(6.5, Math.max(3.5, (e.depth || 3) + 1.2));
 }
 
-// 看板の絵（黄色地に紺の丸と M）
+// 看板の絵（左半分: 黄色地に紺の丸と M。右半分: 駐車場の青地に白い P）
 let signTex = null;
 function signTexture() {
   if (signTex) return signTex;
   const c = document.createElement('canvas');
-  c.width = c.height = 128;
+  c.width = 256;
+  c.height = 128;
   const x = c.getContext('2d');
   x.fillStyle = '#f9b80d';
   x.fillRect(0, 0, 128, 128);
@@ -153,6 +198,14 @@ function signTexture() {
   x.textAlign = 'center';
   x.textBaseline = 'middle';
   x.fillText('M', 64, 68);
+  x.fillStyle = '#1f5fae';
+  x.fillRect(128, 0, 128, 128);
+  x.strokeStyle = '#ffffff';
+  x.lineWidth = 5;
+  x.strokeRect(136, 8, 112, 112);
+  x.fillStyle = '#ffffff';
+  x.font = 'bold 92px sans-serif';
+  x.fillText('P', 192, 70);
   signTex = new THREE.CanvasTexture(c);
   signTex.colorSpace = THREE.SRGBColorSpace;
   signTex.anisotropy = 4;
@@ -163,7 +216,8 @@ export function createMetroMaterials(tex) {
   // 面の向き（周回順）は気にせず両面で描く（法線は面ごとに渡す）
   const D = THREE.DoubleSide;
   return {
-    stone: new THREE.MeshStandardMaterial({ map: tex.plain, vertexColors: true, roughness: 0.85, side: D }),
+    // 石・コンクリート: 模様なし（壁のレンガの明るさの模様をかけると、腰壁が淡いレンガの箱に見えた）
+    stone: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, side: D }),
     steel: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.35, metalness: 0.6, side: D }),
     plain: new THREE.MeshLambertMaterial({ vertexColors: true, side: D }),
     sign: typeof document === 'undefined' ? new THREE.MeshLambertMaterial({ color: '#f9b80d', side: D }) : new THREE.MeshLambertMaterial({ map: signTexture(), side: D }),
@@ -199,11 +253,86 @@ function bar(w, a, b, t, color) {
   }
 }
 
+// 地下駐車場の車の坂。上の端（入口）は道路につながるので腰壁なし。w: { stone, steel, plain, sign } の MeshWriter
+function writeRamp(e, w) {
+  const f = entranceFrame(e), H = entranceDepth(e), L = e.len / 2, W = e.wid / 2;
+  const y0 = rimAt(e, -L, 0), yb = rimAt(e, L, 0) - H;
+  const fy = (u) => y0 + ((yb - y0) * (u + L)) / (2 * L); // 坂の床の高さ
+  const P = (u, v, y) => {
+    const [x, z] = f.at(u, v);
+    return [x, y, z];
+  };
+  const up = [-f.dx * (yb - y0) / (2 * L), 1, -f.dz * (yb - y0) / (2 * L)];
+  const ul = Math.hypot(...up);
+  const n = up.map((c) => c / ul);
+  // 坂の床（アスファルト）。2 車線の幅なら真ん中に白い線
+  w.plain.quad(P(-L, -W, fy(-L)), P(L, -W, fy(L)), P(L, W, fy(L)), P(-L, W, fy(-L)), n, [0, 0], [1, 0], [1, 1], [0, 1], C.asphalt);
+  if (e.wid >= 5.5) {
+    for (let u = -L + 0.5; u + 2 < L; u += 4) w.plain.quad(P(u, -0.06, fy(u) + 0.02), P(u + 2, -0.06, fy(u + 2) + 0.02), P(u + 2, 0.06, fy(u + 2) + 0.02), P(u, 0.06, fy(u) + 0.02), n, [0, 0], [1, 0], [1, 1], [0, 1], C.line);
+  }
+  // 両側の壁（床の下から地面まで）と、下の端の壁にトンネルの口
+  for (const v of [-W, W]) {
+    const nv = v < 0 ? 1 : -1;
+    w.stone.quad(P(-L, v, fy(-L) - 0.3), P(L, v, fy(L) - 0.3), P(L, v, rimAt(e, L, v)), P(-L, v, rimAt(e, -L, v)), [f.sx * nv, 0, f.sz * nv], [0, 0], [L / 2, 0], [L / 2, H / 2], [0, H / 2], C.concrete);
+  }
+  w.stone.quad(P(L, -W, yb - 0.3), P(L, W, yb - 0.3), P(L, W, rimAt(e, L, W)), P(L, -W, rimAt(e, L, -W)), [-f.dx, 0, -f.dz], [0, 0], [W, 0], [W, H / 2], [0, H / 2], C.concrete);
+  const pw = W - 0.25, ph = Math.min(RAMP_PORTAL_H, H - 0.3);
+  w.plain.quad(P(L - 0.03, -pw, yb), P(L - 0.03, pw, yb), P(L - 0.03, pw, yb + ph), P(L - 0.03, -pw, yb + ph), [-f.dx, 0, -f.dz], [0, 0], [1, 0], [1, 1], [0, 1], C.tunnel);
+  // トンネルの口の上の黄色と黒の高さ制限の梁
+  const stripes = (wr, u, yA, yB) => {
+    const k = Math.max(2, Math.round((2 * pw) / 0.5));
+    for (let i = 0; i < k; i++) {
+      const v0 = -pw + (2 * pw * i) / k, v1 = v0 + (2 * pw) / k;
+      const [cx, cz] = f.at(u, (v0 + v1) / 2);
+      box(wr, cx, cz, yA, yB, f.sx, f.sz, v1 - v0, 0.12, i % 2 ? C.black : C.yellow);
+    }
+  };
+  stripes(w.plain, L - 0.2, yb + ph - 0.05, yb + ph + 0.2);
+  // 3 辺のコンクリートの腰壁（入口の側を除く）と手すり
+  const ry = (u0, v0, u1, v1) => {
+    const a = rimAt(e, u0, v0), b = rimAt(e, u1, v1);
+    return [Math.min(a, b) - 0.3, (a + b) / 2 + RAMP_PARAPET];
+  };
+  for (const s of [-1, 1]) {
+    const [cx, cz] = f.at(0.15, s * (W + PARAPET_T / 2));
+    box(w.stone, cx, cz, ...ry(-L, s * W, L, s * W), f.dx, f.dz, 2 * L + 0.3, PARAPET_T, C.concrete);
+  }
+  {
+    const [cx, cz] = f.at(L + PARAPET_T / 2, 0);
+    box(w.stone, cx, cz, ...ry(L, -W, L, W), f.sx, f.sz, e.wid + 2 * PARAPET_T, PARAPET_T, C.concrete);
+  }
+  const railY = rimAt(e, 0, 0) + RAMP_PARAPET + 0.12, o = PARAPET_T / 2;
+  bar(w.steel, P(-L, -W - o, railY), P(L + o, -W - o, railY), 0.05, C.steel);
+  bar(w.steel, P(L + o, -W - o, railY), P(L + o, W + o, railY), 0.05, C.steel);
+  bar(w.steel, P(L + o, W + o, railY), P(-L, W + o, railY), 0.05, C.steel);
+  // 入口の高さ制限の門（両脇の柱と黄色と黒の梁）
+  const ga = -L + 0.4, gy = (v) => rimAt(e, ga, v);
+  for (const v of [-W - 0.15, W + 0.15]) {
+    const [cx, cz] = f.at(ga, v);
+    box(w.plain, cx, cz, gy(v) - 0.2, y0 + 2.45, f.dx, f.dz, 0.16, 0.16, C.post);
+  }
+  stripes(w.plain, ga, y0 + 2.2, y0 + 2.45);
+  // 入口の脇の P の看板（青地に白い P。両面）
+  const seed = Math.round(e.x * 3 + e.z * 7), side = hash01(seed, 2) < 0.5 ? -1 : 1;
+  const [tx, tz] = f.at(-L - 1, side * (W + 0.6)), ty = rimAt(e, -L - 1, side * (W + 0.6));
+  box(w.plain, tx, tz, ty - 0.2, ty + 2.9, f.dx, f.dz, 0.1, 0.1, C.post);
+  box(w.plain, tx, tz, ty + 2.2, ty + 2.9, f.sx, f.sz, 0.72, 0.06, C.name);
+  for (const s of [1, -1]) {
+    const nx = -f.dx * s, nz = -f.dz * s, off = 0.032;
+    const c = (vv, y) => [tx + nx * off + f.sx * vv * s, y, tz + nz * off + f.sz * vv * s];
+    w.sign.quad(c(-0.35, ty + 2.22), c(0.35, ty + 2.22), c(0.35, ty + 2.88), c(-0.35, ty + 2.88), [nx, 0, nz], [0.5, 0], [1, 0], [1, 1], [0.5, 1], [1, 1, 1]);
+  }
+}
+
 // 出入口のメッシュ（エリア全体で 1 つのグループ）。list: fillMetroPits で rim を付けた出入口
 export function buildMetroEntrances(list, mats) {
   const stone = new MeshWriter(), steel = new MeshWriter(), plain = new MeshWriter(), sign = new MeshWriter();
   for (const e of list) {
     if (e.rim == null) continue;
+    if (e.kind === 'parking') {
+      writeRamp(e, { stone, steel, plain, sign });
+      continue;
+    }
     // y0: 上の端（入口）の地面の高さ。yb: 下の踊り場の床
     const f = entranceFrame(e), H = entranceDepth(e), y0 = rimAt(e, -e.len / 2, 0), yb = rimAt(e, e.len / 2, 0) - H;
     const L = e.len / 2, W = e.wid / 2;
@@ -282,7 +411,7 @@ export function buildMetroEntrances(list, mats) {
     for (const s of [1, -1]) {
       const nx = -f.dx * s, nz = -f.dz * s, off = 0.071;
       const c = (vv, y) => [tx + nx * off + f.sx * vv * s, y, tz + nz * off + f.sz * vv * s];
-      sign.quad(c(-0.31, ty + 2.84), c(0.31, ty + 2.84), c(0.31, ty + 3.46), c(-0.31, ty + 3.46), [nx, 0, nz], [0, 0], [1, 0], [1, 1], [0, 1], [1, 1, 1]);
+      sign.quad(c(-0.31, ty + 2.84), c(0.31, ty + 2.84), c(0.31, ty + 3.46), c(-0.31, ty + 3.46), [nx, 0, nz], [0, 0], [0.5, 0], [0.5, 1], [0, 1], [1, 1, 1]);
     }
   }
   const group = new THREE.Group();

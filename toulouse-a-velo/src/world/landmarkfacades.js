@@ -1,7 +1,7 @@
 // 名所の建物の正面に、専用のテクスチャ（facades.js）を貼る場所を決める。
 // いまはキャピトル（市庁舎）: キャピトル広場に面した、いちばん長い建物の壁を正面とする。
 // あわせて、旧市街の建物・レンガ造りの歴史的な建物群・キャピトル広場を囲む建物に印を付ける（ファサードの様式を選ぶため）。
-import { closestOnSegment, pointInPolygon, signedArea } from '../geo.js';
+import { closestOnSegment, hash01, pointInPolygon, pointInRing, signedArea } from '../geo.js';
 import { oldTownTest } from '../config.js';
 import { CAPITOLE_HEIGHT, STYLE } from './facades.js';
 
@@ -66,20 +66,45 @@ export function findCapitoleFacade(parsed) {
   return { building: best.b, origin, dir, normal: [nx, nz], t0, t1, height: CAPITOLE_HEIGHT, edges: best.edges };
 }
 
-// 壁の一部（a→c、外向きの法線 n）が正面に含まれるなら、テクスチャの横の範囲 [u0, u1] を返す
-export function facadeSpan(f, a, c, n) {
+// 壁の一部（a→c、外向きの法線 n）が正面に含まれるなら、テクスチャの横の範囲 [u0, u1] を返す。
+// other: 正面の建物ではない建物の壁。正面の線から 1.5 m 以内で、正面の範囲（t0〜t1）の中なら正面に含める
+// （利用者の写真: キャピトルの正面は一続き。地図では真ん中の右の一部が別の建物の外形になっている）
+export function facadeSpan(f, a, c, n, other = false) {
   if (!f || n[0] * f.normal[0] + n[2] * f.normal[1] < 0.7) return null;
-  const onFacade = (p) => f.edges.some((e) => closestOnSegment(p[0], p[1], e.a[0], e.a[1], e.c[0], e.c[1]).d2 < 2.5 * 2.5);
+  const t = (p) => (p[0] - f.origin[0]) * f.dir[0] + (p[1] - f.origin[1]) * f.dir[1];
+  const off = (p) => Math.abs((p[0] - f.origin[0]) * f.normal[0] + (p[1] - f.origin[1]) * f.normal[1]);
+  const onFacade = other
+    ? (p) => off(p) < 1.5 && t(p) > f.t0 - 0.5 && t(p) < f.t1 + 0.5
+    : (p) => f.edges.some((e) => closestOnSegment(p[0], p[1], e.a[0], e.a[1], e.c[0], e.c[1]).d2 < 2.5 * 2.5);
   if (!onFacade(a) || !onFacade(c)) return null;
-  const u = (p) => ((p[0] - f.origin[0]) * f.dir[0] + (p[1] - f.origin[1]) * f.dir[1] - f.t0) / (f.t1 - f.t0);
+  const u = (p) => (t(p) - f.t0) / (f.t1 - f.t0);
   return [u(a), u(c)];
 }
 
 // レンガ造りの歴史的な建物群（IGN のデータに壁の材料がないことが多い）。中心から半径 r m の大きな建物は
 // ばら色のレンガに白い石の窓枠の様式にする
 const BRICK_SITES = [
-  { name: 'Hôtel-Dieu Saint-Jacques', lat: 43.59935, lon: 1.43655, r: 85 },
-  { name: 'Hôpital de La Grave', lat: 43.60095, lon: 1.43405, r: 110 },
+  // 利用者の写真（NCM_0107・0136・0137・211104）: 背の高い 3 階（1 階 約 5 m）と屋根裏、低い勾配の暗い灰色のスレートの寄棟屋根
+  { name: 'Hôtel-Dieu Saint-Jacques', lat: 43.59935, lon: 1.43655, r: 85, floor: 5.2, roof: { material: 'slate', colour: '#55585d' } },
+  // 利用者の写真 NCM_0102・0106: ラ・グラーヴの病棟の屋根も暗い灰色のスレート
+  { name: 'Hôpital de La Grave', lat: 43.60095, lon: 1.43405, r: 110, roof: { material: 'slate', colour: '#55585d' } },
+];
+// 石の内陣の教会（利用者の写真 NCM_0095: サン・テティエンヌ大聖堂の東の内陣はレンガではなく、風雨にさらされた灰色がかった
+// ベージュの石灰岩）。建物の中心から east の向きに split m より先の壁を石の色にする（buildings.js の教会の壁）
+const STONE_CHOIRS = [{ name: 'Cathédrale Saint-Étienne', lat: 43.59988, lon: 1.45046, r: 30, east: [43.59996, 1.4515], split: 1 }];
+// 写真で様式が決まる建物（[緯度, 経度] の点を含む建物）。利用者の写真・ストリートビュー:
+// 225056 Rue du Docteur Louis Delherm の Auchan の角の白い漆喰の集合住宅、225323 Avenue de Grande-Bretagne の白い高い集合住宅と
+// 赤レンガの現代の集合住宅、210635 A620 の脇のコンクリートの格子にレンガの板の事務所、212318 Jean-Jaurès の奥の青いガラスの塔、
+// NCM_0095 サン・テティエンヌの北の赤レンガの建物
+const PHOTO_STYLES = [
+  { at: [43.594344, 1.434192], style: 'whiteModern' },
+  { at: [43.598925, 1.417837], style: 'whiteModern' },
+  { at: [43.598673, 1.417451], style: 'brickGrid' },
+  { at: [43.603912, 1.404937], style: 'brickGrid' },
+  { at: [43.604125, 1.405007], style: 'brickGrid' },
+  { at: [43.60405, 1.405277], style: 'brickGrid' },
+  { at: [43.606767, 1.450911], style: 'glass' },
+  { at: [43.600288, 1.451383], style: 'brickStone' },
 ];
 // 屋根の材料がデータにない名所の屋根
 const SLATE_ROOFS = [{ name: 'Donjon du Capitole', lat: 43.60442, lon: 1.44478, r: 10, colour: '#5f5f61' }];
@@ -94,7 +119,31 @@ export function markBrickSites(proj, buildings, areas = []) {
       if (b.info.area > 150 && Math.hypot(b.inside[0] - x, b.inside[1] - z) < s.r) {
         b.tags['building:material'] = 'brick';
         b.style = STYLE.brickStone;
+        if (s.floor) b.info.floorHeight = s.floor;
+        if (s.roof) {
+          b.tags['roof:material'] = s.roof.material;
+          b.tags['roof:colour'] = s.roof.colour;
+          if (b.info.roofShape === 'flat') b.info.roofShape = 'auto';
+          b.info.roofHeight = Math.max(b.info.roofHeight || 0, 3.5);
+        }
       }
+    }
+  }
+  for (const c of STONE_CHOIRS) {
+    const [x, z] = proj.project(c.lat, c.lon), [ex, ez] = proj.project(...c.east);
+    const l = Math.hypot(ex - x, ez - z) || 1, e = [(ex - x) / l, (ez - z) / l];
+    for (const b of buildings) {
+      if (b.info.isChurch && Math.hypot(b.inside[0] - x, b.inside[1] - z) < c.r) b.stoneFrom = { e, s0: x * e[0] + z * e[1] + c.split };
+    }
+  }
+  for (const ps of PHOTO_STYLES) {
+    const [x, z] = proj.project(...ps.at);
+    for (const b of buildings) {
+      const bb = b.bounds;
+      if (bb && (x < bb.minX || x > bb.maxX || z < bb.minZ || z > bb.maxZ)) continue;
+      if (!pointInRing(x, z, b.outer)) continue;
+      b.style = STYLE[ps.style];
+      if (ps.style !== 'brickStone') b.info.roofShape = 'flat'; // 現代の建物は陸屋根
     }
   }
   // キャピトルの主塔（donjon）は急なスレートの屋根
@@ -108,11 +157,12 @@ export function markBrickSites(proj, buildings, areas = []) {
     }
   }
   // キャピトル広場を囲む建物は、そろいのレンガ造り（1 階はアーケード）
+  // 利用者の写真: 1 階がアーケードなのは西側の一続きの建物（Galerie des Arcades）だけ。北と南は 1 階が店のレンガ造り
   const square = areas.find((a) => /^Place du Capitole$/i.test(a.name || ''));
   if (square) {
     for (const b of facingSquare(square, buildings)) {
       b.tags['building:material'] = 'brick';
-      b.style = STYLE.arcade;
+      b.style = b.inside[0] < square.bounds.minX + 6 ? STYLE.arcade : STYLE.brickStone;
     }
   }
 }
@@ -138,4 +188,61 @@ export function facingSquare(square, buildings) {
     if (facing >= 6) out.push(b);
   }
   return out;
+}
+
+// 通りの名前で決まる様式。通りの中心線から 道幅の半分 + STREET_REACH m 以内に、通りに沿った（向きの差 35° 以内）
+// 長さ 4 m 以上の壁が通りの方を向いている建物（高さ 10 m 以上）に、styles から建物ごとに選んだ様式を付ける
+// - 19 世紀末に切り開かれた通り（利用者の写真: Rue d'Alsace-Lorraine・Rue de Metz・Esquirol）: 砂色の切り石の
+//   建物（STYLE.haussmann）と灰色の亜鉛の屋根。Alsace-Lorraine の建物は IGN でレンガとされていても写真では石
+// - Rue de la République（サン・シプリアン。利用者の Street View）: 7 割はクリーム色・黄土色・サーモン色の漆喰に
+//   レンガの窓枠、3 割はレンガのまま
+const STREET_STYLES = [
+  { name: /^(Rue d'Alsace[- ]Lorraine|Rue du Languedoc)$/i, styles: [[STYLE.haussmann, 1]], slate: true },
+  // Rue de Metz・Esquirol はレンガの建物も混じる（利用者の写真: Esquirol のブラッスリー、Rue Bertrand de l'Isle の角）。
+  // IGN の壁の材料がレンガの建物はそのまま
+  { name: /^(Rue de Metz|Place [EÉ]tienne[- ]Esquirol)$/i, styles: [[STYLE.haussmann, 1]], slate: true, keepBrick: true },
+  // 利用者の写真 NCM_0096: Place Jeanne d'Arc の角の建物は黄土色の切り石のオスマン様式（通しの鉄のバルコニー・灰色のマンサード）
+  { name: /^Place Jeanne[- ]d'Arc$/i, styles: [[STYLE.haussmann, 1]], slate: true },
+  { name: /^Rue de la R[ée]publique$/i, styles: [[STYLE.ochre, 0.25], [STYLE.salmon, 0.25], [STYLE.cream, 0.2], [STYLE.brickStone, 0.15], [STYLE.brickShutters, 0.15]] },
+];
+const STREET_REACH = 10;
+const STREET_MAX_AREA = 2500; // これより大きい建物（美術館・大きな施設）は通りの様式にしない
+export function markStreetStyles(buildings, roads) {
+  for (const rule of STREET_STYLES) {
+    const segs = [];
+    for (const r of roads) {
+      if (r.tunnel || r.bridge || !rule.name.test(r.name || '')) continue;
+      for (let i = 0; i + 1 < r.pts.length; i++) segs.push([r.pts[i], r.pts[i + 1], r.width / 2 + STREET_REACH]);
+    }
+    if (!segs.length) continue;
+    for (const b of buildings) {
+      if (b.style === STYLE.arcade || b.info.height < 10 || b.info.isChurch || b.info.area > STREET_MAX_AREA || (rule.keepBrick && b.tags['building:material'] === 'brick') || !facesStreet(b, segs)) continue;
+      let r = hash01(b.id, 24);
+      b.style = rule.styles.find(([, p]) => (r -= p) < 0)?.[0] ?? rule.styles[0][0];
+      if (rule.slate) {
+        b.tags['roof:material'] = 'slate';
+        b.tags['roof:colour'] ||= '#6c6e72';
+      }
+    }
+  }
+}
+
+function facesStreet(b, segs) {
+  const bb = b.bounds;
+  const s = signedArea(b.outer) > 0 ? 1 : -1;
+  for (const [p, q, reach] of segs) {
+    if (Math.max(p[0], q[0]) + reach < bb.minX || Math.min(p[0], q[0]) - reach > bb.maxX || Math.max(p[1], q[1]) + reach < bb.minZ || Math.min(p[1], q[1]) - reach > bb.maxZ) continue;
+    const sl = Math.hypot(q[0] - p[0], q[1] - p[1]) || 1, ux = (q[0] - p[0]) / sl, uz = (q[1] - p[1]) / sl;
+    for (let i = 0; i < b.outer.length; i++) {
+      const a = b.outer[i], c = b.outer[(i + 1) % b.outer.length];
+      const L = Math.hypot(c[0] - a[0], c[1] - a[1]);
+      if (L < 4 || Math.abs(((c[0] - a[0]) * ux + (c[1] - a[1]) * uz) / L) < 0.82) continue;
+      const mx = (a[0] + c[0]) / 2, mz = (a[1] + c[1]) / 2;
+      const h = closestOnSegment(mx, mz, p[0], p[1], q[0], q[1]);
+      if (h.d2 > reach * reach) continue;
+      const nx = ((c[1] - a[1]) / L) * s, nz = (-(c[0] - a[0]) / L) * s;
+      if (nx * (h.x - mx) + nz * (h.z - mz) > 0) return true;
+    }
+  }
+  return false;
 }

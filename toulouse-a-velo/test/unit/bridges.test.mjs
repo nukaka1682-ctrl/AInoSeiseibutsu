@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MASONRY_NAME, PONT_NEUF, archLayout, archRise, bridgeGroups, bridgeStyle, columns, wetIntervals } from '../../src/world/bridges.js';
+import { MASONRY_NAME, PONT_NEUF, archLayout, archRise, bridgeGroups, bridgeStyle, columns, conditionUnderpasses, wetIntervals } from '../../src/world/bridges.js';
 import { fillWaterUnderBridges, unifyWaterLevels } from '../../src/world/parse.js';
 import { pointInRing } from '../../src/geo.js';
 import { bankVertexWidths, naturalHeight, subdivideRing } from '../../src/world/ground.js';
@@ -210,4 +210,39 @@ test('岸: 長い辺を 10 m 以下に分け、土手の高さは断面に沿っ
     assert.ok(y <= prev + 1e-9 && y > -10.31);
     prev = y;
   }
+});
+
+test('橋: 陸の上の橋は、高速道路を含めば高架（厚い桁）、ほかは薄い桁の坂・歩道橋（どちらも石の欄干でなく鉄の手すり）', () => {
+  const mw = { id: 1, type: 'motorway', width: 10, bridge: true, pts: [[0, 0], [100, 0]] };
+  const ramp = { id: 2, type: 'residential', name: 'Allée Michel Viala', width: 7, bridge: true, pts: [[0, 300], [60, 300]] };
+  const info = bridgeGroups([mw, ramp]);
+  const dry = () => 0;
+  assert.equal(bridgeStyle(mw, info.get(mw), dry).kind, 'overpass');
+  assert.equal(bridgeStyle(ramp, info.get(ramp), dry).kind, 'land');
+});
+
+test('高架の下の擁壁: 歩道の先に両側の壁を立て、壁の前と裏の格子点を道の高さに下げる', () => {
+  // 5 m の格子（x・z −100〜100）。東西の道（幅 8 m）の両脇は |z| 6〜13 m の斜面で 6 m 上の盛り土。南北の高速道路の橋が上を渡る
+  const cols = 41, rows = 41, DAT = 145, data = new Float32Array(cols * rows);
+  const bank = (z) => Math.min(6, Math.max(0, ((Math.abs(z) - 6) * 6) / 7));
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) data[r * cols + c] = bank(-100 + r * 5) + DAT;
+  const near = { ax: 0.2, bx: 20, az: 0.2, bz: 20, cols, rows, data };
+  const h = (x, z) => {
+    const u = Math.min(cols - 1.001, Math.max(0, x * 0.2 + 20)), v = Math.min(rows - 1.001, Math.max(0, z * 0.2 + 20));
+    const c = Math.floor(u), r = Math.floor(v), fu = u - c, fv = v - r, at = (rr, cc) => data[rr * cols + cc];
+    return (at(r, c) * (1 - fu) + at(r, c + 1) * fu) * (1 - fv) + (at(r + 1, c) * (1 - fu) + at(r + 1, c + 1) * fu) * fv - DAT;
+  };
+  const terrain = { flat: false, near, datum: DAT, h };
+  const road = { id: 1, type: 'secondary', width: 8, pts: [[-100, 0], [100, 0]] };
+  const mw = { id: 2, type: 'motorway', width: 10, bridge: true, pts: [[0, -40], [0, 40]] };
+  const walls = conditionUnderpasses(terrain, [road, mw]);
+  assert.ok(walls.length > 10, `壁 ${walls.length}`);
+  assert.ok(walls.some((w) => w.nz > 0.9) && walls.some((w) => w.nz < -0.9), '両側に立つ（頭の上を渡る橋は壁を切らない）');
+  for (const w of walls) {
+    assert.ok(Math.abs(Math.abs(w.az) - 5.5) < 0.01, `壁は道の縁から 1.5 m 外: z ${w.az}`);
+    assert.ok(w.at > 5.5 && w.ab < 0, `壁は道の高さから盛り土の上まで: ${w.ab}..${w.at}`);
+  }
+  assert.ok(h(10, 5.2) < 0.05 && h(10, -5.2) < 0.05, '壁の足元は道の高さ（斜面が壁の前に出ない）');
+  assert.ok(h(10, 17) > 5.9, '壁の裏の先は盛り土の上');
+  assert.equal(terrain.underpass, walls);
 });

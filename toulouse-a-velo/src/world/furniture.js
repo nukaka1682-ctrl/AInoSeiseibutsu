@@ -13,8 +13,9 @@
 //   広い大通りは細い鋼の高い柱に斜めの腕（Jean Jaurès・Grande-Bretagne）、幹線の環状道路とスタジアムの近くは円盤形
 // - 車止めは歩道では黒い細い柱（potelets、写真 7・8・17・21・23・27）、広場と Rue de Metz（写真 13）は花崗岩の円柱
 // - バス・自転車レーンが縁石に沿う側（markings.js の laneLayout）には路上駐車しない
-// - Place du Capitole: 灰色の高い 5 灯の燭台形の街灯を広場の縁に約 12 本（キャピトルの正面の側はあける）、
-//   西と南のアーケードの前にカフェのテラス（白い四角のパラソル・テーブル 2 つ・椅子 4 つ）。Place Wilson も縁にテラス
+// - Place du Capitole: 暗い灰青色の高い 5 灯の燭台形の街灯を広場の縁に約 12 本（キャピトルの正面の側はあける）、
+//   西と南のアーケードの前にカフェのテラス（白い四角のパラソル・テーブル 2 つ・椅子 4 つ）、縁に花崗岩の角石・ベンチ・
+//   車止めの列、南の縁に暗い植木箱。Place Wilson も縁にテラス
 // 「旧市街」は右岸の歴史的な中心だけ（config.js の historicCoreTest）。左岸のサン・シプリアン（Place Olivier・
 // Château d'eau の角）は外と同じ（ユーザーの写真のメモ 1・5・7）
 // - ごみ箱（黒い輪の形）: 横断歩道の近く・広場・ときどき歩道。大きなごみ収集容器（緑・青）: 広い歩道にときどき
@@ -30,12 +31,16 @@ import { inLaneBand } from './markings.js';
 export const FURNITURE_FAR = 280; // これより遠い小物は描かない（m、自転車から）
 const REFILL = 12; // 自転車がこれだけ動いたら、描く小物を選び直す（m）
 
+const PROMENADE_STEP = 18; // 河岸の下の遊歩道の街灯の間隔
+const PROMENADES = /^Promenade Henri[- ]Martin$/i; // 街灯を並べる河岸の下の遊歩道
 const LIGHT_STEP = 27; // 横向きの灯具の街灯の間隔（片側だけの通り。左右交互の通りは片側でこの 2 倍）
 const DISC_STEP = 32; // 大通りの円盤形の街灯の間隔（両側に向かい合わせ）
 const BOULEVARD = new Set(['trunk', 'primary', 'secondary']);
 export const CAR_L = 4.2, CAR_W = 1.8;
 const CAR_PITCH = 5.6; // 縦列駐車の 1 台分の長さ（車＋前後のすき間）
 const CURB_GAP = 0.15; // 縁石と駐車の車のすき間
+const MAIN_BUS = /^(trunk|primary|secondary|tertiary)$/; // バス停の待合所を置く道
+const SHELTER_STEP = 200, MORRIS_STEP = 260;
 export const BIKE_LANE = 3; // 駐車の車の横に残す車道の幅（自転車が通れるように）
 const PARK_TYPES = new Set(['residential', 'unclassified', 'tertiary', 'secondary', 'road']);
 const KERB_TYPES = new Set(['residential', 'unclassified', 'road']); // 歩道に半分乗り上げて止める通り
@@ -43,6 +48,7 @@ const KERB_OVER = 0.85; // 半分乗り上げた車の、縁石の車道側の�
 const KERB_MIN_E = 1.6; // 半分乗り上げて止める歩道の最小の幅
 const BOLLARD_STEP = 1.4;
 const CENTRE_R = 1500; // 広い歩道に車止めを並べる中心部（原点＝Pont Neuf からの距離）
+const NARROW_BOLLARD_R = 1100, NARROW_BOLLARD_STEP = 2.1; // 狭い歩道の縁にも車止めを並べる中心部（Saint-Cyprien を含む）と間隔（m）
 
 // 車の色（写真の路上駐車: 白・銀・灰・黒・紺が大半、赤やほかの色は少し）。[sRGB, 割合]
 // （ユーザーのストリートビュー: 白・銀・灰が多く、黒は少ない）
@@ -58,6 +64,9 @@ const BIN_COLORS = ['#2f6a3c', '#2c5a94']; // ごみ収集容器（緑・青）
 
 // ---------------------------------------------------------------- 位置の計算（純粋な関数）
 // 道の始点からの距離 [s0, s1] の中の、step おきの位置（phase だけずらす）。k: 何番目か（道全体で決まる）
+const PLANTER_STREETS = /^Rue d'Alsace[- ]Lorraine$/i;
+const PLANTER_STEP = 28;
+
 export function slotsAlong(s0, s1, step, phase = 0) {
   const out = [];
   for (let k = Math.ceil((s0 - phase) / step - 1e-9); phase + k * step <= s1 + 1e-9; k++) out.push({ k, s: phase + k * step });
@@ -215,6 +224,7 @@ function contextOf(parsed, plan) {
   c = {
     plazas,
     parkings: areas.filter((a) => a.type === 'parking' && a.outer?.length >= 3),
+    promenades: (parsed.roads || []).filter((r) => PROMENADES.test(r.name || '') && !r.bridge && !r.tunnel),
     nearJunction: (x, z, r) => near(jGrid, plan.junctions, x, z, r, (n) => Math.hypot(n.x - x, n.z - z) < r),
     nearBridgeEnd: (x, z, r) => near(eGrid, ends, x, z, r, (p) => Math.hypot(p[0] - x, p[1] - z) < r),
     nearRail: (x, z, r) => near(rGrid, rails, x, z, r, (s) => segD(x, z, s) < r),
@@ -261,7 +271,7 @@ function contextOf(parsed, plan) {
 // 戻り値: 種類ごとの { x, y, z, a（向き）, sx, sy（大きさ）, color } の列と、当たり判定（colliders）
 export function planFurniture({ parsed, plan, clip, curbs = [], inOldTown = () => false, heightAt = () => 0, onRoad = () => false, solid = () => false, trunks = [] }) {
   const ctx = contextOf(parsed, plan);
-  const out = { lights: [], discs: [], candelabra: [], bollards: [], cars: [], bins: [], containers: [], terraces: [], colliders: [] };
+  const out = { lights: [], discs: [], candelabra: [], bollards: [], blocks: [], planters: [], cars: [], bins: [], containers: [], terraces: [], shelters: [], columns: [], colliders: [] };
   const inClip = (x, z) => x >= clip.minX && x < clip.maxX && z >= clip.minZ && z < clip.maxZ;
   // バス・自転車レーンの帯（markings.js の断面）にかかる車は、どこから置いた車でも置かない（縁石の列は隣の区間の車道・
   // 駐車場の区画が車道にかかる所も。Avenue de Grande-Bretagne の自転車レーン）
@@ -327,12 +337,18 @@ export function planFurniture({ parsed, plan, clip, curbs = [], inOldTown = () =
       }
     }
 
-    // ---- 花崗岩の車止め: 中心部の広い歩道（通りの片側ごとに半分。広場の縁は下で広場の外周から）
-    if (hash01(id * 2 + side, 52) < 0.5) {
+    // ---- 花崗岩の車止め: 中心部の広い歩道（通りの片側ごとに半分。広場の縁は下で広場の外周から）と、中心部の狭い歩道の縁
+    // （ユーザーのストリートビュー: Rue de la République・Place Esquirol・Rue Laganne は狭い歩道の縁にも黒い車止めが約 2 m おきに並ぶ。
+    // 大通りと、歩道に半分乗り上げて止める通りは除く）
+    const wideSide = hash01(id * 2 + side, 52) < 0.5;
+    {
+      let lastNarrow = -Infinity;
       for (const { s } of slotsAlong(...range(0.6), BOLLARD_STEP, 0.7)) {
         const p = curbAt(rows, s);
         const x = p.cx + p.nx * 0.3, z = p.cz + p.nz * 0.3;
-        if (p.e < 6.5 || Math.hypot(x, z) > CENTRE_R || ctx.plazaAt(x, z)) continue;
+        const narrow = p.e >= 1.2 && p.e < 6.5;
+        if (narrow ? Math.hypot(x, z) > NARROW_BOLLARD_R || s - lastNarrow < NARROW_BOLLARD_STEP || road.width >= 9 || parkMode(road, p.e) === 'kerb' : !wideSide || p.e < 6.5 || Math.hypot(x, z) > CENTRE_R) continue;
+        if (ctx.plazaAt(x, z)) continue;
         if (ctx.crossingZone(road, x, z, 2.3) || ctx.nearJunction(x, z, road.width / 2 + 1) || !clear(x, z, 0.14)) continue;
         const granite = GRANITE_STREETS.test(road.name || '');
         // 黒い細い車止めは一続きにせず、約 7 m の組ごとに 3 割ほど抜く（写真: 横断歩道の近く・切れ目ごとの組）
@@ -340,6 +356,7 @@ export function planFurniture({ parsed, plan, clip, curbs = [], inOldTown = () =
         // 歩道は黒い細い車止め（potelets。ユーザーの写真 7・8・17・21・23: 旧市街の Alsace-Lorraine・Lafayette も）。
         // 灰色の花崗岩の円柱は広場（下の広場の外周）と、石の柱の並ぶ通り（Rue de Metz、写真 13）だけ
         out.bollards.push({ x, z, y: heightAt(x, z), type: granite ? 'granite' : 'potelet', a: yaw(p.ux, p.uz) });
+        if (narrow) lastNarrow = s;
         take(x, z, 0.16);
         circle(x, z, 0.15);
       }
@@ -352,7 +369,7 @@ export function planFurniture({ parsed, plan, clip, curbs = [], inOldTown = () =
     const lane = lay && (right ? lay.right : lay.left);
     const mode = lane ? null : parkMode(road, curbAt(rows, (s0 + s1) / 2).e);
     if (mode && !road.bridge) {
-      if (mode === 'both' || (hash01(id, 60) < 0.5) === right) {
+      if (mode === 'both' || (road.parkSide ? road.parkSide === 'right' : hash01(id, 60) < 0.5) === right) {
         const kerb = mode === 'kerb';
         const off = kerb ? -KERB_OVER + CAR_W / 2 : CURB_GAP + CAR_W / 2; // 縁石の車道側の縁から車の中心まで（車道の側へ）
         for (const { k, s: sk } of slotsAlong(s0 - CAR_PITCH, s1 + CAR_PITCH, CAR_PITCH, hash01(id, 61) * CAR_PITCH)) {
@@ -412,6 +429,38 @@ export function planFurniture({ parsed, plan, clip, curbs = [], inOldTown = () =
       take(x, z, 0.35);
       circle(x, z, 0.28);
     }
+
+    // ---- バス停の待合所（旧市街の外の幹線道路の広い歩道に、片側ずつ 200 m おきの半分ほど。ガラスの背の壁・平らな屋根・広告の板・ベンチと
+    // 停留所の標識。開いた側を車道に向ける）。模型の +z が車道の側（向き yaw(-n_z, n_x)）
+    if (MAIN_BUS.test(road.type)) {
+      for (const { k, s } of slotsAlong(s0 + 8, s1 - 8, SHELTER_STEP, hash01(id, 90) * SHELTER_STEP)) {
+        const h = (id ^ Math.imul(k + 53 * side, 0x2f6b8a1d)) | 0;
+        if (hash01(h, 91) > 0.5) continue;
+        const p = curbAt(rows, s);
+        if (p.e < 2.8) continue;
+        const x = p.cx + p.nx * 1.3, z = p.cz + p.nz * 1.3;
+        const ax = -p.nz, az = p.nx; // 待合所の長い向き
+        if (inOldTown(x, z) || ctx.crossingZone(road, x, z, 7) || ctx.nearJunction(x, z, 15) || onLane(x, z)) continue;
+        // 待合所の足元（長い向きに 3 点）に小物がなく、両端まで歩道の上（縁石の際の車止めは前に残ってよい）
+        if ([-1, 0, 1].some((t) => !clear(x + ax * 1.4 * t, z + az * 1.4 * t, 0.85))) continue;
+        if ([-1, 1].some((t) => heightAt(x + ax * 1.9 * t, z + az * 1.9 * t) < 0.02)) continue;
+        out.shelters.push({ x, z, y: heightAt(x, z), a: yaw(ax, az) });
+        take(x, z, 2.2);
+        boxC(x, z, ax, az, 1.95, 0.75);
+      }
+    }
+    // ---- モリス柱（広告の円柱。旧市街の広い歩道に約 260 m おき、深緑の柱とドームの屋根）
+    for (const { k, s } of slotsAlong(s0 + 6, s1 - 6, MORRIS_STEP, hash01(id, 94) * MORRIS_STEP)) {
+      const h = (id ^ Math.imul(k + 1, 0x5bd1e995)) | 0;
+      if (hash01(h, 95) > 0.5 || (hash01(h, 97) < 0.5) !== right) continue; // 片側だけ
+      const p = curbAt(rows, s);
+      if (p.e < 3.5) continue;
+      const x = p.cx + p.nx * 1.3, z = p.cz + p.nz * 1.3;
+      if (!inOldTown(x, z) || heightAt(x, z) < 0.02 || ctx.crossingZone(road, x, z, 3) || ctx.nearJunction(x, z, 6) || !clear(x, z, 1.1)) continue;
+      out.columns.push({ x, z, y: heightAt(x, z), a: hash01(h, 96) * Math.PI * 2 });
+      take(x, z, 1.1);
+      circle(x, z, 0.62);
+    }
   }
 
   // ---- ごみ箱: 横断歩道の角（約 3 割）。歩道の上だけ
@@ -430,6 +479,29 @@ export function planFurniture({ parsed, plan, clip, curbs = [], inOldTown = () =
         take(x, z, 0.35);
         circle(x, z, 0.28);
       }
+    }
+  }
+
+  // ---- Rue d'Alsace-Lorraine（利用者の Street View 211548・211704）: 通りの真ん中から少し西寄りに、低い植え込みの箱
+  // （3 × 1.4 m・高さ 0.5 m、低木と小さな常緑のタイサンボク）を約 28 m おき。位置は道の始点からの距離で決める
+  for (const road of parsed.roads) {
+    if (!PLANTER_STREETS.test(road.name || '') || road.bridge || road.tunnel) continue;
+    const pts = road.pts, hid = road.id | 0;
+    let acc = 0;
+    for (let i = 0; i + 1 < pts.length; i++) {
+      const [ax, az] = pts[i], [bx, bz] = pts[i + 1], L = Math.hypot(bx - ax, bz - az);
+      if (L < 1e-6) continue;
+      const ux = (bx - ax) / L, uz = (bz - az) / L;
+      // 道の向きによらず西寄り（x の小さい側）
+      const sx = -uz < 0 ? -1 : 1, nx = -uz * sx, nz = ux * sx;
+      for (const { s } of slotsAlong(acc + 6, acc + L - 6, PLANTER_STEP, hash01(hid, 95) * PLANTER_STEP)) {
+        const t = s - acc, x = ax + ux * t + nx * 2.2, z = az + uz * t + nz * 2.2;
+        if (!inClip(x, z) || ctx.nearJunction(x, z, 6) || !clear(x, z, 1.6)) continue;
+        out.planters.push({ x, z, y: heightAt(x, z), a: yaw(ux, uz), type: 'low' });
+        take(x, z, 1.6);
+        boxC(x, z, ux, uz, 1.5, 0.7);
+      }
+      acc += L;
     }
   }
 
@@ -458,6 +530,24 @@ export function planFurniture({ parsed, plan, clip, curbs = [], inOldTown = () =
       }
       // カフェのテラス: 西と南の縁（アーケードの前。縁の車道の外）から 7.5 m 内側に 9 m おき
       for (const p of ringSamples(a.outer, 9, 7.5, 3)) if (p.nx > 0.7 || p.nz < -0.7) terrace(p, okC);
+      // 利用者の写真（Street View・NCM_0097）: 縁の道と広場の境に、ばら色がかった灰色の花崗岩の角石（0.55 m 角）と長い石の
+      // ベンチ、円柱の車止めを約 1.9 m おきに並べる（約 20 m ごとに 4 m の切れ目）。キャピトルの正面の側はあける
+      for (const p of ringSamples(a.outer, 1.9, 3, 0.5)) {
+        if (p.nx < -0.7 || p.i % 11 >= 9 || !okC(p.x, p.z, 0.5)) continue;
+        const k = p.i % 11, y = heightAt(p.x, p.z), ang = yaw(p.ux, p.uz);
+        if (k % 3 === 2) out.bollards.push({ x: p.x, z: p.z, y, type: 'granite', a: ang });
+        else out.blocks.push({ x: p.x, z: p.z, y, a: ang, type: k === 4 ? 'bench' : 'cube' });
+        take(p.x, p.z, 0.5);
+        if (k === 4) boxC(p.x, p.z, p.ux, p.uz, 0.62, 0.27);
+        else circle(p.x, p.z, k % 3 === 2 ? 0.15 : 0.32);
+      }
+      // 南の縁（テラスの前）: 暗い灰緑色の大きな植木箱（1.6 m 角・高さ 1.3 m、常緑の丸い木）を 6 m おき
+      for (const p of ringSamples(a.outer, 6, 12, 2)) {
+        if (!(p.nz < -0.7) || !okC(p.x, p.z, 1.1)) continue;
+        out.planters.push({ x: p.x, z: p.z, y: heightAt(p.x, p.z), a: yaw(p.ux, p.uz) });
+        take(p.x, p.z, 1.1);
+        boxC(p.x, p.z, p.ux, p.uz, 0.8, 0.8);
+      }
       continue;
     }
     if (/Wilson/i.test(a.name)) for (const p of ringSamples(a.outer, 13, 3.5, 4)) if (hash01(hid + p.i, 94) < 0.6) terrace(p, ok);
@@ -512,6 +602,29 @@ export function planFurniture({ parsed, plan, clip, curbs = [], inOldTown = () =
       const sl = 0.93 + hash01(h, 82) * 0.12;
       out.cars.push({ x: st.x, z: st.z, y: 0, a: yaw(st.ux, st.uz), sx: sl, sy: 0.94 + hash01(h, 83) * 0.16, color: carColor(hash01(h, 84)) });
       boxC(st.x, st.z, st.ux, st.uz, (CAR_L / 2) * sl, CAR_W / 2);
+    }
+  }
+
+  // ---- 河岸の下の遊歩道の街灯（利用者の写真 NCM_0125・0138・0174: ラ・ドラードから Saint-Pierre までの下の段の遊歩道に
+  // 街灯が並ぶ）。道の陸の側（岸壁の足元）に PROMENADE_STEP m ごと
+  for (const r of ctx.promenades) {
+    let next = hash01(r.id | 0, 61) * PROMENADE_STEP, s0 = 0;
+    for (let i = 0; i + 1 < r.pts.length; i++) {
+      const [ax, az] = r.pts[i], [bx, bz] = r.pts[i + 1], L = Math.hypot(bx - ax, bz - az);
+      const ux = (bx - ax) / (L || 1), uz = (bz - az) / (L || 1);
+      for (; next < s0 + L; next += PROMENADE_STEP) {
+        const t = next - s0;
+        const cx = ax + ux * t, cz = az + uz * t;
+        // 陸の側: 6 m 先が水（solid）でない側
+        const sd = !solid(cx - uz * 6, cz + ux * 6) ? 1 : !solid(cx + uz * 6, cz - ux * 6) ? -1 : 0;
+        if (!sd) continue;
+        const off = r.width / 2 + 0.4, x = cx - uz * off * sd, z = cz + ux * off * sd;
+        if (!inClip(x, z) || !clear(x, z, 0.6) || onRoad(x, z, 0.2)) continue;
+        out.lights.push({ x, z, y: heightAt(x, z), a: yaw(uz * sd, -ux * sd), type: 'swan' });
+        take(x, z, 0.4);
+        circle(x, z, 0.12);
+      }
+      s0 += L;
     }
   }
   return out;
@@ -675,19 +788,64 @@ export function poteletGeometry() {
   return toGeometry(w);
 }
 
-// Place du Capitole の灰色の高い燭台形の街灯（約 6 m、十字の 4 本の腕と頂上に白い球 5 つ）。ユーザーの写真 19
+// Place du Capitole の燭台形の街灯（利用者の写真・Street View）: 暗い灰青色の鋳鉄（#4a5058）、高さ約 9.5 m、
+// 溝の付いた柱に 4 本の腕と頂上の、六角形のパリ風の角灯 5 つ（ガラスと尖った冠）
 export function capitoleLampGeometry() {
   const w = new MeshWriter();
-  const grey = rgb('#80868a'), globe = rgb('#efebe1');
-  column(w, 0, 0, 0.22, 0.16, 0, 1.0, 8, grey, { top: grey });
-  column(w, 0, 0, 0.1, 0.07, 1.0, 5.6, 8, grey);
-  box(w, -0.75, 4.86, -0.035, 0.75, 4.94, 0.035, grey);
-  box(w, -0.035, 4.86, -0.75, 0.035, 4.94, 0.75, grey);
-  for (const [x, y, z] of [[0.72, 4.94, 0], [-0.72, 4.94, 0], [0, 4.94, 0.72], [0, 4.94, -0.72], [0, 5.6, 0]]) {
-    // 丸い球（10 角・横の輪 3 つ。インスタンスなので安い）と下の細い首
-    const prof = [[0.05, 0], [0.15, 0.06], [0.2, 0.18], [0.16, 0.32], [0, 0.42]];
-    for (let k = 0; k + 1 < prof.length; k++) column(w, x, z, prof[k][0], prof[k + 1][0], y + prof[k][1], y + prof[k + 1][1], 10, globe);
+  const iron = rgb('#4a5058'), glass = rgb('#ece6d4');
+  column(w, 0, 0, 0.3, 0.22, 0, 1.2, 8, iron, { top: iron });
+  column(w, 0, 0, 0.16, 0.12, 1.2, 1.5, 8, iron, { top: iron });
+  column(w, 0, 0, 0.11, 0.08, 1.5, 8.3, 8, iron);
+  for (const [ux, uz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    // 腕（上の横木と、下の短い支え）
+    const arm = (L, y0, y1) => box(w, ux ? Math.min(0, ux * L) : -0.03, y0, uz ? Math.min(0, uz * L) : -0.03, ux ? Math.max(0, ux * L) : 0.03, y1, uz ? Math.max(0, uz * L) : 0.03, iron);
+    arm(0.95, 7.38, 7.46);
+    arm(0.45, 7.0, 7.05);
   }
+  const lantern = (x, y, z) => {
+    column(w, x, z, 0.06, 0.1, y, y + 0.12, 6, iron, { bottom: iron });
+    column(w, x, z, 0.13, 0.19, y + 0.12, y + 0.62, 6, glass);
+    column(w, x, z, 0.23, 0.05, y + 0.62, y + 0.86, 6, iron, { bottom: iron });
+    column(w, x, z, 0.03, 0, y + 0.86, y + 1.0, 4, iron);
+  };
+  for (const [x, z] of [[0.95, 0], [-0.95, 0], [0, 0.95], [0, -0.95]]) lantern(x, 7.46, z);
+  lantern(0, 8.3, 0);
+  return toGeometry(w);
+}
+
+// キャピトル広場の縁の花崗岩の角石（0.55 m 角・高さ 0.45 m）と長い石のベンチ（1.25 × 0.5 m）。ばら色がかった灰色
+export function graniteBlockGeometry(long = false) {
+  const w = new MeshWriter();
+  const g = rgb('#a2958f'), top = rgb('#b3a7a1');
+  const hx = long ? 0.62 : 0.275, hz = long ? 0.25 : 0.275;
+  box(w, -hx, 0, -hz, hx, 0.45, hz, g, { top });
+  return toGeometry(w);
+}
+
+// 低い植え込みの箱（3 × 1.4 m・高さ 0.5 m、暗い灰色）に低木と小さな常緑の木（高さ約 5 m）。x 軸が箱の長い向き
+export function lowPlanterGeometry() {
+  const w = new MeshWriter();
+  const boxCol = rgb('#4a4d4f'), soil = rgb('#3a2e24'), shrub = rgb('#3d4a26'), bark = rgb('#5a524a'), leaf = rgb('#3f4b22');
+  box(w, -1.5, 0, -0.7, 1.5, 0.5, 0.7, boxCol, { top: soil });
+  for (const x of [-1.0, 1.0]) {
+    const prof = [[0.2, 0], [0.5, 0.15], [0.55, 0.4], [0.35, 0.65], [0, 0.75]];
+    for (let k = 0; k + 1 < prof.length; k++) column(w, x, 0, prof[k][0], prof[k + 1][0], 0.5 + prof[k][1], 0.5 + prof[k + 1][1], 7, shrub, { bottom: k === 0 ? shrub : null });
+  }
+  column(w, 0, 0, 0.08, 0.06, 0.5, 2.6, 5, bark);
+  const prof = [[0.4, 0], [1.3, 0.5], [1.5, 1.3], [1.2, 2.1], [0.6, 2.6], [0, 2.8]];
+  for (let k = 0; k + 1 < prof.length; k++) column(w, 0, 0, prof[k][0], prof[k + 1][0], 2.1 + prof[k][1], 2.1 + prof[k + 1][1], 9, leaf, { bottom: k === 0 ? leaf : null });
+  return toGeometry(w);
+}
+
+// 暗い灰緑色の大きな植木箱（1.6 m 角・高さ 1.3 m）に、刈り込んだ常緑の丸い木（幹 1 m・樹冠の直径約 1.8 m）
+export function planterGeometry() {
+  const w = new MeshWriter();
+  const boxCol = rgb('#3c4644'), rim = rgb('#4a5452'), soil = rgb('#3a2e24'), bark = rgb('#4a3f36'), leaf = rgb('#344a2c');
+  box(w, -0.8, 0, -0.8, 0.8, 1.25, 0.8, boxCol, { top: soil });
+  for (const [x0, z0, x1, z1] of [[-0.82, -0.82, 0.82, -0.7], [-0.82, 0.7, 0.82, 0.82], [-0.82, -0.7, -0.7, 0.7], [0.7, -0.7, 0.82, 0.7]]) box(w, x0, 1.25, z0, x1, 1.32, z1, rim);
+  column(w, 0, 0, 0.07, 0.06, 1.25, 2.4, 5, bark);
+  const prof = [[0.2, 0], [0.75, 0.25], [0.95, 0.75], [0.85, 1.25], [0.5, 1.6], [0, 1.75]];
+  for (let k = 0; k + 1 < prof.length; k++) column(w, 0, 0, prof[k][0], prof[k + 1][0], 2.2 + prof[k][1], 2.2 + prof[k + 1][1], 9, leaf, { bottom: k === 0 ? leaf : null });
   return toGeometry(w);
 }
 
@@ -780,6 +938,38 @@ export function containerGeometry() {
   box(w, -0.6, 0, -0.5, 0.6, 0.1, 0.5, dark);
   box(w, -0.62, 0.1, -0.52, 0.62, 1.12, 0.52, paint, { paint: 1 });
   box(w, -0.66, 1.12, -0.56, 0.66, 1.19, 0.57, lid, { paint: 1, top: lid });
+  return toGeometry(w);
+}
+
+// バス停の待合所（長さ 3.9・奥行き 1.6・高さ 2.5 m。模型の x が長い向き、+z が開いた側＝車道）: 灰色の柱と平らな屋根、
+// 淡い青灰色のガラスの背の壁、端の広告の板（明るい絵）、金属のベンチ、開いた側の端に停留所の標識の柱
+export function shelterGeometry() {
+  const w = new MeshWriter();
+  const frame = rgb('#4b5156'), roof = rgb('#6d7377'), under = rgb('#a9adae'), glass = rgb('#a7bcc2'), poster = rgb('#e6dcc2'), bench = rgb('#3a3f42'), sign = rgb('#2c5a9e'), white = rgb('#f1f0ea');
+  for (const x of [-1.8, 1.8]) for (const z of [-0.68, 0.6]) box(w, x - 0.04, 0, z - 0.04, x + 0.04, 2.36, z + 0.04, frame);
+  box(w, -1.95, 2.36, -0.8, 1.95, 2.5, 0.85, roof, { bottom: under });
+  box(w, -1.76, 0.12, -0.7, 1.76, 2.3, -0.66, glass);
+  box(w, 1.74, 0.1, -0.64, 1.84, 2.25, 0.45, frame);
+  box(w, 1.73, 0.3, -0.58, 1.85, 2.1, 0.39, poster);
+  box(w, -1.3, 0.44, -0.62, 0.7, 0.5, -0.3, bench);
+  for (const x of [-1.2, 0.6]) box(w, x - 0.03, 0, -0.5, x + 0.03, 0.44, -0.44, bench);
+  column(w, -2.35, 0.55, 0.04, 0.04, 0, 2.7, 6, frame, { top: frame });
+  box(w, -2.6, 2.25, 0.52, -2.1, 2.62, 0.58, sign);
+  box(w, -2.55, 2.3, 0.585, -2.15, 2.45, 0.59, white);
+  return toGeometry(w);
+}
+
+// モリス柱（広告の円柱、高さ約 3.5 m）: 深緑の台座と帯、ポスターの胴、張り出した蛇腹とドーム、頂の飾り
+export function morrisGeometry() {
+  const w = new MeshWriter();
+  const green = rgb('#2e4a3b'), poster = rgb('#ddd2b6'), dark = rgb('#24392e');
+  column(w, 0, 0, 0.66, 0.62, 0, 0.4, 12, green, { top: green });
+  column(w, 0, 0, 0.56, 0.56, 0.4, 0.55, 12, dark);
+  column(w, 0, 0, 0.56, 0.56, 0.55, 2.45, 12, poster);
+  column(w, 0, 0, 0.58, 0.58, 2.45, 2.62, 12, green);
+  column(w, 0, 0, 0.7, 0.7, 2.62, 2.78, 12, green, { bottom: dark, top: green });
+  column(w, 0, 0, 0.64, 0.12, 2.78, 3.3, 12, green);
+  column(w, 0, 0, 0.06, 0.02, 3.3, 3.6, 6, dark, { top: dark });
   return toGeometry(w);
 }
 
@@ -893,7 +1083,7 @@ export function buildFurniture(opts, cw = null) {
     for (const [k, list] of Object.entries(items)) {
       if (k === 'colliders') continue;
       for (const it of list) {
-        it.y = (it.y || 0) + T.h(it.x, it.z);
+        it.y = (it.y || 0) + T.top(it.x, it.z);
         if (k === 'cars') {
           // 模型の x 軸（車の前後）の向きの勾配
           const fx = Math.cos(it.a || 0), fz = -Math.sin(it.a || 0);
@@ -914,10 +1104,16 @@ export function buildFurniture(opts, cw = null) {
   set.add('candelabra', candelabraGeometry(), mat, of(items.candelabra, 'black', 'black'));
   set.add('capitole-lights', capitoleLampGeometry(), mat, of(items.candelabra, 'capitole', 'black'), { shadow: true });
   set.add('bollards', bollardGeometry(), mat, of(items.bollards, 'granite', 'granite'));
+  set.add('granite-blocks', graniteBlockGeometry(), mat, of(items.blocks, 'cube', 'cube'), { shadow: true });
+  set.add('granite-benches', graniteBlockGeometry(true), mat, of(items.blocks, 'bench', 'cube'), { shadow: true });
+  set.add('planters', planterGeometry(), mat, of(items.planters, 'tall', 'tall'), { shadow: true });
+  set.add('low-planters', lowPlanterGeometry(), mat, of(items.planters, 'low', 'tall'), { shadow: true });
   set.add('potelets', poteletGeometry(), mat, of(items.bollards, 'potelet', 'granite'));
   set.add('terraces', terraceGeometry(), mat, items.terraces);
   set.add('bins', binGeometry(), mat, items.bins);
   set.add('containers', containerGeometry(), mat, items.containers, { shadow: true });
+  set.add('shelters', shelterGeometry(), mat, items.shelters, { shadow: true });
+  set.add('morris', morrisGeometry(), mat, items.columns, { shadow: true });
   if (cw) {
     for (const c of items.colliders) {
       if (c.r) cw.addCircle(c.x, c.z, c.r);

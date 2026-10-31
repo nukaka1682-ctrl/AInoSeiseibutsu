@@ -70,6 +70,7 @@ const NO_PLAZA = maskTexture(new Uint8Array(1), 1, 1);
 const NOISE = /* glsl */ `
 varying vec2 vCoverPos;
 varying float vOldTown;
+varying float vSlab;
 uniform sampler2D coverMap, plazaMap, tPaving, tSidewalk, tGravel, tGround, tGrass, tSetts;
 uniform vec4 coverRect;
 uniform vec3 c_old, c_public, c_asphalt, c_gravel, c_concrete, c_lawn, c_dry, c_shade, c_earth, c_pavers, c_setts;
@@ -109,6 +110,8 @@ const FRAGMENT = /* glsl */ `
   // 旧市街: 地図の広場の中は花崗岩の石畳、ほかは通りと同じ小舗石
   vec3 setts = texture2D(tSetts, cp / ${SETT_TILE.toFixed(2)}).rgb * c_setts;
   vec3 pub = mix(sidewalk * c_public, mix(setts, paving, texture2D(plazaMap, cuv).r), vOldTown);
+  // 河岸の下の段・ポン・ヌフの橋のたもと: 大きな花崗岩の板（利用者の写真 NCM_0136・0137・210627）
+  pub = mix(pub, paving * vec3(0.86, 0.89, 0.95), vSlab); // 少し灰色に寄せる
   // 敷地の中: アスファルト → コンクリート → ところどころ砂利（big の大きい所）
   vec3 priv = mix(sidewalk * c_asphalt, texture2D(tGround, cp / 6.0).rgb * c_concrete, smoothstep(0.42, 0.52, big));
   priv = mix(priv, gravel * c_gravel, smoothstep(0.64, 0.7, big));
@@ -130,8 +133,8 @@ function onBeforeCompile(uniforms) {
   return (shader) => {
     Object.assign(shader.uniforms, uniforms);
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute float oldTown;\nvarying vec2 vCoverPos;\nvarying float vOldTown;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvCoverPos = (modelMatrix * vec4(transformed, 1.0)).xz;\nvOldTown = oldTown;');
+      .replace('#include <common>', '#include <common>\nattribute float oldTown;\nattribute float quaySlab;\nvarying vec2 vCoverPos;\nvarying float vOldTown;\nvarying float vSlab;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvCoverPos = (modelMatrix * vec4(transformed, 1.0)).xz;\nvOldTown = oldTown;\nvSlab = quaySlab;');
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>\n${NOISE}`)
       .replace('#include <map_fragment>', FRAGMENT);
@@ -141,7 +144,8 @@ function onBeforeCompile(uniforms) {
 // 1 枚の板: bounds（ローカル座標の範囲）を覆う。cover: { cols, rows, rle }、inOldTown(x, z): 旧市街か、
 // parsed: 地図（広場と並木道の名前で覆いを補正する。data/cover.js の coverStamps）
 // geometry: 地形のタイルの地面（terrainmesh.js。頂点はワールド座標）。あればそれに重ねて描く（同じ三角形なので地面とぴったり重なる）
-export function buildCoverMesh(cover, bounds, shared, inOldTown = () => false, parsed = null, geometry = null) {
+// lowQuay(x, z): 小舗石ではなく大きな灰色の花崗岩の板にする所か（利用者の写真: ラ・ドラードの下の段・ポン・ヌフの橋のたもと）
+export function buildCoverMesh(cover, bounds, shared, inOldTown = () => false, parsed = null, geometry = null, lowQuay = null) {
   const grid = decodeCover(cover);
   const w = bounds.maxX - bounds.minX, h = bounds.maxZ - bounds.minZ;
   let cx = (bounds.minX + bounds.maxX) / 2, cz = (bounds.minZ + bounds.maxZ) / 2;
@@ -153,13 +157,18 @@ export function buildCoverMesh(cover, bounds, shared, inOldTown = () => false, p
     g.deleteAttribute('uv');
   }
   const pos = g.attributes.position;
-  const old = new Float32Array(pos.count);
+  const old = new Float32Array(pos.count), slab = new Float32Array(pos.count);
   let anyOld = false;
-  for (let i = 0; i < pos.count; i++) if ((old[i] = inOldTown(cx + pos.getX(i), cz + pos.getZ(i)) ? 1 : 0)) anyOld = true;
+  for (let i = 0; i < pos.count; i++) {
+    const x = cx + pos.getX(i), z = cz + pos.getZ(i), low = lowQuay ? lowQuay(x, z) : false;
+    slab[i] = low ? 1 : 0;
+    if ((old[i] = inOldTown(x, z) && !low ? 1 : 0)) anyOld = true;
+  }
   g.setAttribute('oldTown', new THREE.BufferAttribute(old, 1));
+  g.setAttribute('quaySlab', new THREE.BufferAttribute(slab, 1));
   // 旧市街にかかる板だけ、広場の中の印（公道を花崗岩の石畳にする所）を作る
   const mask = parsed && anyOld ? new Uint8Array(grid.cols * grid.rows) : null;
-  if (parsed) stampCover(grid, bounds, coverStamps(parsed), mask);
+  if (parsed) stampCover(grid, bounds, coverStamps(parsed), mask, inOldTown);
   paveAllees(grid);
   const map = coverTexture(grid);
   const plaza = mask ? maskTexture(mask, grid.cols, grid.rows) : NO_PLAZA;

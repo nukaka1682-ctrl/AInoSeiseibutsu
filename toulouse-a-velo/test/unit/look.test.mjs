@@ -46,7 +46,8 @@ test('木の形: LiDAR の横に広い塊を平たい板にしない', () => {
   // ふつうの街路樹（高さ 20 m・半径 6 m）はそのまま 1 本
   const plane = shapeTrees([{ x: 0, z: 0, y: 0, h: 20, r: 6 }]);
   assert.equal(plane.length, 1);
-  assert.ok(Math.abs(plane[0].r - 6.3) < 1e-9);
+  assert.ok(Math.abs(plane[0].r - Math.min(6.3, crownLimit(20).rmax)) < 1e-9);
+  assert.ok(plane[0].crownY - plane[0].crownH >= 6, '大きなプラタナスは下枝が 6 m より上');
   assert.ok(Math.abs(plane[0].crownY + plane[0].crownH - 20) < 1e-9);
   // 実際の LiDAR の木の大きさの範囲（高さ 4〜45 m、半径 1.5〜9 m）のどれも、樹冠は平たくならず、木の高さに収まる
   for (let h = 4; h <= 45; h += 0.7) {
@@ -131,6 +132,18 @@ test('ファサード: 旧市街のレンガ・材料不明の建物は 8 割が
   assert.ok(share(true, 'brick') >= 0.75, `旧市街・レンガ ${share(true, 'brick')}`);
   assert.ok(share(false, null) < 0.75, `旧市街の外 ${share(false, null)}`);
   assert.equal(facadeStyle({ id: 5, tags: {}, style: STYLE.arcade }), STYLE.arcade);
+  // 背の高い集合住宅は、白いバルコニーの帯の漆喰・白い漆喰・現代的な様式（レンガ・石の建物は除く）。旧市街では 8 階以上で 25 m 以上だけ
+  const tall = [STYLE.residence, STYLE.whiteModern, STYLE.modern];
+  const seen = new Set();
+  for (let id = 1; id <= 50; id++) {
+    const st = facadeStyle({ id, tags: {}, oldTown: false, info: { levels: 9, height: 28 } });
+    assert.ok(tall.includes(st));
+    seen.add(st);
+    assert.ok(tall.includes(facadeStyle({ id, tags: {}, oldTown: true, info: { levels: 9, height: 28 } })));
+    assert.ok(!tall.includes(facadeStyle({ id, tags: {}, oldTown: true, info: { levels: 8, height: 16 } })), '旧市街の階数だけ多い建物は古い様式');
+  }
+  assert.equal(seen.size, 3);
+  assert.ok(![STYLE.residence].includes(facadeStyle({ id: 3, tags: { 'building:material': 'brick' }, oldTown: false, info: { levels: 9, height: 28 } })));
   assert.equal(stylePlainColor(STYLE.brickShutters), null);
   assert.match(stylePlainColor(STYLE.ochre), /^#[0-9a-f]{6}$/);
 

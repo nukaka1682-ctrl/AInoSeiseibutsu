@@ -3,7 +3,7 @@
 // 樹冠は木ごとに違うこぶのある形（シェーダーで作る）、幹は途中で 2 本に分かれ、街路・運河沿いのプラタナスはまだらな樹皮。
 import * as THREE from 'three';
 import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { Grid, hash01, mulberry32, pointInPolygon } from '../geo.js';
+import { Grid, hash01, mulberry32, pointInPolygon, pointInRing } from '../geo.js';
 import { CAR_ROADS } from './parse.js';
 import { makeBarkTexture } from './textures.js';
 
@@ -74,17 +74,58 @@ export function planeTreeTest(roadnet, inWater) {
   };
 }
 
+// 常緑のタイサンボク（Magnolia grandiflora）の並木（利用者の Street View: Allées Roosevelt の 2 列）。通りの中心線から
+// MAGNOLIA_REACH m 以内の木。樹冠は低く（下枝 2.5 m 前後）、密で、つやのある暗い緑。幹は細く滑らかな灰色
+const MAGNOLIA_STREETS = /^All[ée]es du Pr[ée]sident Franklin Roosevelt$/i;
+const MAGNOLIA_REACH = 16;
+export function magnoliaTest(roads) {
+  const segs = [];
+  for (const r of roads) {
+    if (!MAGNOLIA_STREETS.test(r.name || '')) continue;
+    for (let i = 0; i + 1 < r.pts.length; i++) segs.push([...r.pts[i], ...r.pts[i + 1]]);
+  }
+  if (!segs.length) return () => false;
+  return (x, z) => segs.some(([ax, az, bx, bz]) => {
+    const dx = bx - ax, dz = bz - az, L2 = dx * dx + dz * dz || 1;
+    const t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / L2));
+    return (ax + dx * t - x) ** 2 + (az + dz * t - z) ** 2 < MAGNOLIA_REACH ** 2;
+  });
+}
+
+// 岸壁の上の並木（利用者の写真 NCM_0106・0109・0125: ラ・ドラードの河岸のプラタナスは上の段の岸壁の縁に立ち、樹冠が
+// 下の段の上に張り出す）。LiDAR の木の位置は樹冠の真ん中なので、下の段の壁から QUAY_TREE_REACH m 以内の木は、壁の
+// 上の段の側（壁から 2.2 m 奥）へ移す。木のてっぺんの高さはそのまま（段差の分だけ低い木にする）
+const QUAY_TREE_REACH = 7;
+export function liftQuayTrees(points, terrain) {
+  if (!terrain?.quayBelow) return points;
+  return points.map((p) => {
+    if (p.x == null || !(p.h > 0) || p.abs) return p;
+    const q = terrain.quayBelow(p.x, p.z, QUAY_TREE_REACH);
+    if (!q || q.drop < 2.5 || p.h - q.drop < 5) return p;
+    return { ...p, x: q.x - q.nx * 2.2, z: q.z - q.nz * 2.2, h: p.h - q.drop };
+  });
+}
+
+// 木のない広場（利用者の写真: キャピトル広場には木がない。LiDAR が街灯・日よけ・パラソルを木と見てしまう）
+const TREELESS_PLAZAS = /^Place du Capitole$/i;
+export function treelessTest(areas) {
+  const rings = areas.filter((a) => a.type === 'plaza' && TREELESS_PLAZAS.test(a.name || '')).map((a) => a.outer);
+  return (x, z) => rings.some((r) => pointInRing(x, z, r));
+}
+
 // ---------------------------------------------------------------- 木の形
 // LiDAR の「木」は、数本の木の樹冠がつながった塊のことがある（半径 9 m・高さ 6 m など）。そのまま作ると平たい板になるので、
-// 樹冠は「高さ（半分）が半径の CROWN_ASPECT 倍以上」の形に限り、その形が木の高さ（幹の下枝の高さより上）に収まる
+// 樹冠は「高さ（半分）が半径の CROWN_ASPECT 倍以上」（写真の街路のプラタナスは幅と同じくらいの高さの樹冠）の形に限り、その形が木の高さ（幹の下枝の高さより上）に収まる
 // 半径まで抑える（crownLimit）。抑えた半径の 1.4 倍より横に広い塊は、塊の向き（分からないので種から決める）に沿って
 // 2〜3 本の木に分ける。canPlace(x, z) が false の場所（道路・水・建物）には分けた木を置かない。
 // 返す木: { x, z, y, r: 樹冠の半径, crownH: 樹冠の高さの半分, crownY: 樹冠の中心の高さ, trunkH, seed }
-export const CROWN_ASPECT = 0.75;
+export const CROWN_ASPECT = 1;
 
 // 高さ h の木の、下枝の高さ（bottom）と樹冠の半径の上限（rmax）
 export function crownLimit(h) {
-  const bottom = Math.max(1.6, Math.min(h * 0.22, 5)); // 下枝の高さ（高さの 2 割ほど、街路樹のプラタナスで 3〜5 m）
+  // 下枝の高さ: 高さの 4 割弱、高い木ほど高く（利用者の写真: 街路・河岸の高さ 15〜20 m のプラタナスは下枝が 6〜8 m で、
+  // 樹冠の下に通りの家並みと空が見える）
+  const bottom = Math.max(1.6, Math.min(h * 0.36 + Math.max(0, h - 14) * 0.15, 8.5));
   return { bottom, rmax: Math.max(1.5, Math.min(0.45 * h + 1, (h - bottom) / (2 * CROWN_ASPECT))) };
 }
 
@@ -97,8 +138,8 @@ export function shapeTrees(points, canPlace = () => true, groundH = null) {
     if (!(t.h > 0) || !(t.r > 0)) {
       // 大きさの分からない木（OSM・並木道・公園に補った木）
       const r = 2.4 + hash01(seed, 1) * 2.4;
-      const trunkH = 2.6 + hash01(seed, 2) * 2.2;
-      const crownH = r * (0.85 + hash01(seed, 4) * 0.3);
+      const trunkH = 3.4 + hash01(seed, 2) * 2.4;
+      const crownH = r * (1 + hash01(seed, 4) * 0.25);
       out.push({ x, z, y, r, crownH, crownY: trunkH + crownH * 0.9, trunkH, seed });
       continue;
     }
@@ -142,7 +183,7 @@ function lumpyCrown() {
     v.fromBufferAttribute(pos, i);
     const n = Math.sin(v.x * 5.1 + v.y * 2.3) * Math.cos(v.z * 4.7 - v.y * 3.1) + Math.sin(v.x * 3.7 - v.z * 4.3) * 0.5;
     v.multiplyScalar(0.92 * (1 + n * 0.07)); // こぶの分だけ小さく
-    if (v.y < 0) v.y *= 0.85; // 下側は少し平ら
+    if (v.y < 0) v.y *= 0.95; // 下側はほんの少し平ら（平らすぎると下から見て板のよう）
     pos.setXYZ(i, v.x, v.y, v.z);
   }
   g.computeVertexNormals();
@@ -191,7 +232,7 @@ const LUMPS_GLSL = `
       float az = lumpHash(sd, fi + 2.0) * 6.2832;
       float el = mix(-0.25, 1.0, lumpHash(sd, fi + 9.0));
       vec3 d = vec3(cos(az) * cos(el), sin(el), sin(az) * cos(el));
-      float a = mix(0.07, 0.17, lumpHash(sd, fi + 17.0));
+      float a = mix(0.09, 0.22, lumpHash(sd, fi + 17.0));
       float c = max(0.0, dot(n, d));
       f += a * c * c;
       g += a * 2.0 * c * (d - dot(n, d) * n);
@@ -220,7 +261,7 @@ function leafShading(material) {
         }`)
       .replace('#include <color_fragment>', `#include <color_fragment>
         float leaf = leafNoise(vLeafPos * 5.0) * 0.55 + leafNoise(vLeafPos * 13.0) * 0.45;
-        diffuseColor.rgb *= (0.68 + leaf * 0.58) * (0.66 + 0.34 * smoothstep(-0.9, 0.6, vLeafPos.y));`);
+        diffuseColor.rgb *= (0.72 + leaf * 0.56) * (0.74 + 0.26 * smoothstep(-0.9, 0.6, vLeafPos.y));`);
   };
   material.customProgramCacheKey = () => 'leaf-shading';
 }
@@ -239,18 +280,19 @@ function lumpyDepthMaterial() {
 
 // 葉の色: プラタナス（街路・運河・河岸）は黄みのオリーブ色、公園などの木はいろいろな緑（写真の樹冠は #414c1f〜#645731）
 const LEAF = {
-  plane: ['#6a7535', '#737d3a', '#626e31', '#7a823f', '#6e7a38'],
+  plane: ['#667a38', '#6f823e', '#5e7233', '#768a44', '#6a7e3b'],
   other: ['#5b7034', '#667a3a', '#52682f', '#6d7c3d', '#587036', '#5f7440', '#737c37', '#4f6033'],
+  magnolia: ['#46552a', '#4f5e2c', '#5a6630', '#4a5928'], // 写真 #4f5a2a〜#7e784d（日なたの上は黄緑）
 };
 // 幹の色（樹皮の模様に掛ける）: プラタナスはまだらな樹皮をそのまま、ほかの木は暗い灰褐色
-const BARK_TINT = { plane: '#ffffff', other: '#7a6c5e' };
+const BARK_TINT = { plane: '#ffffff', other: '#7a6c5e', magnolia: '#85837e' };
 
 let barkTexture = null;
 
 // points: [x, z]（大きさは推定）か { x, z, y, h, r }（LiDAR で測った高さと枝の広がり）。
 // isPlane(x, z): プラタナス（まだらな樹皮・オリーブ色の葉）にする場所、canPlace(x, z): 塊を分けた木を置ける場所。
 // group.userData.trunks に、実際に幹を立てた位置（当たり判定用）を入れる
-export function buildTrees(points, { isPlane = () => false, canPlace = () => true, groundH = null } = {}) {
+export function buildTrees(points, { isPlane = () => false, isMagnolia = () => false, canPlace = () => true, groundH = null } = {}) {
   const src = points.length > MAX_TREES ? points.filter((_, i) => i % Math.ceil(points.length / MAX_TREES) === 0) : points;
   const trees = shapeTrees(src, canPlace, groundH);
   const n = trees.length;
@@ -275,11 +317,19 @@ export function buildTrees(points, { isPlane = () => false, canPlace = () => tru
   const Y = new THREE.Vector3(0, 1, 0);
   for (let i = 0; i < n; i++) {
     const t = trees[i];
-    const kind = isPlane(t.x, t.z) ? 'plane' : 'other';
+    const kind = isMagnolia(t.x, t.z) ? 'magnolia' : isPlane(t.x, t.z) ? 'plane' : 'other';
+    if (kind === 'magnolia') {
+      // 低い下枝（2.6 m）から木の高さまでの、細めの卵形の樹冠
+      const top = t.crownY + t.crownH;
+      t.r = Math.min(t.r, 3.4);
+      t.crownH = Math.max(t.r, (top - 2.6) / 2);
+      t.crownY = top - t.crownH;
+      t.trunkH = Math.max(1.2, t.crownY - t.crownH * 0.6);
+    }
     q.setFromAxisAngle(Y, hash01(t.seed, 3) * Math.PI * 2);
     // 幹は分かれ目が樹冠の中に隠れる高さまで。太さは木ごとに少し変える
     const th = t.trunkH + t.crownH * 0.55;
-    const thick = (0.85 + hash01(t.seed, 6) * 0.4) * (kind === 'plane' ? 1.15 : 1);
+    const thick = (0.85 + hash01(t.seed, 6) * 0.4) * (kind === 'plane' ? 1.15 : kind === 'magnolia' ? 0.75 : 1);
     m.compose(p.set(t.x, t.y, t.z), q, s.set(th * thick, th, th * thick));
     trunks.setMatrixAt(i, m);
     trunks.setColorAt(i, col.set(BARK_TINT[kind]));

@@ -29,6 +29,7 @@ const OVERSHOOT = 0.3; // 壁の中まで少し延ばして、壁際のすき間
 const SHARED_EXTRA = 6; // 旧市街の通りの石畳を、車道の外へ延ばす最大の幅
 const SETT_TILE = 2.56; // 小舗石のテクスチャ 1 枚の大きさ（m）
 const SLAB_TILE = 2.4;
+const ALSACE_TILE = 6; // Rue d'Alsace-Lorraine の石の板のテクスチャ 1 枚（m）
 const PROBE = 1.5; // 歩道の外の端を横へ調べる間隔（m）。境目は二分法で詰める
 const RAIL_HALF = 1.5; // 線路（1 本の軌道）の中心からこの幅には歩道を敷かない
 const ANCHOR = 20; // 道の始点からこの間隔ごとに断面を必ず残す（タイルの境の両側で同じ間引きになる）
@@ -51,16 +52,25 @@ const strHash = (s) => {
 
 // 通りの種類: shared（旧市街の石畳の共有空間）/ taur（小舗石の車道＋石の板の歩道）/ curb（縁石と一段高い歩道）/
 // bridge（橋。歩道は作らないが、ほかの歩道を切る）/ plain（それ以外: 歩道なしの車道・歩行者の通り・小道）
+// 旧市街でも、車道（アスファルト）と灰色の花崗岩の板の歩道の通り（利用者のストリートビュー 2026-10-17 210627: ポン・ヌフの橋のたもと）
+const GREY_WALKS = /^(Place du Pont[- ]Neuf|Quai de la Daurade)$/i;
+
 export function classifyStreet(road, old) {
   const t = road.type;
+  const grey = GREY_WALKS.test(road.name || '');
+  if (grey) old = false;
   const car = CAR_ROADS.has(t);
   const h = strHash(road.name || `#${road.id}`);
   const near = NEAR_TYPES.has(t) || road.bridge;
   if (road.bridge) return { kind: 'bridge', band: road.width / 2 + (car ? 2 : 0.3), near };
+  // 車の通らない石の板の並木道（Allées Roosevelt。ground.js の SLAB_ALLEES）: 真ん中の道も段差のない石の板
+  if (/^All[ée]es du Pr[ée]sident Franklin Roosevelt$/i.test(road.name || '')) return { kind: 'shared', slabs: true, band: road.width / 2 + 1.2, gutter: null, near };
   if (old && (t === 'pedestrian' || t === 'living_street') && road.width > 6.5) {
     // 旧市街の広い歩行者の通り（Rue d'Alsace-Lorraine・Rue de la Pomme の広い所）: 壁から壁まで段差のない石の板、
     // 真ん中に 2 列の石の側溝
-    return { kind: 'shared', slabs: true, band: road.width / 2 + 1.2, gutter: 0, near };
+    // Rue d'Alsace-Lorraine（利用者の写真）: 暗い灰色の花崗岩の細長い板に、ばら色の花崗岩の横縞（textures.js の makeAlsaceTexture）
+    const alsace = /^Rue d'Alsace[- ]Lorraine$/i.test(road.name || '');
+    return { kind: 'shared', slabs: true, alsace, band: road.width / 2 + 1.2, gutter: alsace ? null : 0, near };
   }
   if (old && OLD_MINOR.has(t) && road.width <= (t === 'tertiary' ? 5 : 6.5)) {
     // 旧市街の細い通り（IGN の幅は車道だけなので、壁から壁は広い）。車の通れる通りの 3 割は Rue du Taur 型
@@ -73,7 +83,9 @@ export function classifyStreet(road, old) {
     // 歩道の舗装: 中心部はえんじ色（赤茶）の舗装が多く、外は灰色のアスファルトが多い（通りの両側で違うこともある）
     const p = old ? 0.55 : 0.2;
     // 縁石の足元の 2 列の小舗石の側溝は、中心部と幹線道路だけ（郊外の住宅街はアスファルトのまま）
-    return { kind: 'curb', band: road.width / 2, red: [hash01(h, 34) < p, hash01(h, 35) < p], gutter: old || MAIN.has(t), near };
+    // Esquirol と Rue de Metz（利用者の Street View）: 両側とも赤茶色の小舗石の歩道
+    const esq = /^(Place [EÉ]tienne[- ]Esquirol|Rue de Metz)$/i.test(road.name || '');
+    return { kind: 'curb', band: road.width / 2, red: esq ? [true, true] : grey ? [false, false] : [hash01(h, 34) < p, hash01(h, 35) < p], gutter: old || MAIN.has(t), near };
   }
   return { kind: 'plain', band: road.width / 2, near };
 }
@@ -164,12 +176,19 @@ export function planStreets(parsed, inOld = notOld) {
   // 横断歩道: 旧市街の交差点と、2 本の幹線道路が交わる交差点（信号のある交差点の代わり）で、縁石のある車道を横切る。
   // 交差する道の端から約 1.2 m あけて置く。郊外の住宅街の交差点には引かない
   const crossings = [];
+  // 高架の車道の下には引かない（利用者の Street View 225619: A620 の下の Avenue de Grande-Bretagne には横断歩道がない）
+  const decks = parsed.roads.filter((r) => r.bridge && (CAR_ROADS.has(r.type) || /^motorway/.test(r.type)));
+  const underDeck = (x, z) => decks.some((r) => r.pts.some((p, i) => i + 1 < r.pts.length && closestOnSegment(x, z, p[0], p[1], r.pts[i + 1][0], r.pts[i + 1][1]).d2 < (r.width / 2 + 2) ** 2));
   const sameStreet = (a, b) => a.road === b.road || info.get(a.road).cont.has(b.road) || (a.road.name && a.road.name === b.road.name);
   for (const n of junctions) {
     if (n.arms.length < 3) continue;
     const old = inOld(n.x, n.z);
     const mains = n.arms.filter((a) => MAIN.has(a.road.type));
-    const lights = mains.some((a) => mains.some((b) => !sameStreet(a, b)));
+    // 信号: 2 本の幹線道路が交わる交差点と、中心部で 2 車線以上の幹線道路に脇の車道が 2 本以上つながる交差点
+    // （ポン・ヌフの右岸の端: Rue de Metz に Quai de la Daurade と Quai de Tounis。ユーザーのストリートビュー）
+    const sides = n.arms.filter((a) => CAR_ROADS.has(a.road.type) && !MAIN.has(a.road.type) && !mains.some((b) => sameStreet(a, b)));
+    const lights = mains.some((a) => mains.some((b) => !sameStreet(a, b))) ||
+      (Math.hypot(n.x, n.z) < CENTRE_R && mains.some((a) => (a.road.lanes || 1) >= 2) && new Set(sides.map((a) => a.road.name || a.road)).size >= 2);
     if (!lights && !old) continue;
     const top = Math.max(...n.arms.map((a) => rankOf(a.road)));
     const centre = old || Math.hypot(n.x, n.z) < CENTRE_R;
@@ -183,7 +202,7 @@ export function planStreets(parsed, inOld = notOld) {
       const d = reach + CURB_W + 1.2 + len / 2;
       if (a.len < d + len / 2 + 4) continue;
       const c = alongFrom(a.road.pts, a.i, a.dir, d);
-      if (!c) continue;
+      if (!c || underDeck(c.x, c.z)) continue;
       // 停止線は交差点へ向かう車線（右側通行）。一方通行は道の向き（頂点の順）に走る車だけ。
       // 信号のある交差点の腕と、格の高い道（優先道路）に出る腕だけ（優先道路の側には引かない）
       let stop = null;
@@ -194,7 +213,7 @@ export function planStreets(parsed, inOld = notOld) {
         const hp = strHash(`${Math.round(c.x * 10)},${Math.round(c.z * 10)}`);
         for (let k = 0; k < 4; k++) if (hash01(hp, 40 + k) < 0.6) posts |= 1 << k;
       }
-      crossings.push({ road: a.road, ...c, half: a.road.width / 2, len, stop, posts, lights, s: ia.cum[a.i] + a.dir * d, sNode: ia.cum[a.i], dir: a.dir });
+      crossings.push({ road: a.road, ...c, half: a.road.width / 2, len, stop, posts, lights, centre, room: a.len - d, s: ia.cum[a.i] + a.dir * d, sNode: ia.cum[a.i], dir: a.dir });
     }
   }
   // 車道の標示（markings.js）の並び（道ごとに 1 回、使う時に）と、線を止める区間（道の始点からの距離）:
@@ -899,12 +918,13 @@ export function* streetSteps(parsed, plan, clip, { buildings = [], walls = [], w
       band(slabs, (e) => Math.min(c + GUTTER_W, e.fL), (e) => (room(e.fL) ? e.fL : capL(e, c + GUTTER_W)), SLAB_TILE, colors.slab);
       band(slabs, (e) => (room(e.fR) ? -e.fR : -capR(e, c + GUTTER_W)), (e) => -Math.min(c + GUTTER_W, e.fR), SLAB_TILE, colors.slab);
     } else {
-      if (inf.slabs) band(out('slabs'), (e) => -e.fR, (e) => e.fL, SLAB_TILE, colors.slabWide);
+      if (inf.alsace) band(out('alsace'), (e) => -e.fR, (e) => e.fL, ALSACE_TILE, colors.white);
+      else if (inf.slabs) band(out('slabs'), (e) => -e.fR, (e) => e.fL, SLAB_TILE, colors.slabWide);
       else band(setts, (e) => -e.fR, (e) => e.fL, SETT_TILE, colors.setts);
       // 側溝の線: ほかの車道の中には引かない
       const g = inf.gutter, gut = out('gutter');
       const G = (d) => () => g + d;
-      for (let m = 0; m + 1 < K.length; m++) {
+      for (let m = 0; g != null && m + 1 < K.length; m++) {
         const A = K[m], B = K[m + 1];
         const pi = at(A, G(0)), pj = at(B, G(0));
         const mx = (pi[0] + pj[0]) / 2, mz = (pi[1] + pj[1]) / 2;
@@ -921,8 +941,8 @@ export function* streetSteps(parsed, plan, clip, { buildings = [], walls = [], w
       const r = inf.kind === 'taur' ? Math.min(2.1, Math.max(1.75, half)) : Math.min(Math.max(e.fL, e.fR), half + 2);
       const rim = discRim(st.x, st.z, r, 12, soft);
       if (!rim) continue;
-      const tile = inf.slabs ? SLAB_TILE : SETT_TILE;
-      const w = inf.slabs ? out('slabs') : setts, col = inf.slabs ? colors.slabWide : colors.setts;
+      const tile = inf.alsace ? ALSACE_TILE : inf.slabs ? SLAB_TILE : SETT_TILE;
+      const w = inf.alsace ? out('alsace') : inf.slabs ? out('slabs') : setts, col = inf.alsace ? colors.white : inf.slabs ? colors.slabWide : colors.setts;
       const uv = (q) => [((q[0] - st.x) * st.nx + (q[1] - st.z) * st.nz) / tile, (st.s + (q[0] - st.x) * st.ux + (q[1] - st.z) * st.uz) / tile];
       for (let i = 0; i < rim.length; i++) {
         const q0 = rim[i], q1 = rim[(i + 1) % rim.length];
@@ -1018,8 +1038,10 @@ export function* streetSteps(parsed, plan, clip, { buildings = [], walls = [], w
       const mid = (o0 + o1) / 2;
       // 交差点へ向かう向き（-u）の右は (uz, -ux) = -n
       rect(mark, sx - nx * mid, sz - nz * mid, nx, nz, (o1 - o0) / 2, 0.15, colors.white);
-      if (plan.layout(c.road).bike) {
-        // 自転車の待機ボックス（sas vélo、ユーザーの写真 12）: 停止線の後ろに 4 m の緑の帯と自転車マーク、その後ろに車の停止線
+      // 自転車の待機ボックス（sas vélo、ユーザーの写真 12）: 自転車レーンのある道と、中心部の信号のある交差点（トゥールーズの
+      // 中心部では信号の停止線の後ろにたいてい引いてある。ポン・ヌフの右岸の Quai de la Daurade。ユーザーのストリートビュー）。
+      // 停止線の後ろに 4 m の緑の帯と自転車マーク、その後ろに車の停止線
+      if ((plan.layout(c.road).bike || (c.lights && c.centre)) && c.room > c.len / 2 + 6) {
         const d0 = c.len / 2 + 1.3;
         const bx = c.x + c.ux * (d0 + 2) - nx * mid, bz = c.z + c.uz * (d0 + 2) - nz * mid;
         rect(mark, bx, bz, c.ux, c.uz, 2, (o1 - o0) / 2, colors.green);

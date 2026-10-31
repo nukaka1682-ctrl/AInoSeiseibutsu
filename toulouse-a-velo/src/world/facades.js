@@ -12,8 +12,10 @@
 import * as THREE from 'three';
 import { mulberry32 } from '../geo.js';
 
-export const FACADE_STYLES = 9;
-export const STYLE = { brickStone: 0, brickShutters: 1, ochre: 2, taupe: 3, salmon: 4, cream: 5, modern: 6, rose: 7, arcade: 8 };
+export const FACADE_STYLES = 15;
+// haussmann: 19 世紀末の切り石の建物（Rue d'Alsace-Lorraine・Rue de Metz）。2 階と 5 階（上の階の 2 段目と 5 段目）は
+// 通しのバルコニーのセル（haussmannFilant。シェーダーで差し替える。様式としては選ばない）
+export const STYLE = { brickStone: 0, brickShutters: 1, ochre: 2, taupe: 3, salmon: 4, cream: 5, modern: 6, rose: 7, arcade: 8, haussmann: 9, haussmannFilant: 10, residence: 11, whiteModern: 12, glass: 13, brickGrid: 14 };
 
 const W = 1024, CELL = 256, BAYW = 256;
 
@@ -27,6 +29,19 @@ const STYLES = [
   { wall: 'plaster', plaster: '#d3ccc0', trim: 'none', shutters: null, panes: 1, balcony: [0, 1, 0, 1], band: 'none', modern: true, door: '#555b60', shop: '#3a4046' },
   { wall: 'plaster', plaster: '#cfa594', trim: 'brick', shutters: null, panes: 3, balcony: [0, 0, 0, 0], band: 'brick', arched: true, door: '#4b3a2c', shop: '#5c2c28' },
   { wall: 'brick', bricks: ['#bf7454', '#b66d4f', '#c47e5e', '#ad684b', '#c17a59', '#b97250'], mortar: '#d6c3a8', trim: 'brick', shutters: null, panes: 3, balcony: [0, 0, 0, 0], balustrade: true, band: 'brick', arcade: true, door: '#3a3632', shop: '#2b2826' },
+  // 利用者の写真（Rue d'Alsace-Lorraine・Rue de Metz・Esquirol）: 砂色の切り石 #c9b394〜#cbb595、鎧戸なし、窓ごとの鉄の手すり、
+  // 1 階は全部が背の高い店（石の付け柱のあいだ）。filant: 通しの鉄のバルコニー（石の床板つき）
+  { wall: 'stone', plaster: '#cdb798', trim: 'molded', shutters: null, panes: 3, balcony: [1, 1, 1, 1], lintel: true, band: 'stone', shops: true, door: '#2c3a44', shop: '#24313a' },
+  { wall: 'stone', plaster: '#cdb798', trim: 'molded', shutters: null, panes: 3, balcony: [0, 0, 0, 0], filant: true, lintel: true, band: 'stone', shops: true, door: '#2c3a44', shop: '#24313a' },
+  // 戦後の集合住宅（利用者の写真 NCM_0183・0184・225015）: サーモン色の漆喰、どの階にも白いコンクリートのバルコニーの帯、鎧戸なし
+  { wall: 'plaster', plaster: '#c9a08e', trim: 'none', shutters: null, panes: 2, balcony: [0, 0, 0, 0], band: 'none', modern: true, residence: true, door: '#555b60', shop: '#3a4046' },
+  // 白い漆喰の現代の集合住宅（利用者の写真 225056・225323）: 白い漆喰、大きな窓、暗い灰色のガラスの手すりのバルコニー、1 階は店
+  { wall: 'plaster', plaster: '#e6e4de', trim: 'none', shutters: null, panes: 1, balcony: [0, 0, 0, 0], band: 'none', modern: true, glassRail: true, shops: true, door: '#3c4246', shop: '#353b3f' },
+  // ガラスのカーテンウォールの事務所（利用者の写真 212318）: 青灰色のガラスと細い金属の方立て、階の境に暗い帯
+  { wall: 'glass', plaster: '#6f8396', trim: 'none', shutters: null, panes: 1, balcony: [0, 0, 0, 0], band: 'none', modern: true, curtain: true, door: '#2c3640', shop: '#2c3640' },
+  // 打ち放しのコンクリートの格子にレンガの板の事務所・集合住宅（利用者の写真 210635・225323）: 淡い灰色の柱と階の帯、
+  // あいだに大きな窓と赤いレンガの腰壁
+  { wall: 'brick', bricks: ['#b8644a', '#c06d50', '#ad5d45', '#c47457', '#b5684d'], mortar: '#cdb59c', trim: 'none', shutters: null, panes: 1, balcony: [0, 0, 0, 0], band: 'concrete', modern: true, fins: true, shops: true, door: '#3c4246', shop: '#2e3438' },
 ];
 
 function canvas(w, h) {
@@ -285,7 +300,57 @@ function balustrade(ctx, x, y, w) {
 }
 
 // 上の階のセル
+const CONCRETE = '#cfcbc4'; // 打ち放しのコンクリート
+
+// ガラスのカーテンウォール: 青灰色のガラス（パネルごとに空の映り込みの明るさを変える）、細い金属の方立て、
+// 階の境の暗いスパンドレル。ground: 1 階（ガラスの扉）
+function curtainWall(ctx, rnd, ground) {
+  const g = ctx.createLinearGradient(0, 0, 0, CELL);
+  g.addColorStop(0, '#8aa2b6');
+  g.addColorStop(1, '#55708a');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, CELL);
+  for (let x = 0; x < W; x += 64) {
+    ctx.fillStyle = rnd() < 0.5 ? `rgba(255,255,255,${0.04 + rnd() * 0.12})` : `rgba(20,32,44,${0.05 + rnd() * 0.12})`;
+    ctx.fillRect(x, 0, 64, CELL);
+  }
+  // 斜めの映り込みの筋
+  ctx.save();
+  ctx.globalAlpha = 0.1;
+  ctx.fillStyle = '#ffffff';
+  for (let i = 0; i < 4; i++) {
+    const x0 = rnd() * W;
+    ctx.beginPath();
+    ctx.moveTo(x0, 0);
+    ctx.lineTo(x0 + 70, 0);
+    ctx.lineTo(x0 + 10, CELL);
+    ctx.lineTo(x0 - 60, CELL);
+    ctx.fill();
+  }
+  ctx.restore();
+  if (!ground) {
+    ctx.fillStyle = '#34414c';
+    ctx.fillRect(0, CELL - 30, W, 30);
+  }
+  ctx.fillStyle = '#b9c0c5';
+  for (let x = 0; x < W; x += 64) ctx.fillRect(x, 0, 4, CELL);
+  ctx.fillRect(0, 0, W, 3);
+  ctx.fillRect(0, CELL - 32, W, 3);
+  if (ground) {
+    // ガラスの両開きの扉と、暗い腰の帯
+    ctx.fillStyle = '#2c3640';
+    ctx.fillRect(0, CELL - 14, W, 14);
+    for (const x of [384, 448]) {
+      ctx.fillStyle = 'rgba(25,32,38,0.55)';
+      ctx.fillRect(x + 4, 40, 60, CELL - 54);
+      ctx.fillStyle = '#9aa3a8';
+      ctx.fillRect(x + 30, 120, 4, 40);
+    }
+  }
+}
+
 function drawUpper(ctx, st, rnd) {
+  if (st.curtain) return curtainWall(ctx, rnd, false);
   wallFill(ctx, 0, 0, W, CELL, st, rnd);
   // 階の境の帯（石・レンガの持ち送り）
   if (st.band === 'stone') {
@@ -297,6 +362,12 @@ function drawUpper(ctx, st, rnd) {
     brickBlocks(ctx, 0, CELL - 10, W, 10, rnd, 0.85);
     ctx.fillStyle = 'rgba(0,0,0,0.18)';
     ctx.fillRect(0, CELL - 11, W, 1);
+  } else if (st.band === 'concrete') {
+    // 打ち放しの階の帯（窓の下の腰壁まで）
+    ctx.fillStyle = CONCRETE;
+    ctx.fillRect(0, CELL - 26, W, 26);
+    ctx.fillStyle = 'rgba(0,0,0,0.2)';
+    ctx.fillRect(0, CELL - 26, W, 2);
   }
   for (let b = 0; b < 4; b++) {
     const cx = b * BAYW + BAYW / 2;
@@ -326,7 +397,16 @@ function drawUpper(ctx, st, rnd) {
       glass(ctx, x, top, ww, wh, rnd, b === 1 || b === 2);
       windowPanes(ctx, x, top, ww, wh, st.panes, st.modern);
     }
-    if (st.modern) {
+    if (st.glassRail && (b === 1 || b === 2)) {
+      // ベランダの暗い灰色のガラスの手すり（下に白い床板）
+      ctx.fillStyle = 'rgba(52,58,63,0.82)';
+      ctx.fillRect(x - 30, top + wh - 64, ww + 60, 64);
+      ctx.fillStyle = 'rgba(255,255,255,0.12)';
+      ctx.fillRect(x - 30, top + wh - 64, ww + 60, 4);
+      ctx.fillStyle = '#f0efea';
+      ctx.fillRect(x - 36, top + wh, ww + 72, 10);
+    }
+    if (st.modern && !st.fins) {
       // 巻き上げシャッターの箱
       ctx.fillStyle = '#c9c6bf';
       ctx.fillRect(x - 4, top - 16, ww + 8, 14);
@@ -350,6 +430,38 @@ function drawUpper(ctx, st, rnd) {
     if (st.balustrade) balustrade(ctx, x - 10, top + wh - 54, ww + 20);
     // 窓台の両端からの雨だれ
     rainStreaks(ctx, x - 14, x + ww + 14, top + wh + 9, rnd);
+  }
+  if (st.fins) {
+    // 打ち放しの柱（ベイの境）
+    for (let b = 0; b <= 4; b++) {
+      ctx.fillStyle = CONCRETE;
+      ctx.fillRect(b * BAYW - 14, 0, 28, CELL);
+      ctx.fillStyle = 'rgba(0,0,0,0.18)';
+      ctx.fillRect(b * BAYW + 12, 0, 3, CELL);
+    }
+  }
+  if (st.residence) {
+    // どの階にも、白いコンクリートのバルコニーの床板（下に影）と細い金属の手すり
+    const y = CELL - 30;
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.fillRect(0, y + 18, W, 8);
+    ctx.fillStyle = '#ecebe6';
+    ctx.fillRect(0, y, W, 18);
+    ctx.fillStyle = 'rgba(0,0,0,0.12)';
+    ctx.fillRect(0, y + 15, W, 3);
+    ctx.fillStyle = '#9da2a4';
+    ctx.fillRect(0, y - 52, W, 3);
+    for (let x = 4; x < W; x += 9) ctx.fillRect(x, y - 52, 2, 52);
+  }
+  if (st.filant) {
+    // 通しのバルコニー: 石の床板（下に持ち送りの影）と、壁の端から端までの黒い鉄の手すり
+    const y = 44 + 178 - 60;
+    ctx.fillStyle = STONE;
+    ctx.fillRect(0, y + 58, W, 12);
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.fillRect(0, y + 70, W, 5);
+    for (let x = 30; x < W; x += 64) ctx.fillRect(x, y + 70, 10, 14);
+    railing(ctx, 6, y, W - 12, rnd, true);
   }
 }
 
@@ -432,8 +544,38 @@ function arcade(ctx, st, rnd) {
   }
 }
 
+// 1 階が全部店の建物（Rue d'Alsace-Lorraine）: 石の付け柱のあいだに背の高いショーウィンドウ、上に看板の帯と布のひさし
+const AWNINGS = ['#2f4f7a', '#24344a', '#7a2a2a', '#3a4a3a'];
+function shopRow(ctx, st, rnd) {
+  for (let b = 0; b < 4; b++) {
+    const x0 = b * BAYW;
+    ctx.fillStyle = STONE_DARK;
+    ctx.fillRect(x0, 8, 26, CELL - 8);
+    ctx.fillStyle = 'rgba(0,0,0,0.12)';
+    for (let y = 30; y < CELL; y += 36) ctx.fillRect(x0, y, 26, 2);
+    const x = x0 + 32, w = BAYW - 44;
+    ctx.fillStyle = st.shop;
+    ctx.fillRect(x, 18, w, CELL - 18);
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    for (let i = 0; i < 7; i++) ctx.fillRect(x + 30 + i * 18, 30, 12, 10);
+    glass(ctx, x + 8, 56, w - 16, CELL - 56 - 6, rnd, false);
+    ctx.fillStyle = 'rgba(240,225,190,0.22)';
+    ctx.fillRect(x + 14, CELL - 100, w - 28, 60);
+    ctx.fillStyle = st.shop;
+    ctx.fillRect(x + w * 0.62, 56, 5, CELL - 56);
+    if (rnd() < 0.6) {
+      // 布のひさし（斜めに張り出した帯）
+      ctx.fillStyle = AWNINGS[Math.floor(rnd() * AWNINGS.length)];
+      ctx.fillRect(x - 4, 46, w + 8, 18);
+      ctx.fillStyle = 'rgba(0,0,0,0.25)';
+      ctx.fillRect(x - 4, 64, w + 8, 4);
+    }
+  }
+}
+
 // 1 階（地上階）のセル: 馬車門・店・格子の窓・玄関
 function drawGround(ctx, st, rnd) {
+  if (st.curtain) return curtainWall(ctx, rnd, true);
   wallFill(ctx, 0, 0, W, CELL, st, rnd);
   plinth(ctx, st, rnd);
   // 1 階の上の帯
@@ -444,6 +586,10 @@ function drawGround(ctx, st, rnd) {
     return;
   }
   const trimStone = st.trim === 'stone' || st.trim === 'molded' || st.trim === 'none';
+  if (st.shops) {
+    shopRow(ctx, st, rnd);
+    return;
+  }
 
   // ベイ 0: 半円アーチの馬車門（porte cochère）
   {
@@ -630,6 +776,8 @@ export function useFacadeAtlas(material) {
       `#ifdef USE_MAP
         float facadeStyle = floor((vMapUv.y + 100.0) / 1000.0);
         vec2 facadeUv = vec2(vMapUv.x, vMapUv.y - facadeStyle * 1000.0);
+        float facadeFloor = floor(facadeUv.y);
+        if (facadeStyle == ${STYLE.haussmann}.0 && (facadeFloor == 1.0 || facadeFloor == 4.0)) facadeStyle = ${STYLE.haussmannFilant}.0;
         const float FN = ${FACADE_STYLES}.0;
         vec2 atlasUv = vec2(facadeUv.x, (facadeStyle + 0.015 + fract(facadeUv.y) * 0.97) / FN);
         vec2 gScale = vec2(1.0, 0.97 / FN);

@@ -3,6 +3,7 @@
 import {
   Grid, centroid, clipRingToRect, closestOnSegment, hash01, pointInPolygon, pointInRing, ringBounds, signedArea, simplifyRing,
 } from '../geo.js';
+import { reshapeRoads } from './ramblas.js';
 
 export const FLOOR_HEIGHT = 3.1;
 
@@ -74,6 +75,62 @@ export const CAR_ROADS = new Set([
   'trunk', 'primary', 'secondary', 'tertiary', 'unclassified', 'residential', 'road',
   'trunk_link', 'primary_link', 'secondary_link', 'tertiary_link',
 ]);
+
+// データの誤りを写真に合わせて直す道（IGN の道の番号 → 置き換えるタグ。shift: 線を進む向きの右へずらす m、
+// parkSide: 路上駐車する側 'right' / 'left'、bare: 路面の標示（車線・自転車レーン・絵）を描かない）。利用者の Street View: Purpan の近くの
+// Avenue de Grande-Bretagne の西行き（北側）の車道は 1 車線（約 4 m）。データは 4〜5 車線・14〜15 m
+const ROAD_FIXES = {
+  41226: { lanes: '1', width: '4' },
+  142020: { lanes: '1', width: '4' },
+  142062: { lanes: '1', width: '4' },
+  // 利用者の Street View 224901: Rue Laganne（Prairie des Filtres の西）は、西の庭の塀から東の擁壁まで約 8 m で、
+  // 1 車線＋東の擁壁沿いの縦列駐車（約 5.5 m）と西の約 2 m の歩道。データの線は通りの中心より約 2 m 東（航空写真）
+  37419: { width: '5.5', shift: -2, parkSide: 'right' },
+  // 利用者の Street View 225653: Purpan の脇の Avenue de Grande-Bretagne の西行きは標示のない 1 車線（約 4.5 m）。
+  // データの線はトラムの軌道の縁にあり、実際の車線の中心はもう少し北（航空写真。軌道の芝との間をあけすぎないよう 2 m）
+  99386: { lanes: '1', width: '4.5', shift: 2, bare: true },
+};
+
+// 折れ線 pts（と頂点の番号 ids）を進む向きの右へ d m ずらす。両端（交差点）はそのままで、端から ramp m かけてずらしきる
+// （その所に頂点を足す。番号は way の番号から作る）
+function shiftLine(pts, ids, d, wid, ramp = 12) {
+  const cum = [0];
+  for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+  const total = cum[cum.length - 1];
+  if (total < ramp * 3) return;
+  const at = (s) => {
+    let i = 0;
+    while (i + 2 < pts.length && cum[i + 1] < s) i++;
+    const t = (s - cum[i]) / (cum[i + 1] - cum[i] || 1);
+    return [pts[i][0] + (pts[i + 1][0] - pts[i][0]) * t, pts[i][1] + (pts[i + 1][1] - pts[i][1]) * t, i];
+  };
+  // 進む向きの右の法線（頂点では前後の辺の平均）
+  const normal = (i) => {
+    let nx = 0, nz = 0;
+    for (const [a, b] of [[i - 1, i], [i, i + 1]]) {
+      if (a < 0 || b >= pts.length) continue;
+      const L = Math.hypot(pts[b][0] - pts[a][0], pts[b][1] - pts[a][1]) || 1;
+      nx += -(pts[b][1] - pts[a][1]) / L;
+      nz += (pts[b][0] - pts[a][0]) / L;
+    }
+    const L = Math.hypot(nx, nz) || 1;
+    return [nx / L, nz / L];
+  };
+  const list = pts.map((p, i) => ({ p, s: cum[i], id: ids[i], n: normal(i) }));
+  for (const [s, k] of [[ramp, 1], [total - ramp, 2]]) {
+    if (list.some((q) => Math.abs(q.s - s) < 2)) continue;
+    const [x, z, i] = at(s);
+    const L = cum[i + 1] - cum[i] || 1;
+    list.push({ p: [x, z], s, id: `${wid}:${k}`, n: [-(pts[i + 1][1] - pts[i][1]) / L, (pts[i + 1][0] - pts[i][0]) / L] });
+  }
+  list.sort((a, b) => a.s - b.s);
+  pts.length = ids.length = 0;
+  for (const q of list) {
+    const o = d * Math.min(1, q.s / ramp, (total - q.s) / ramp);
+    pts.push([q.p[0] + q.n[0] * o, q.p[1] + q.n[1] * o]);
+    ids.push(q.id);
+  }
+}
 
 function roadWidth(tags) {
   const hw = tags.highway;
@@ -304,7 +361,7 @@ export function parseOsm(osm, proj, rect, bdtopo = []) {
   const rails = [];
   const waterLines = [];
   for (const w of ways.values()) {
-    const t = w.tags;
+    const t = w.tags && w.tags.highway && ROAD_FIXES[w.id] ? { ...w.tags, ...ROAD_FIXES[w.id] } : w.tags;
     if (!t || !w.nodes) continue;
     if (t.highway && !SKIP_HIGHWAY.has(t.highway)) {
       if (t.area === 'yes' && isClosed(w)) continue; // 広場はポリゴン側で処理
@@ -321,6 +378,7 @@ export function parseOsm(osm, proj, rect, bdtopo = []) {
         pts.reverse();
         ids.reverse();
       }
+      if (t.shift && ROAD_FIXES[w.id]) shiftLine(pts, ids, +t.shift, w.id);
       const tunnel = t.tunnel && t.tunnel !== 'no' && t.tunnel !== 'building_passage';
       const layer = parseLength(t.layer) || 0;
       roads.push({
@@ -338,6 +396,8 @@ export function parseOsm(osm, proj, rect, bdtopo = []) {
         sidewalk: t.sidewalk || '',
         lanes: Math.round(parseLength(t.lanes)) || 0, // 車線の数（IGN の nombre_de_voies・OSM の lanes。路面の車線の破線）
         cycleway: t.cycleway || '', // OSM の自転車レーン（lane など）
+        parkSide: ROAD_FIXES[w.id]?.parkSide || '', // 路上駐車する側（写真で決めた道だけ）
+        bare: !!ROAD_FIXES[w.id]?.bare, // 路面の標示を描かない（写真で決めた道だけ）
       });
       if (t.name) named.push({ name: t.name, tags: t, x: pts[0][0], z: pts[0][1], pts, line: true });
     } else if (t.railway && !(t.tunnel && t.tunnel !== 'no')) {
@@ -405,6 +465,7 @@ export function parseOsm(osm, proj, rect, bdtopo = []) {
     }
   }
 
+  reshapeRoads(roads, proj); // ジャン・ジョレス通りの 2023 年の車道の位置（ramblas.js）
   unifyWaterLevels(areas);
   fillWaterUnderBridges(areas, roads);
   return { nodePos, buildings, parts, roads, areas, rails, waterLines, trees, named, proj };

@@ -45,6 +45,10 @@ test('向きの付いた長方形・放射線・円', () => {
   assert.ok(Math.abs(box.a - 30) < 1e-6 && Math.abs(box.b - 12) < 1e-6);
   assert.ok(Math.abs(Math.abs(box.e1[0] * Math.cos(t) + box.e1[1] * Math.sin(t)) - 1) < 1e-6, '長い辺の向き');
   assert.ok(Math.hypot(box.cx - 10, box.cz + 5) < 1e-6);
+  // 縦長の長方形（長い辺が 2 番目の向き）: e1 は長い辺、e2 は e1 に直角
+  const tall = orientedBox(rect(0, 0, 8, 25, 0));
+  assert.ok(Math.abs(tall.a - 25) < 1e-6 && Math.abs(tall.b - 8) < 1e-6);
+  assert.ok(Math.abs(tall.e1[0] * tall.e2[0] + tall.e1[1] * tall.e2[1]) < 1e-9, 'e2 は e1 に直角');
   assert.ok(Math.abs(rayRing(0, 0, 1, 0, rect(0, 0, 20, 10)) - 20) < 1e-9);
   const c = circleOf(circle(3, 4, 9));
   assert.ok(Math.hypot(c.x - 3, c.z - 4) < 1e-6 && Math.abs(c.r - 9) < 1e-6);
@@ -197,5 +201,70 @@ test('小物を置かない所: シャトー・ドーの柵に抜けがあって
   for (const m of [full, gap]) {
     const solid = monumentSolid(m.keepOut);
     assert.ok(solid(9.8, 0) && solid(0, -10) && !solid(13, 0));
+  }
+});
+
+test('ファストフード店: 近くの外形を置き換え、看板塔・砂利の植え込みの位置を持つ。正面のガラスと屋根を作る', () => {
+  const proj = new LocalProjection(43.5994, 1.4395);
+  const spec = MONUMENTS.find((m) => m.id === 'mcdo-bayonne');
+  const [x, z] = proj.project(spec.lat, spec.lon);
+  const shop = bld(rect(x, z, 14, 9), { height: 3.9 });
+  const far = bld(rect(x + 60, z, 14, 9));
+  const [m] = findMonuments(proj, { buildings: [shop, far] }).filter((q) => q.kind === 'fastfood');
+  assert.ok(m && m.replaced[0] === shop && m.height >= 4.8);
+  assert.equal(m.gravel.length, spec.gravel.length);
+  assert.ok(Math.hypot(m.pylon[0] - x, m.pylon[1] - z) < 40, '看板塔は店の近く');
+  const built = buildMonuments([m], { monument: {}, monumentMetal: {}, monumentInlay: {} }, { groundAt: () => 0 });
+  assert.ok(built.colliders.some((c) => c.length === 3 && Math.hypot(c[0] - m.pylon[0], c[1] - m.pylon[1]) < 1e-6), '看板塔の当たり判定');
+});
+
+test('閘門: 閘室の両側の柵は当たり判定の線、上の面は地面の切り抜き（ステンシル）', async () => {
+  const { LOCKS, lockFrame } = await import('../../src/world/locks.js');
+  const proj = new LocalProjection(43.6045, 1.4345);
+  const spec = LOCKS.find((l) => l.id === 'ecluse-saint-pierre');
+  const list = findMonuments(proj, { buildings: [], areas: [], roads: [], bounds: null }).filter((m) => m.kind === 'lock');
+  assert.equal(list.length, 1);
+  const f = lockFrame(list[0].a, list[0].b);
+  const [u, v] = f.uv(...f.at(7, -2));
+  assert.ok(Math.abs(u - 7) < 1e-9 && Math.abs(v + 2) < 1e-9);
+  const { group, colliders } = buildMonuments(list, {}, { groundAt: () => 0, waterAt: () => -3 });
+  assert.ok(group.children.some((c) => c.name === 'monument-mask') && group.children.some((c) => c.name === 'monument-mask-reset'));
+  // 柵: 閘室の芯線から幅の半分 + 0.3 m の所に、閘室に沿った線分
+  const side = colliders.filter((c) => c.length === 4 && Math.abs(Math.abs(f.uv(c[0], c[1])[1]) - (spec.width / 2 + 0.3)) < 1e-6);
+  assert.ok(side.length >= 4);
+});
+
+test('入市税の門の小屋: 2 つ、正面は広場（東）を向き、壁は当たり判定の 4 辺', () => {
+  const proj = new LocalProjection(43.5979, 1.4310);
+  const list = findMonuments(proj, { buildings: [], areas: [], roads: [], bounds: null }).filter((m) => m.kind === 'pavilion');
+  assert.equal(list.length, 2);
+  for (const m of list) assert.ok(m.f[0] > 0.8); // 東向き
+  const { colliders } = buildMonuments(list, {}, { groundAt: () => 0 });
+  assert.equal(colliders.length, 8);
+});
+
+test('メトロ Jean-Jaurès のエレベーターの小屋: 1 つ、ガラスの壁と当たり判定の 4 辺', () => {
+  const proj = new LocalProjection(43.6056, 1.4486);
+  const list = findMonuments(proj, { buildings: [], areas: [], roads: [], bounds: null }).filter((m) => m.kind === 'lift');
+  assert.equal(list.length, 1);
+  const { colliders } = buildMonuments(list, {}, { groundAt: () => 0 });
+  assert.equal(colliders.length, 4);
+});
+
+test('Purpan の病院の門: 塀はアーチの所であいていて、門柱と柵に当たり判定', () => {
+  const proj = new LocalProjection(43.6081, 1.3977);
+  const [px, pz] = proj.project(43.608147, 1.397792);
+  const porch = { id: 1, tags: {}, info: { area: 21, height: 2.2 }, inside: [px, pz], outer: [[px - 2, pz - 3], [px + 2, pz - 3], [px + 2, pz + 3], [px - 2, pz + 3]], holes: [], bounds: { minX: px - 2, minZ: pz - 3, maxX: px + 2, maxZ: pz + 3 } };
+  const list = findMonuments(proj, { buildings: [porch], areas: [], roads: [], bounds: null }).filter((m) => m.kind === 'hgate');
+  assert.equal(list.length, 1);
+  assert.deepEqual(list[0].replaced, [porch]); // アーチの小屋はモデルで描く
+  const { colliders } = buildMonuments(list, {}, { groundAt: () => 0 });
+  // 塀の当たり判定は 2 本（アーチの通り抜けの両側）、門柱 2 本 × 4 辺、柵 1 本
+  assert.equal(colliders.length, 2 + 8 + 1);
+  const [cx, cz] = list[0].arch;
+  const wall = colliders.slice(0, 2);
+  for (const [x0, z0, x1, z1] of wall) {
+    const t = ((cx - x0) * (x1 - x0) + (cz - z0) * (z1 - z0)) / ((x1 - x0) ** 2 + (z1 - z0) ** 2);
+    assert.ok(t < 0 || t > 1, 'アーチの中心は塀の当たり判定の外');
   }
 });

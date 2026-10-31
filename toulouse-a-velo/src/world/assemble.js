@@ -12,13 +12,13 @@ import { FLAT_TERRAIN, surfaceFns } from './terrain.js';
 import { buildTerrainTile } from './terrainmesh.js';
 import { buildCoverMesh } from './cover.js';
 import { tileBounds, tileLayout } from '../data/tiles.js';
-import { buildTrees, fillParkTrees, planeTreeTest, streetTrees } from './trees.js';
-import { buildEnclosures, clearRoads, projectTrees, projectWalls, tameWalls } from './enclosures.js';
-import { clearEntrances, entranceWalls, projectEntrances } from './metro.js';
+import { buildTrees, fillParkTrees, planeTreeTest, streetTrees, treelessTest, magnoliaTest, liftQuayTrees } from './trees.js';
+import { buildEnclosures, clearNamedAreas, clearRoads, fixedWalls, projectTrees, projectWalls, tameWalls } from './enclosures.js';
+import { clearEntrances, entranceWalls, inEntrance, projectEntrances } from './metro.js';
 import { findTowers } from './towers.js';
 import { buildMonuments, findMonuments, monumentClearance, monumentSolid } from './monuments.js';
-import { findCapitoleFacade, markBrickSites } from './landmarkfacades.js';
-import { historicCoreTest, oldTownTest } from '../config.js';
+import { findCapitoleFacade, markBrickSites, markStreetStyles } from './landmarkfacades.js';
+import { greySquareTest, historicCoreTest, oldTownTest } from '../config.js';
 import { POST_HIT, planStreets } from './streets.js';
 import { buildFurniture } from './furniture.js';
 import { CollisionWorld } from '../game/collision.js';
@@ -84,12 +84,14 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   progress('道路と川を作成中…', 0.15);
   await pause();
   // 塀（地籍の敷地の境界と LiDAR から見つけたもの）。歩道は建物の壁・塀まで延ばすので、地面より先に用意する
-  const walls = clearEntrances(clearRoads(tameWalls(projectWalls(data.walls || [], proj), parsed.buildings), (x, z) => roadnet.onRoad(x, z, 0.3)), projectEntrances(terrain.metroRaw || [], proj)); // 出入口の腰壁は塀にしない（地形の手直しはまだなので緯度経度から）
+  const walls = clearNamedAreas(clearEntrances(clearRoads(tameWalls(projectWalls(data.walls || [], proj), parsed.buildings), (x, z) => roadnet.onRoad(x, z, 0.3)), projectEntrances(terrain.metroRaw || [], proj)), parsed.areas, proj).concat(fixedWalls(proj, rect)); // 出入口の腰壁は塀にしない（地形の手直しはまだなので緯度経度から）
   // 地面の覆い（500 m のブロックごと。fetch-data の bakeSite と同じ区切り）。覆いのある所の緑地は覆いにまかせる
   const layout = tileLayout(rect);
   const covers = (data.cover || []).map((c) => ({ c, b: tileBounds(layout, c.i, c.j) }));
   const inOldTown = oldTownTest(proj);
-  const ground = buildGround(parsed, rect, groundMats, { buildings: parsed.buildings, walls, inOldTown, covered: covers.map(({ b }) => b), terrain, layout, proj });
+  const inCore = historicCoreTest(proj); // 通りの石畳は右岸の歴史的な中心だけ（stream.js と同じ）
+  const inGreySquare = greySquareTest(proj);
+  const ground = buildGround(parsed, rect, groundMats, { buildings: parsed.buildings, walls, inOldTown, inStreetOld: inCore, covered: covers.map(({ b }) => b), terrain, layout, proj });
   if (terrain.flat) {
     for (const { c, b } of covers) ground.group.add(buildCoverMesh(c, b, groundMats.cover, inOldTown, parsed));
   } else {
@@ -101,7 +103,10 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
         const tile = buildTerrainTile(terrain, b, groundMats, { quayCentre, inWater });
         ground.group.add(tile.group);
         const cv = covers.find((cc) => cc.c.i === i && cc.c.j === j);
-        if (cv) ground.group.add(buildCoverMesh(cv.c, b, groundMats.cover, inOldTown, parsed, tile.geometry));
+        if (cv) ground.group.add(buildCoverMesh(cv.c, b, groundMats.cover, inOldTown, parsed, tile.geometry, (x, z) => {
+          const q = terrain.quayBelow?.(x, z, 40);
+          return inGreySquare(x, z) || (q != null && q.drop > 2 && !q.setts);
+        }));
         ground.far?.setTile(i, j, true);
       }
     }
@@ -111,6 +116,7 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   group.add(ground.group);
   for (const [x, z] of ground.posts) collision.addCircle(x, z, POST_HIT); // 横断歩道の脇の車止め
   for (const q of terrain.quayWalls || []) collision.addSegment(q.ax, q.az, q.bx, q.bz); // 岸壁（垂直のレンガの壁）
+  for (const q of terrain.abutments || []) collision.addSegment(q.ax, q.az, q.bx, q.bz); // 高架の下の擁壁
   for (const e of terrain.metro || []) for (const s of entranceWalls(e)) collision.addSegment(...s); // メトロの出入口の吹き抜け
   group.add(buildEnclosures(walls, buildingMats, collision, terrain));
 
@@ -119,7 +125,7 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   let treePts;
   if (data.trees?.length) {
     // LiDAR で見つけた木（水の上・道路の真ん中は除く）
-    treePts = projectTrees(data.trees, proj).filter((p) => !inWater(p.x, p.z) && !roadnet.onRoad(p.x, p.z, -1.5));
+    treePts = projectTrees(data.trees, proj).filter((p) => !inWater(p.x, p.z) && !roadnet.onRoad(p.x, p.z, -1.5) && !inEntrance(terrain.metro || [], p.x, p.z));
   } else {
     const m = 30;
     const inRect = ([x, z]) => x > rect.minX - m && x < rect.maxX + m && z > rect.minZ - m && z < rect.maxZ + m;
@@ -133,12 +139,15 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   treePts = treePts.concat(ground.bankTrees || []); // 街の外れの川岸の土手の木
   const towers = findTowers(proj, parsed.buildings); // 八角形の鐘楼は専用のモデル
   markBrickSites(proj, parsed.buildings, parsed.areas);
-  const clear = monumentClearance(monuments);
-  treePts = treePts.filter((p) => !clear(p.x ?? p[0], p.z ?? p[1])); // 像・塔のまわりには植えない
+  markStreetStyles(parsed.buildings, parsed.roads);
+  const clear = monumentClearance(monuments, proj);
+  treePts = liftQuayTrees(treePts, terrain); // 岸壁の下の段の木は上の段へ
+  const treeless = treelessTest(parsed.areas);
+  treePts = treePts.filter((p) => !clear(p.x ?? p[0], p.z ?? p[1]) && !treeless(p.x ?? p[0], p.z ?? p[1])); // 像・塔のまわり・木のない広場には植えない
   const skip = new Set(monuments.flatMap((m) => m.replaced));
   const buildings = await buildBuildings(parsed, buildingMats, (p) => progress(`建物を建てています… ${Math.round(p * 100)}%`, 0.3 + p * 0.6), facade, { towers, groundAt: liftAt, skip, terrain });
   group.add(buildings.group);
-  const mon = buildMonuments(monuments, buildingMats, { groundAt: (x, z) => terrain.h(x, z) + liftAt(x, z), onRoad: onCarRoad });
+  const mon = buildMonuments(monuments, buildingMats, { groundAt: (x, z) => terrain.h(x, z) + liftAt(x, z), onRoad: onCarRoad, waterAt: (x, z, area) => terrain.waterLevel(x, z, area) });
   group.add(mon.group);
   for (const c of mon.colliders) {
     if (c.length === 4) collision.addSegment(...c); // 像の台・塔の鉄柵（円 [x, z, r] か線分 [ax, az, bx, bz]）
@@ -149,8 +158,9 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   // 街路・運河沿いはプラタナス。横に広い LiDAR の塊を分けた木は、道路・水・建物の上には置かない
   const trees = buildTrees(treePts, {
     isPlane: planeTreeTest(roadnet, inWater),
+    isMagnolia: magnoliaTest(parsed.roads),
     canPlace: (x, z) => !roadnet.onRoad(x, z, 0.3) && !inWater(x, z) && !insideBuilding(x, z),
-    groundH: (x, z) => terrain.h(x, z),
+    groundH: (x, z) => terrain.top(x, z),
   });
   group.add(trees);
   // 木の幹は道路の上でなければ当たり判定を付ける（道路に張り出した枝の下は通れる）
@@ -162,8 +172,8 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   const pad = 120;
   const onMonument = monumentSolid(mon.keepOut); // 雄鶏の像の台・シャトー・ドーの柵の内側には置かない
   const furniture = buildFurniture({
-    parsed, plan: planStreets(parsed, inOldTown), clip: { minX: rect.minX - pad, minZ: rect.minZ - pad, maxX: rect.maxX + pad, maxZ: rect.maxZ + pad },
-    curbs: ground.curbs, inOldTown: historicCoreTest(proj), heightAt: liftAt, terrain, onRoad: (x, z, m) => roadnet.onRoad(x, z, m),
+    parsed, plan: planStreets(parsed, inCore), clip: { minX: rect.minX - pad, minZ: rect.minZ - pad, maxX: rect.maxX + pad, maxZ: rect.maxZ + pad },
+    curbs: ground.curbs, inOldTown: inCore, heightAt: liftAt, terrain, onRoad: (x, z, m) => roadnet.onRoad(x, z, m),
     solid: (x, z) => insideBuilding(x, z) || inWater(x, z) || onMonument(x, z), trunks: trees.userData.trunks,
   }, collision);
   group.add(furniture.group);

@@ -55,6 +55,7 @@ export function wallColor(b) {
   const t = b.tags;
   const tag = colorFromTag(t['building:colour']);
   if (tag) return tag;
+  if (b.style === STYLE.glass) return paletteColor([stylePlainColor(STYLE.glass)], b.id, 1); // ガラスの塔の細い壁もガラスの色
   const mat = t['building:material'];
   if (mat === 'brick') return paletteColor(BRICK, b.id, 1);
   if (mat === 'stone' || mat === 'concrete' || mat === 'sandstone' || mat === 'limestone') return paletteColor(STONE, b.id, 1);
@@ -79,6 +80,14 @@ const STYLE_MIX = {
 export function facadeStyle(b) {
   if (b.style != null) return b.style; // 決まった様式（landmarkfacades.js の歴史的な建物）
   const mat = b.tags['building:material'];
+  // 背の高い戦後の集合住宅（レンガ・石でない。旧市街の外は 7 階以上か 20 m 以上、旧市街（サン・シプリアンを含む）は 8 階以上で
+  // 25 m 以上: 歴史的な建物はそこまで高くない。IGN の階数は当てにならないことがあるので高さもみる）: 半分強はサーモン色の漆喰に
+  // 白いバルコニーの帯、3 割は白い漆喰に暗いガラスの手すり（利用者の写真 225056・225323）、残りは現代的な様式
+  const lv = b.info?.levels || 0, h = b.info?.height || 0;
+  if (mat !== 'brick' && mat !== 'stone' && (b.oldTown ? lv >= 8 && h >= 25 : lv >= 7 || h >= 20)) {
+    const r = hash01(b.id, 21);
+    return r < 0.55 ? STYLE.residence : r < 0.85 ? STYLE.whiteModern : STYLE.modern;
+  }
   const key = mat === 'sandstone' || mat === 'limestone' ? 'stone' : mat === 'plaster' || mat === 'render' ? 'other' : mat;
   const mix = (b.oldTown && (key === 'brick' || !STYLE_MIX[key]) ? STYLE_MIX.oldTown : STYLE_MIX[key]) || STYLE_MIX.other;
   let r = hash01(b.id, 21);
@@ -216,6 +225,8 @@ function coverIntervals(L, covers) {
   return out;
 }
 
+const STONE_CHOIR = [0.7, 0.65, 0.59]; // 石の内陣の壁（風雨にさらされた灰色がかったベージュの石灰岩 #b3a696）
+
 // covers: 辺ごとの、隣の建物に接している区間（makePartyIndex の結果）
 function writeWalls(W, ring, sign, b, plainColor, facade, covers = null) {
   const info = b.info;
@@ -226,6 +237,7 @@ function writeWalls(W, ring, sign, b, plainColor, facade, covers = null) {
   const groundH = Math.max(3.4, floorH * 1.15);
   const bayShift = Math.floor(hash01(b.id, 9) * 4);
   const sv = facadeStyle(b) * 1000; // v に様式の番号を入れる（facades.js）
+  const curtain = facadeStyle(b) === STYLE.glass;
   const tint = facadeTint(b);
   const fc = facadeColor(b, y1);
   let along = 0;
@@ -238,7 +250,7 @@ function writeWalls(W, ring, sign, b, plainColor, facade, covers = null) {
     const nrm = [(dz / L) * sign, 0, (-dx / L) * sign];
     const A = (y) => [a[0], y, a[1]];
     const C = (y) => [c[0], y, c[1]];
-    const span = facade?.building === b ? facadeSpan(facade, a, c, nrm) : null;
+    const span = facade ? facadeSpan(facade, a, c, nrm, facade.building !== b) : null;
     if (span) {
       const top = Math.max(y1, y0 + facade.height);
       W.capitole.quad(A(y0), C(y0), C(top), A(top), nrm, [span[0], 0], [span[1], 0], [span[1], (top - y0) / facade.height], [span[0], (top - y0) / facade.height]);
@@ -253,17 +265,29 @@ function writeWalls(W, ring, sign, b, plainColor, facade, covers = null) {
       const l = t1 - t0;
       if (cover > y0 + 0.3) {
         const yc = cover;
+        if (curtain && L >= 1.6) {
+          // ガラスのカーテンウォールの建物は、隣より上もガラス（窓のない壁にしない）
+          const nb = L / BAY, e0 = (bayShift + 0.5 - nb / 2) / 4, u0 = e0 + t0 / BAY / 4, u1 = e0 + t1 / BAY / 4, v0 = (yc - y0) / floorH, v1 = (y1 - y0) / floorH;
+          W.upper.quad(P(t0, yc), P(t1, yc), P(t1, y1), P(t0, y1), nrm, [u0, sv + v0], [u1, sv + v0], [u1, sv + v1], [u0, sv + v1], fc);
+          continue;
+        }
         W.plain.quad(P(t0, yc), P(t1, yc), P(t1, y1), P(t0, y1), nrm, [t0 / 4, yc / 4], [t1 / 4, yc / 4], [t1 / 4, y1 / 4], [t0 / 4, y1 / 4], plainColor);
         continue;
       }
       if (y0 < 0.5 && W.contact && l >= 1.5 && info.kind !== 'roof') writeContact(W.contact, P(t0, 0), P(t1, 0), nrm);
       if (info.isChurch && L >= 1.6) {
-        // 教会の壁: 地面からの高さで窓の段がそろう
+        // 教会の壁: 地面からの高さで窓の段がそろう。石の内陣（landmarkfacades.js の stoneFrom）の壁は灰色がかった石の色
         const s0 = (along + t0) / CHURCH_TILE.w, s1 = (along + t1) / CHURCH_TILE.w;
+        const sf = b.stoneFrom;
+        if (sf && (((a[0] + c[0]) / 2) * sf.e[0] + ((a[1] + c[1]) / 2) * sf.e[1]) >= sf.s0) {
+          // 石の壁（尖頭アーチの窓と控え壁は monuments.js の choir）
+          W.plain.quad(P(t0, y0), P(t1, y0), P(t1, y1), P(t0, y1), nrm, [t0 / 4, y0 / 4], [t1 / 4, y0 / 4], [t1 / 4, y1 / 4], [t0 / 4, y1 / 4], STONE_CHOIR);
+          continue;
+        }
         W.church.quad(P(t0, y0), P(t1, y0), P(t1, y1), P(t0, y1), nrm, [s0, y0 / CHURCH_TILE.h], [s1, y0 / CHURCH_TILE.h], [s1, y1 / CHURCH_TILE.h], [s0, y1 / CHURCH_TILE.h], tint);
         continue;
       }
-      if (info.isChurch || L < 1.6 || info.kind === 'roof' || l < 1.2) {
+      if (info.isChurch || L < 1.6 || info.kind === 'roof' || l < 1.2 || b.blank) {
         W.plain.quad(P(t0, y0), P(t1, y0), P(t1, y1), P(t0, y1), nrm, [t0 / 4, y0 / 4], [t1 / 4, y0 / 4], [t1 / 4, y1 / 4], [t0 / 4, y1 / 4], plainColor);
         continue;
       }
@@ -448,7 +472,8 @@ export function traditionalHouse(b, plan) {
   if (info.height < 3 || info.height > 22 || info.area > 2500) return false;
   if (BIG_FLAT_KINDS.test(info.kind) || NOT_HOUSE.test(info.kind)) return false;
   if (info.kind === 'commercial' && info.area > 800) return false; // 大きな商業施設
-  return facadeStyle(b) !== STYLE.modern;
+  const st = facadeStyle(b);
+  return st !== STYLE.modern && st !== STYLE.whiteModern && st !== STYLE.glass && st !== STYLE.brickGrid;
 }
 
 // 頂点の座標の鍵（屋根の三角形の頂点と外形の頂点を突き合わせる）

@@ -122,10 +122,67 @@ export class Terrain {
     this.deckGrid = new Grid(40);
     this.deckSegs = [];
     this.areaLevels = new WeakMap();
+    this.levelOverride = null; // (x, z) => 水面の高さ y（決まった所だけ。ほかは null。ground.js の buildGroundBase）
     // 地面の格子の線（ローカル座標での間隔）
     const g = this.near;
     this.cellX = 1 / g.ax;
     this.cellZ = 1 / g.az;
+  }
+
+  // 岸壁（terraincond.js の sharpenQuays の線）を覚える。壁は下の段の格子点の上に立ち、壁の裏（上の段の側）の 1 マスは
+  // 斜面のまま（ground.js の歩道の板で隠す）。自転車・並木・街灯は板の上に載せる（top）
+  setQuayWalls(walls) {
+    this.quayWalls = walls;
+    this.quayGrid = new Grid(20);
+    this.quayBox = null;
+    walls.forEach((q, i) => {
+      const k = Math.max(q.wa || 0, q.wb || 0);
+      const b = [Math.min(q.ax, q.bx) - k, Math.min(q.az, q.bz) - k, Math.max(q.ax, q.bx) + k, Math.max(q.az, q.bz) + k];
+      this.quayGrid.insertBounds(...b, i);
+      const B = this.quayBox || (this.quayBox = [Infinity, Infinity, -Infinity, -Infinity]);
+      B[0] = Math.min(B[0], b[0]);
+      B[1] = Math.min(B[1], b[1]);
+      B[2] = Math.max(B[2], b[2]);
+      B[3] = Math.max(B[3], b[3]);
+    });
+  }
+
+  // 上に載る面の高さ: 地面か、岸壁の上の歩道の板（板の幅 wa/wb の中）の高い方。地面のメッシュ・道路の面は h のまま
+  top(x, z) {
+    const y = this.h(x, z);
+    return this.quayBox ? Math.max(y, this.quayWalkAt(x, z)) : y;
+  }
+
+  // 岸壁の上の歩道の板の高さ（板の上でなければ -Infinity）
+  quayWalkAt(x, z) {
+    const B = this.quayBox;
+    if (!B || x < B[0] || z < B[1] || x > B[2] || z > B[3]) return -Infinity;
+    let best = -Infinity;
+    this.quayGrid.queryPoint(x, z, 0, (i) => {
+      const q = this.quayWalls[i], dx = q.bx - q.ax, dz = q.bz - q.az, L2 = dx * dx + dz * dz;
+      const t = ((x - q.ax) * dx + (z - q.az) * dz) / L2;
+      if (t < -0.02 || t > 1.02) return;
+      const tc = Math.min(1, Math.max(0, t)), d = -((x - q.ax - dx * tc) * q.nx + (z - q.az - dz * tc) * q.nz); // 壁から裏へ
+      if (d <= 0.05 || d > (q.wa || 0) + ((q.wb || 0) - (q.wa || 0)) * tc) return;
+      best = Math.max(best, q.at + (q.bt - q.at) * tc - 0.02);
+    });
+    return best;
+  }
+
+  // 点 (x, z) が岸壁の下の段の側、壁から reach m 以内なら、いちばん近い壁の上の点と向き・段差を返す（なければ null）
+  quayBelow(x, z, reach) {
+    const B = this.quayBox;
+    if (!B || x < B[0] - reach || z < B[1] - reach || x > B[2] + reach || z > B[3] + reach) return null;
+    let best = null;
+    this.quayGrid.queryPoint(x, z, reach, (i) => {
+      const q = this.quayWalls[i], dx = q.bx - q.ax, dz = q.bz - q.az, L2 = dx * dx + dz * dz;
+      const t = Math.min(1, Math.max(0, ((x - q.ax) * dx + (z - q.az) * dz) / L2));
+      const px = q.ax + dx * t, pz = q.az + dz * t, d = (x - px) * q.nx + (z - pz) * q.nz; // 壁から下の段へ
+      if (d <= 0 || d > reach || (best && d >= best.d)) return;
+      const drop = q.at + (q.bt - q.at) * t - (q.ab + (q.bb - q.ab) * t);
+      best = { x: px, z: pz, nx: q.nx, nz: q.nz, d, drop, setts: !!q.setts };
+    });
+    return best;
   }
 
   // 地面の高さ（y）。5 m の格子の平面。格子の外は遠くの格子
@@ -187,6 +244,8 @@ export class Terrain {
 
   // 水面の高さ（y）。水面の格子（20 m ごと、地形モデルの川の上の平らな値）から。area: 水域（あれば、格子の外の池の高さに使う）
   waterLevel(x, z, area = null) {
+    const o = this.levelOverride?.(x, z);
+    if (o != null) return o;
     const g = this.level;
     if (g) {
       const L = bilinear(g, g.ax * x + g.bx, g.az * z + g.bz);
@@ -295,6 +354,7 @@ export class Terrain {
 export const FLAT_TERRAIN = {
   flat: true,
   h: () => 0,
+  top: () => 0,
   hFar: () => 0,
   inNear: () => false,
   normal: (x, z, out = [0, 1, 0]) => {
@@ -330,14 +390,15 @@ export function deckEdgeBlocked(dHere, dAhead, S, Sa, step = 0.5) {
 // 走る面の高さ。liftAt(x, z): 一段高い歩道の高さ（地面からの相対、0 か CURB_H）。
 // surfaceY(x, z, yHint): 地面＋歩道、または橋の面（yHint より 1.2 m 以上高い橋は無視 = 橋の下）
 export function surfaceFns(terrain, liftAt) {
+  const top = terrain.top ? (x, z) => terrain.top(x, z) : (x, z) => terrain.h(x, z);
   const surfaceY = (x, z, yHint = Infinity) => {
-    const g = terrain.h(x, z) + liftAt(x, z);
+    const g = top(x, z) + liftAt(x, z);
     const d = terrain.deck(x, z, yHint);
     return d == null ? g : Math.max(g, d + DECK_TOP);
   };
   // 歩道の段を除いた面（勾配・崖の判定に使う）
   const rideY = (x, z, yHint = Infinity) => {
-    const g = terrain.h(x, z);
+    const g = top(x, z);
     const d = terrain.deck(x, z, yHint);
     return d == null ? g : Math.max(g, d + DECK_TOP);
   };

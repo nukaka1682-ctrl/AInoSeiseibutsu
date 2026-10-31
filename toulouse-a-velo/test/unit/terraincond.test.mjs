@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DATUM, LATTICE, Terrain } from '../../src/world/terrain.js';
-import { cleanProfile, conditionRoads, despike, extendHeights, fitDeckEnds, segmentsCross, sharpenQuays } from '../../src/world/terraincond.js';
+import { cleanProfile, conditionRoads, despike, extendHeights, fitDeckEnds, segmentsCross, sharpenQuays, WALK_DEF } from '../../src/world/terraincond.js';
 import { DECK_TOP, deckEdgeBlocked, surfaceFns } from '../../src/world/terrain.js';
-import { setupDecks } from '../../src/world/bridges.js';
+import { abutmentWalls, setupDecks } from '../../src/world/bridges.js';
 import { latticeFor } from '../../src/data/terrainbake.js';
 import { LocalProjection } from '../../src/geo.js';
 
@@ -220,4 +220,42 @@ test('欄干: 橋の外や高さの違う隣の橋の面へ 0.5 m 以上落ち�
   const f = surfaceFns(T, () => 0);
   assert.equal(f.spawnY(0, 0, () => false), 0);
   assert.equal(f.spawnY(0, 0, () => false, true), 6 + DECK_TOP);
+});
+
+test('岸壁: 壁は下の段の格子点を結ぶ地面の三角形の辺に立ち、壁の前の地面は平ら。壁の裏は歩道の板の高さで走る', () => {
+  const T = synth((x, z) => 142 - 8 * ss(z / 20));
+  const walls = sharpenQuays(T, [0, 0], 300, { inWater: (x, z) => z > 30 });
+  assert.ok(walls.length > 20);
+  for (const w of walls.slice(0, 40)) {
+    const mx = (w.ax + w.bx) / 2, mz = (w.az + w.bz) / 2;
+    // 壁の前（下の段の側）1〜3 m は下端の高さのまま（地面の三角形が壁をまたがない）
+    for (const d of [1, 3]) assert.ok(T.h(mx + w.nx * d, mz + w.nz * d) - Math.max(w.ab, w.bb) < 0.3, `壁の前の地面 ${mx},${mz}`);
+    assert.equal(w.wa, WALK_DEF, '車道がなければ歩道の板は既定の幅');
+  }
+  // 板の上（壁の裏 2 m）は、地面の高さ h は斜面のまま、上に載る面 top は板の高さ
+  T.setQuayWalls(walls);
+  const w = walls[10], mx = (w.ax + w.bx) / 2, mz = (w.az + w.bz) / 2, x = mx - w.nx * 2, z = mz - w.nz * 2;
+  assert.ok(Math.abs(T.top(x, z) - ((w.at + w.bt) / 2 - 0.02)) < 0.05, `板 ${T.top(x, z)}`);
+  assert.ok(T.h(x, z) <= T.top(x, z) + 1e-6);
+  assert.equal(T.top(mx + w.nx * 2, mz + w.nz * 2), T.h(mx + w.nx * 2, mz + w.nz * 2), '壁の前は地面');
+});
+
+test('高架の下の擁壁: 高速道路の橋の下をくぐる車道の両脇の盛り土の足元に、盛り土の上までの壁を立てる', () => {
+  // 南北の車道（x = 0、幅 10 m）。両脇 x = ±12 m から盛り土（6 m 高い）。東西の高速道路の橋が z = 0 で越える
+  const h = (x, z) => (Math.abs(x) > 12 && Math.abs(z) < 60 ? Math.min(6, (Math.abs(x) - 12) * 2) : 0);
+  const terrain = { flat: false, h, deck: (x, z) => (Math.abs(z) < 6 ? 8 : null) };
+  const road = { type: 'secondary', width: 10, pts: [[0, -150], [0, 150]], bridge: false, tunnel: false, layer: 0 };
+  const motorway = { type: 'motorway', width: 12, pts: [[-80, 0], [80, 0]], bridge: true, tunnel: false, layer: 1 };
+  const ramp = { type: 'footway', width: 2, pts: [[13, 40], [30, 40]], bridge: false, tunnel: false, layer: 0 };
+  const walls = abutmentWalls(terrain, [road, motorway, ramp]);
+  assert.ok(walls.length > 20, `壁 ${walls.length}`);
+  for (const w of walls) {
+    assert.ok(Math.abs(Math.abs(w.ax) - 12.5) < 0.6, `足元 ${w.ax}`);
+    assert.ok(Math.abs(w.az) < 62, `盛り土の外 ${w.az}`);
+    assert.ok(w.at > 5, `上端 ${w.at}`);
+    assert.ok(Math.sign(w.nx) === -Math.sign(w.ax), '道の側を向く');
+    assert.ok(!segmentsCross(w.ax, w.az, w.bx, w.bz, 13, 40, 30, 40), '盛り土を上る道を横切らない');
+  }
+  // 高架がなければ作らない
+  assert.equal(abutmentWalls(terrain, [road]).length, 0);
 });

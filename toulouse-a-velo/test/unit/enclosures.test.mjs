@@ -11,7 +11,8 @@ test('地形の上の塀: 上端はなめらか、地面より下がらず、足
   const l = Math.hypot(80, 12), nx = (-12 / l) * 0.2, nz = (80 / l) * 0.2; // 塀の両側の面（厚さ 0.4 m）
   for (let i = 0; i < P.length; i++) {
     const p = P[i], g = [step.h(p.x, p.z), step.h(p.x + nx, p.z + nz), step.h(p.x - nx, p.z - nz)];
-    assert.ok(p.top >= Math.min(...g) + 2 - 1e-9, `低い側から ${2} m 以上 ${p.top}`);
+    // 低い側から塀の高さ以上（段差の所の土留めの壁は、高い側 + 胸壁まで）
+    assert.ok(p.top >= Math.min(Math.min(...g) + 2, Math.max(...g) + 1) - 1e-9, `低い側から ${2} m 以上 ${p.top}`);
     assert.ok(p.top >= Math.max(...g) + 1 - 1e-9, `高い側にも胸壁 ${p.top}`);
     assert.ok(p.base < Math.min(...g), `足が地面より上 ${p.base}`);
     if (i) assert.ok(Math.abs(p.top - P[i - 1].top) < 0.8, `上端の段 ${P[i - 1].top} → ${p.top}`);
@@ -35,10 +36,10 @@ test('地形の上の塀: 平らな地面では上端 = 地面 + 高さ。平ら
   assert.ok(f.children.length >= 2);
 });
 
-test('盛り土の脇の塀は土留め: 上端は盛り土の上 + 胸壁、盛り土の側に平らな面の印', () => {
+test('盛り土の脇の塀は土留め: 上端は盛り土の上 + 胸壁（低い側から測った塀の高さは使わない）、盛り土の側に平らな面の印', () => {
   // 東西の塀（z = 0）。北（z < 0）は 5 m の格子で 3 m 下がる斜面の下、南（z > 0）の 5 m 先は盛り土の上（3 m 高い）
   const emb = { flat: false, h: (x, z) => (z >= 5 ? 3 : z <= 0 ? 0 : (3 * z) / 5) };
-  const P = wallProfile(emb, -20, 0, 20, 0, 2);
+  const P = wallProfile(emb, -20, 0, 20, 0, 4); // LiDAR の塀の高さ 4 m（低い側の地面から）
   for (const p of P) {
     assert.ok(p.fill && p.fill.y === 3, `土留めの印 ${JSON.stringify(p.fill)}`);
     assert.ok(Math.abs(p.top - 4) < 1e-9, `上端は盛り土 + 1 m ${p.top}`);

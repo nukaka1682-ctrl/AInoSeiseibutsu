@@ -54,6 +54,15 @@ export function oldTownTest(proj) {
   return test;
 }
 
+// 旧市街の中でも、地面の覆いを小舗石ではなく灰色の石の板にする広場 [緯度, 経度, 半径 m]
+// Place du Pont-Neuf（利用者のストリートビュー 2026-10-17 210627・2026-10-02 211242）: 橋のたもとの歩道は灰色の花崗岩の板
+export const GREY_SQUARES = [[43.599714, 1.440840, 38]];
+
+export function greySquareTest(proj) {
+  const discs = GREY_SQUARES.map(([lat, lon, r]) => [...proj.project(lat, lon), r]);
+  return (x, z) => discs.some(([cx, cz, r]) => (x - cx) ** 2 + (z - cz) ** 2 < r * r);
+}
+
 // ガロンヌ川の流れの真ん中の線 [緯度, 経度]（南から北へ。地図データの水面の両岸の真ん中から）。旧市街のうち
 // この線より東（右岸）が歴史的な中心。左岸のサン・シプリアン（Place Olivier・Château d'eau の角）は街の小物を
 // 旧市街の外と同じにする（ユーザーの写真のメモ 1・5・7: 灰色の横向きの灯具の街灯、路上駐車の車、ごみ収集容器）

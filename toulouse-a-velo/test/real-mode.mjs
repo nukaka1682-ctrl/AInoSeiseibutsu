@@ -56,7 +56,7 @@ await page.route('https://data.geopf.fr/**', async (r) => {
   r.fulfill({ body, contentType: type, headers: { 'access-control-allow-origin': '*' } });
 });
 const t0 = Date.now();
-await page.goto(`http://game.test/?area=${process.env.AREA || 'light'}&autostart=1${process.env.REAL === '0' ? '&real=0' : ''}`);
+await page.goto(`http://game.test/?area=${process.env.AREA || 'light'}&autostart=1${process.env.REAL === '0' ? '&real=0' : ''}`, { timeout: 180000 }); // ほかの撮影と同時に動かすと読み込みが遅い
 const ticker = setInterval(async () => {
   try {
     const t = await page.textContent('#loading-text');
@@ -132,9 +132,20 @@ for (const v of views) {
         const at = ([r, u, f]) => [b.x + fz * -r + fx * f, b.y + u, b.z + fx * r + fz * f];
         c.position.set(...at(cam.pos));
         c.lookAt(...at(cam.look));
+      } else if (cam.ground || cam.deck) {
+        // ground: y は地面（岸壁の上の歩道の板を含む）からの高さ（写真と同じ目の高さで撮る）
+        // deck: 橋の上（いちばん上の橋面）からの高さ
+        const T = s.world.terrain, g = cam.deck && s.world.heightAt ? (x, z) => s.world.heightAt(x, z) : (x, z) => (T?.top ? T.top(x, z) : T?.h ? T.h(x, z) : 0) + (s.world.liftAt ? s.world.liftAt(x, z) : 0);
+        const g0 = g(cam.pos[0], cam.pos[2]);
+        c.position.set(cam.pos[0], cam.pos[1] + g0, cam.pos[2]);
+        c.lookAt(cam.look[0], cam.look[1] + (cam.deck ? g0 : g(cam.look[0], cam.look[2])), cam.look[2]); // 橋の上からは水平に
       } else {
         c.position.set(...cam.pos);
         c.lookAt(...cam.look);
+      }
+      if (cam.fov) {
+        c.fov = cam.fov;
+        c.updateProjectionMatrix();
       }
     }, v.cam);
     for (let i = 0; i < 25; i++) {
@@ -162,6 +173,8 @@ for (const v of views) {
   });
   await page.screenshot({ path: join(out, `${v.name}.jpg`), type: 'jpeg', quality: 85, timeout: 240000 });
   console.log(`  ${v.name}: 自転車の高さ ${info}`);
+  // probe: ページで評価する式（例: 近くの小物の位置を調べる）。結果を JSON で表示する
+  if (v.probe) console.log(`  ${v.name} probe:`, JSON.stringify(await page.evaluate(v.probe)));
   if (v.cam) await page.evaluate(() => (window.__tav.phase = 'play'));
 }
 await browser.close();

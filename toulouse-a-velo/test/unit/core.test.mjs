@@ -205,6 +205,30 @@ test('IGN: 建物・道路・水域・広場を OSM 形式に変換する', () =
   assert.equal(court.info.roofHeight, 2);
 });
 
+test('写真で直す道: 線を横にずらし、両端（交差点）は動かさない', () => {
+  // Rue Laganne（way 37419）: 北向きの一方通行を 2 m 西（進む向きの左）へ、端から 12 m かけてずらす
+  const proj = new LocalProjection(43.6, 1.445);
+  const node = (id, x, z) => {
+    const [lat, lon] = proj.unproject(x, z);
+    return { type: 'node', id, lat, lon };
+  };
+  const elements = [node(1, 0, 0), node(2, 10, -90), node(3, 20, -180),
+    { type: 'way', id: 37419, nodes: [1, 2, 3], tags: { highway: 'residential', oneway: 'yes', name: 'Rue Laganne' } }];
+  const parsed = parseOsm({ elements }, proj, { minX: -500, minZ: -500, maxX: 500, maxZ: 500 }, []);
+  const road = parsed.roads[0];
+  assert.equal(road.width, 5.5);
+  assert.equal(road.parkSide, 'right');
+  assert.equal(road.pts.length, 5); // 端から 12 m の所に頂点を足す
+  assert.equal(road.nodeIds.length, road.pts.length);
+  assert.equal(road.nodeIds[0], 1);
+  assert.equal(road.nodeIds.at(-1), 3);
+  const near = (p, x, z) => Math.hypot(p[0] - x, p[1] - z) < 0.05;
+  assert.ok(near(road.pts[0], 0, 0) && near(road.pts.at(-1), 20, -180), '両端はそのまま');
+  // 真ん中の頂点は進む向き (0.11, -0.99) の左（西）へ 2 m
+  const ux = 10 / Math.hypot(10, 90), uz = -90 / Math.hypot(10, 90);
+  assert.ok(near(road.pts[2], 10 + uz * 2, -90 - ux * 2), JSON.stringify(road.pts[2]));
+});
+
 test('橋の下で切り抜かれた水面を埋める', () => {
   // 川（x: -50〜50）を、橋の幅（z: -10〜10）だけ岸から岸まで切り抜いて 2 つに分けた形
   const river = (z0, z1) => ({ type: 'water', outer: [[-50, z0], [50, z0], [50, z1], [-50, z1]], holes: [], depth: 6, kind: 'river', bounds: { minX: -50, maxX: 50, minZ: Math.min(z0, z1), maxZ: Math.max(z0, z1) } });

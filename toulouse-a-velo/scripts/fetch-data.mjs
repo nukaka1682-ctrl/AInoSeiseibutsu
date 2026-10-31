@@ -113,7 +113,8 @@ async function bakeMetroFile(id, bbox) {
     const r = await fetchMetroEntrances(bbox, { log: (t) => console.log(t) });
     const out = join(root, 'public', 'data', `${id}-metro.json`);
     await writeFile(out, JSON.stringify(r));
-    console.log(`  保存: ${out}（駅 ${r.stations.length}、出入口 ${r.entrances.length}）`);
+    const ramps = r.entrances.filter((e) => e.kind === 'parking').length;
+    console.log(`  保存: ${out}（駅 ${r.stations.length}、メトロの出入口 ${r.entrances.length - ramps}、地下駐車場 ${r.parkings.length} の坂 ${ramps}）`);
   } catch (err) {
     console.log(`  メトロの出入口を取得できませんでした: ${err.message}`);
   }

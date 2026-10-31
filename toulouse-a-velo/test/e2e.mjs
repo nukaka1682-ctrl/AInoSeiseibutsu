@@ -171,7 +171,8 @@ try {
   // 木の数は同梱データの木だけ（街の外れの川岸の土手に自動で植える木は除く）
   const ws = await wp.evaluate(() => ({ walls: window.__tav.world.stats.walls, trees: window.__tav.world.stats.trees - (window.__tav.world.stats.bankTrees || 0) }));
   check(ws.walls >= 1 && ws.walls <= 2 && ws.trees === 1, `同梱データの塀と木を置く（道路の上を切り取って塀 ${ws.walls}・木 ${ws.trees}）`);
-  const [p0, p1] = [ahead(5, -7.5), ahead(15, -7.5)];
+  // 左の端はキャピトル広場（塀のない広場。enclosures.js の clearNamedAreas）にかかるので、右の端で調べる
+  const [p0, p1] = [ahead(5, 7.5), ahead(15, 7.5)];
   const hit = await wp.evaluate(([a, b]) => window.__tav.world.collision.raycast(a[0], a[1], b[0], b[1]), [p0, p1]);
   check(hit > 0.4 && hit < 0.6, `道の外の塀には当たる（${hit.toFixed(2)}）`);
   await wp.evaluate((s) => window.__tav.bike.place(s.x, s.z, s.heading), start);
