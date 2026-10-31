@@ -14,7 +14,7 @@
 import * as THREE from 'three';
 import { MeshWriter } from './meshwriter.js';
 import { CAR_ROADS } from './parse.js';
-import { Grid, clipPolylineToRect, closestOnSegment } from '../geo.js';
+import { Grid, clipPolylineToRect, closestOnSegment, hash01 } from '../geo.js';
 import { offsets, roadStyle } from './ground.js';
 import { DATUM } from './terrain.js';
 import { cleanProfile, fitDeckEnds, segmentsCross } from './terraincond.js';
@@ -346,11 +346,13 @@ export function archLayout(s0, s1, { spans = null, piers = null, reverse = false
   return { arches, piers: pierList };
 }
 
-// アーチの高さ: 起拱線（アーチの付け根）は水面の 0.7 m 上、要石の下は蛇腹から迫石の輪の分だけ下まで
-export function archRise(a, depth, ring) {
+// アーチの高さ: 起拱線（アーチの付け根）は水面の 0.7 m 上、要石の下は蛇腹から迫石の輪の分だけ下まで。
+// ratio: 径間に対する高さ（ポン・ヌフは 0.38。利用者の写真 NCM_0111・0137: アーチは水面から蛇腹の近くまで届き、
+// 大きなアーチの上のスパンドレルは薄い）
+export function archRise(a, depth, ring, ratio = 0.3) {
   const spring = -depth + 0.7;
   const crownMax = CORNICE - ring - 0.25;
-  return { spring, rise: Math.max(0, Math.min(crownMax - spring, 0.3 * 2 * a)) };
+  return { spring, rise: Math.max(0, Math.min(crownMax - spring, ratio * 2 * a)) };
 }
 
 // ---- メッシュ ----
@@ -801,7 +803,7 @@ export function bridgeStyle(road, v, waterDepthAt, levelAt = null, deckAt = null
       : { target, minSpan: target * 0.75, maxSpan: target * 1.25 };
     const lay = archLayout(s0, s1, opts);
     w.ring = ring;
-    w.arches = lay.arches.map((ar) => ({ ...ar, ...archRise(ar.a, w.depth, ring), t: ring }));
+    w.arches = lay.arches.map((ar) => ({ ...ar, ...archRise(ar.a, w.depth, ring, pontNeuf && w === longest ? 0.38 : 0.3), t: ring }));
     w.piers = lay.piers;
     w.pontNeuf = pontNeuf && w === longest;
     w.a0 = s0;
@@ -886,11 +888,23 @@ function writeDeck({ deck, body, walk, marks }, road, half, kind, info, clipRect
         hq(pa, pb, cb, ca, ct, up, COL.cornice);
         // 欄干の面は淡い切り石（写真 10・11: 淡い石の約 1 m の欄干）。レンガではなく花崗岩の板のテクスチャ（walk。
         // 2.4 m で 1 周: 長さ 1.2 m・高さ 0.6 m の石。目地は細い横の線）に暖かい白の色をかける
-        const sq = (p, q, y0, y1, nn) => walk.quad([p[0], y0, p[1]], [q[0], y0, q[1]], [q[0], y1, q[1]], [p[0], y1, p[1]], nn, [0, y0 / 2.4], [l / 2.4, y0 / 2.4], [l / 2.4, y1 / 2.4], [0, y1 / 2.4], PARAPET_STONE);
-        sq(pa, pb, ct, top, n);
-        // 笠石: 欄干の面と同じ切り石のテクスチャ（体のテクスチャのレンガの縞にしない。利用者の写真: 平らな淡い石の笠）
-        walk.quad([pa[0], top, pa[1]], [pb[0], top, pb[1]], [ib[0], top, ib[1]], [ia[0], top, ia[1]], up, [0, 0.1], [l / 2.4, 0.1], [l / 2.4, 0.3], [0, 0.3], COPING_STONE);
-        sq(ia, ib, topY, top, ni);
+        // 風雨のしみ: 区間ごとに少しずつ暗く・灰色がかった石（利用者の写真 NCM_0112・0123・211139: 地衣類の黒ずみの斑）
+        const h = hash01(Math.round((a[0] + b[0]) * 3 + (a[1] + b[1]) * 7), 11), wk = h < 0.25 ? 0.82 + h * 0.4 : 0.93 + h * 0.07;
+        const stoneC = PARAPET_STONE.map((c, j) => c * wk * (j === 2 ? 0.98 : 1)), copeC = COPING_STONE.map((c) => c * (0.9 + h * 0.1));
+        const sq = (p, q, y0, y1, nn) => walk.quad([p[0], y0, p[1]], [q[0], y0, q[1]], [q[0], y1, q[1]], [p[0], y1, p[1]], nn, [0, y0 / 2.4], [l / 2.4, y0 / 2.4], [l / 2.4, y1 / 2.4], [0, y1 / 2.4], stoneC);
+        sq(pa, pb, ct, top - 0.06, n);
+        sq(ia, ib, topY, top - 0.06, ni);
+        // 笠石: 丸く盛り上がった淡い石（利用者の写真 NCM_0112・0123: 厚い欄干の上は丸い笠）。外から内へ半円を 5 つの面で
+        const R = 5, rise = 0.14;
+        const cp = (j) => {
+          const th = (Math.PI * j) / R, f = (1 - Math.cos(th)) / 2, y = top - 0.06 + Math.sin(th) * rise;
+          return { a: [pa[0] + (ia[0] - pa[0]) * f, pa[1] + (ia[1] - pa[1]) * f], b: [pb[0] + (ib[0] - pb[0]) * f, pb[1] + (ib[1] - pb[1]) * f], y, th };
+        };
+        for (let j = 0; j < R; j++) {
+          const q0 = cp(j), q1 = cp(j + 1), tm = (q0.th + q1.th) / 2, cn = Math.cos(tm), sn = Math.sin(tm);
+          const nn = [n[0] * cn + 0, sn, n[2] * cn];
+          walk.quad([q0.a[0], q0.y, q0.a[1]], [q0.b[0], q0.y, q0.b[1]], [q1.b[0], q1.y, q1.b[1]], [q1.a[0], q1.y, q1.a[1]], nn, [0, 0.1 + j * 0.04], [l / 2.4, 0.1 + j * 0.04], [l / 2.4, 0.14 + j * 0.04], [0, 0.14 + j * 0.04], copeC);
+        }
       }
     }
   }
@@ -1137,8 +1151,25 @@ function writeStructure(w, road, v, stone = w) {
         const [ux, uz] = U((p0[0] + p1[0]) / 2);
         const [ns, ny] = archNormal(ar, (t0 + t1) / 2);
         const arc0 = (ar.a * (Math.PI - t0)) / 4, arc1 = (ar.a * (Math.PI - t1)) / 4;
-        w.quad(P(1, ...p0), P(-1, ...p0), P(-1, ...p1), P(1, ...p1), [ux * ns, ny, uz * ns],
-          [arc0, v.extL / 4], [arc0, -v.extR / 4], [arc1, -v.extR / 4], [arc1, v.extL / 4], COL.vault);
+        const nrm = [ux * ns, ny, uz * ns];
+        if (!wt.pontNeuf) {
+          w.quad(P(1, ...p0), P(-1, ...p0), P(-1, ...p1), P(1, ...p1), nrm,
+            [arc0, v.extL / 4], [arc0, -v.extR / 4], [arc1, -v.extR / 4], [arc1, v.extL / 4], COL.vault);
+          continue;
+        }
+        // ポン・ヌフ: レンガのヴォールトに、幅の向き 2.6 m ごとに淡い石の帯（石とレンガが交互のはしご。利用者の写真 NCM_0111）
+        const W = v.extL + v.extR, n = Math.max(2, Math.round(W / 2.6));
+        const at = (p, f) => {
+          const A = P(1, ...p), B = P(-1, ...p);
+          return [A[0] + (B[0] - A[0]) * f, A[1] + (B[1] - A[1]) * f, A[2] + (B[2] - A[2]) * f];
+        };
+        const uvAt = (arc, f) => [arc, (v.extL - W * f) / 4];
+        for (let k = 0; k < n; k++) {
+          const fa = k / n, fb = (k + 1) / n, fr = fb - 0.55 / W; // 帯は区画の終わりの 0.55 m
+          w.quad(at(p0, fa), at(p0, fr), at(p1, fr), at(p1, fa), nrm, uvAt(arc0, fa), uvAt(arc0, fr), uvAt(arc1, fr), uvAt(arc1, fa), COL.vault);
+          if (k + 1 < n) w.quad(at(p0, fr), at(p0, fb), at(p1, fb), at(p1, fr), nrm, uvAt(arc0, fr), uvAt(arc0, fb), uvAt(arc1, fb), uvAt(arc1, fr), j % 2 ? COL.vault : COL.stone);
+          else w.quad(at(p0, fr), at(p0, fb), at(p1, fb), at(p1, fr), nrm, uvAt(arc0, fr), uvAt(arc0, fb), uvAt(arc1, fb), uvAt(arc1, fr), COL.vault);
+        }
       }
     }
     // 水切り（上流・下流の両側）

@@ -65,10 +65,10 @@ const namedSurface = (area) => PLAZA_SURFACES.find((p) => p.match.test(area.name
 // 壁から壁まで石の板の並木道（利用者の Street View 212222・212248: Allées Roosevelt は車の通らない、淡いばら色がかった
 // ベージュの石の板 #d8c8bb〜#e8dfd6 の広場。真ん中の道は streets.js で同じ石の板）。中心線から half m の帯
 const SLAB_ALLEES = [{ name: /^All[ée]es du Pr[ée]sident Franklin Roosevelt$/i, half: 14, color: c3('#f0e2d8') }];
-// 河岸の遊歩道と水際のあいだの小石の浜（利用者の写真 NCM_0138: Pont Saint-Pierre の下流の右岸は、遊歩道 Promenade Henri Martin
-// から水際まで淡い茶色の丸い小石の浜がゆるく水へ下りる。ラ・ドラードの前（maxX より東）は石の板の河岸）。遊歩道の中心から
-// 水の側へ from〜to m の帯（水に沈む分は水面に隠れる）
-const PEBBLE_BEACHES = [{ name: /^Promenade Henri Martin$/i, maxX: -150, from: 1.6, to: 16, color: c3('#d2c9bc') }];
+// 河岸の遊歩道と水際のあいだの丸い川石の石畳の斜面（利用者の写真 NCM_0104・0138: Pont Saint-Pierre の下流の右岸は、遊歩道
+// Promenade Henri Martin から水際まで灰色〜茶色がかった丸い川石 galets を敷き詰めた斜面がゆるく水へ下りる。ラ・ドラードの前
+// （maxX より東）は石の板の河岸）。遊歩道の中心から水の側へ from〜to m の帯（水に沈む分は水面に隠れる）
+const PEBBLE_BEACHES = [{ name: /^Promenade Henri Martin$/i, maxX: -150, from: 1.6, to: 16, color: c3('#ffffff') }];
 export function plazaSurface(area, inOldTown = () => false) {
   const s = namedSurface(area);
   if (s) return s;
@@ -94,6 +94,7 @@ export function createGroundMaterials(tex) {
       gutter: flat(tex.gutter),
       grass: flat(tex.grass),
       gravel: flat(tex.gravel),
+      galets: flat(tex.galets),
       capitole: flat(tex.capitoleSquare),
       plain: flat(null),
       marks: flat(tex.marks, { alphaTest: 0.5 }), // 路面の絵（自転車・矢印・BUS・30）のアトラス
@@ -698,6 +699,7 @@ function buildQuayWalls(list, mats, proj = null) {
       for (let i = 1; i + 1 < F.length; i++) walk.tri(F[0], F[i], F[i + 1], [0, 1, 0], [F[0][0] / 2.4, F[0][2] / 2.4], [F[i][0] / 2.4, F[i][2] / 2.4], [F[i + 1][0] / 2.4, F[i + 1][2] / 2.4], BANK.quayWalk);
     }
   }
+  writeQuayFittings(w, list);
   const g = new THREE.Group();
   g.name = 'quay-walls';
   for (const [writer, mat] of [[w, mats.quai], [walk, mats.quayWalk]]) {
@@ -707,6 +709,55 @@ function buildQuayWalls(list, mats, proj = null) {
     g.add(m);
   }
   return g;
+}
+
+// 高い岸壁の金物（利用者の写真 NCM_0109: ドラード河岸の高いレンガの岸壁には、下の遊歩道の上に腕木に吊った鉄の角灯が並び、
+// 足元近くに水抜きの小さな穴の列）。壁に沿った座標（壁の向きへの射影）で 24 m ごとに灯り、4.8 m ごとに水抜きを置く
+// （短い壁の切れ端が続いても間隔がそろう）。灯りは下の段から 3.6 m 以上の壁だけ
+const FIT_UV = [0.5, 0.5]; // 壁のテクスチャの 1 点（模様のない色の面）
+const QUAY_IRON = c3('#2b2c2d', 1.16), QUAY_GLASS = c3('#eadcae', 1.16), QUAY_HOLE = c3('#3b3129', 1.16);
+function fitBox(w, o, ex, ey, ez, color) {
+  const V = (a, b, c) => [o[0] + ex[0] * a + ey[0] * b + ez[0] * c, o[1] + ex[1] * a + ey[1] * b + ez[1] * c, o[2] + ex[2] * a + ey[2] * b + ez[2] * c];
+  const N = (v, s) => {
+    const l = Math.hypot(...v) || 1;
+    return [(v[0] / l) * s, (v[1] / l) * s, (v[2] / l) * s];
+  };
+  const f = (a, b, c, d, n) => w.quad(a, b, c, d, n, FIT_UV, FIT_UV, FIT_UV, FIT_UV, color);
+  f(V(1, -1, -1), V(1, 1, -1), V(1, 1, 1), V(1, -1, 1), N(ex, 1));
+  f(V(-1, -1, 1), V(-1, 1, 1), V(-1, 1, -1), V(-1, -1, -1), N(ex, -1));
+  f(V(-1, 1, -1), V(-1, 1, 1), V(1, 1, 1), V(1, 1, -1), N(ey, 1));
+  f(V(-1, -1, 1), V(-1, -1, -1), V(1, -1, -1), V(1, -1, 1), N(ey, -1));
+  f(V(1, -1, 1), V(1, 1, 1), V(-1, 1, 1), V(-1, -1, 1), N(ez, 1));
+  f(V(-1, -1, -1), V(-1, 1, -1), V(1, 1, -1), V(1, -1, -1), N(ez, -1));
+}
+function writeQuayFittings(w, list) {
+  for (const q of list) {
+    const L = Math.hypot(q.bx - q.ax, q.bz - q.az);
+    if (L < 0.5) continue;
+    const ux = (q.bx - q.ax) / L, uz = (q.bz - q.az) / L, { nx, nz } = q, s0 = q.ax * ux + q.az * uz;
+    const U = (h) => [ux * h, 0, uz * h], Y = (h) => [0, h, 0], N = (h) => [nx * h, 0, nz * h];
+    for (const [step, lamp] of [[24, true], [4.8, false]]) {
+      for (let k = Math.ceil(s0 / step); k * step < s0 + L; k++) {
+        const t = k * step - s0;
+        if (t < 0.3 || t > L - 0.3) continue;
+        const x = q.ax + ux * t, z = q.az + uz * t, yb = q.ab + ((q.bb - q.ab) * t) / L, yt = q.at + ((q.bt - q.at) * t) / L;
+        const at = (o, y) => [x + nx * o, y, z + nz * o];
+        if (!lamp) {
+          if (yt - yb > 2.4) fitBox(w, at(0.01, yb + 1.7), U(0.08), Y(0.08), N(0.01), QUAY_HOLE);
+          continue;
+        }
+        if (yt - yb < 3.6) continue;
+        // 壁の板・腕木・笠・ガラスの角灯・下の受け
+        const yl = yb + Math.min(3.4, yt - yb - 0.7);
+        fitBox(w, at(0.03, yl + 0.3), U(0.07), Y(0.17), N(0.03), QUAY_IRON);
+        fitBox(w, at(0.26, yl + 0.42), U(0.025), Y(0.025), N(0.23), QUAY_IRON);
+        fitBox(w, at(0.46, yl + 0.21), U(0.15), Y(0.035), N(0.15), QUAY_IRON);
+        fitBox(w, at(0.46, yl + 0.03), U(0.11), Y(0.15), N(0.11), QUAY_GLASS);
+        fitBox(w, at(0.46, yl - 0.14), U(0.08), Y(0.025), N(0.08), QUAY_IRON);
+        fitBox(w, at(0.46, yl + 0.3), U(0.012), Y(0.06), N(0.012), QUAY_IRON);
+      }
+    }
+  }
 }
 
 // 地面の板と水（エリア全体で 1 回だけ作る）。地形があるときは、平らな板の代わりに遠くの地面（読み込んだタイルの中は
@@ -1268,7 +1319,7 @@ function* groundDetailSteps(parsed, clip, mats, waterDepthAt, opts) {
     const ring = [...offsets(pts, pb.from)[side], ...offsets(pts, pb.to)[side].reverse()];
     if (!overlaps(ringBounds(ring))) continue;
     const outer = clipRingToRect(ring, clip.minX, clip.minZ, clip.maxX, clip.maxZ);
-    if (outer.length >= 3) writeFlatPolygon(W(ORDER.plaza, 'gravel'), outer, [], 0, 2, pb.color);
+    if (outer.length >= 3) writeFlatPolygon(W(ORDER.plaza, 'galets'), outer, [], 0, 2, pb.color);
   }
   // ---- ジャン・ジョレス通りの遊歩道（ramblas.js）: 淡いベージュの固めた砂と、車道沿いの植え込みの帯（暗い土に低木）
   const rl = parsed.proj ? ramblasLayout(parsed.roads, parsed.proj) : null;

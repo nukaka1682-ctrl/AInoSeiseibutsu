@@ -346,6 +346,44 @@ function stoneGrain(ctx, rnd, x, y, w, h, dots, alpha = 0.35, bevel = true) {
   ctx.fillRect(x, y + h * 0.78, w, h * 0.22);
 }
 
+// ガロンヌ川の丸い石（galets de Garonne）を敷き詰めた河岸の斜面（利用者の写真 NCM_0104・0138: 遊歩道から水際までの
+// 灰色〜茶色がかった丸い川石の石畳）。長さ 12〜22 cm のだ円の石を、暗い砂の目地に隙間なく並べる。2 m で 1 周
+export function makeGaletTexture() {
+  const S = 512, ppm = S / 2;
+  const [c, ctx] = canvas(S, S);
+  const rnd = mulberry32(57);
+  ctx.fillStyle = '#5c544b';
+  ctx.fillRect(0, 0, S, S);
+  const tones = ['#9a9085', '#a39a8e', '#8e857b', '#b0a596', '#968b7c', '#a8998a', '#8a8279', '#b4ab9f', '#9d9184'];
+  // 行ごとに石を並べ、少しずらして詰める（端は反対の端へ回り込ませて、つなぎ目を見せない）
+  const rows = 15, rowH = S / rows;
+  for (let r = 0; r < rows; r++) {
+    let x = rnd() * 20;
+    while (x < S + 10) {
+      const lw = (0.12 + rnd() * 0.1) * ppm, lh = rowH * (0.78 + rnd() * 0.22);
+      const cx = x + lw / 2, cy = r * rowH + rowH / 2 + (rnd() - 0.5) * rowH * 0.18, ang = (rnd() - 0.5) * 0.5;
+      const tone = tones[Math.floor(rnd() * tones.length)];
+      for (const ox of [-S, 0, S]) {
+        for (const oy of [-S, 0, S]) {
+          ctx.save();
+          ctx.translate(cx + ox, cy + oy);
+          ctx.rotate(ang);
+          // 影（目地の側）・石・上の明るいふくらみ
+          ctx.fillStyle = 'rgba(30,26,22,0.45)';
+          ctx.beginPath(); ctx.ellipse(1.5, 2, lw / 2, lh / 2, 0, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = tone;
+          ctx.beginPath(); ctx.ellipse(0, 0, lw / 2 - 1, lh / 2 - 1, 0, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = 'rgba(255,250,240,0.16)';
+          ctx.beginPath(); ctx.ellipse(-lw * 0.08, -lh * 0.12, lw * 0.3, lh * 0.26, 0, 0, Math.PI * 2); ctx.fill();
+          ctx.restore();
+        }
+      }
+      x += lw + 1 + rnd() * 2;
+    }
+  }
+  return toTexture(c);
+}
+
 // 旧市街の小舗石（pavés）: 約 10 cm 角の灰色〜ふじ色がかった花崗岩（写真 #706c6d〜#8a8080、日陰 #5d5656）を、
 // 通りを横切る浅い弧の列（segmental arcs、弦 1.28 m・高さ 12 cm）に並べたもの。目地は暗い砂。
 // 通りに沿った UV（u = 横方向、v = 通りの向き）で貼り、2.56 m で 1 周
@@ -875,6 +913,7 @@ export function makeTextures() {
     sidewalk: makeSidewalkTexture(),
     paving: makePavingTexture(),
     setts: makeSettsTexture(),
+    galets: makeGaletTexture(),
     gutter: makeGutterTexture(),
     slabs: makeSlabTexture(),
     curb: makeCurbTexture(),

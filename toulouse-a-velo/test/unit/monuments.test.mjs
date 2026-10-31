@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import * as THREE from 'three';
 import { LocalProjection, pointInPolygon } from '../../src/geo.js';
 import {
   MONUMENTS, ZODIAC, buildMonuments, cabanisLayout, circleOf, fenceColliders, findMonuments, kerbSpot, monumentClearance, monumentSolid, occitanCross, orientedBox, placeOnPlaza, rayRing, stadiumAnnexes, stadiumRays, strokeQuads,
@@ -267,4 +268,35 @@ test('Purpan の病院の門: 塀はアーチの所であいていて、門柱�
     const t = ((cx - x0) * (x1 - x0) + (cz - z0) * (z1 - z0)) / ((x1 - x0) ** 2 + (z1 - z0) ** 2);
     assert.ok(t < 0 || t > 1, 'アーチの中心は塀の当たり判定の外');
   }
+});
+
+test('Place de la Trinité の噴水: 1 つ、水盤の外の縁に当たり判定の円、まわりに小物を置かない', () => {
+  const proj = new LocalProjection(43.5997, 1.4441);
+  const list = findMonuments(proj, { buildings: [], areas: [], roads: [], bounds: null }).filter((m) => m.kind === 'trinite');
+  assert.equal(list.length, 1);
+  const { colliders, keepOut } = buildMonuments(list, {}, { groundAt: () => 0 });
+  assert.equal(colliders.length, 1);
+  assert.ok(Math.abs(colliders[0][2] - 2.95) < 1e-9, '水盤の外径 約 5.9 m');
+  assert.ok(keepOut[0][2] > colliders[0][2]);
+});
+
+test('店の並ぶ通りの飾り: 通りに面した建物の正面の辺だけ（裏の辺・離れた建物・ほかの通りは除く）', () => {
+  const proj = new LocalProjection(43.598, 1.432);
+  // 東西の Rue de la République（z = 0、幅 8 m）。北側（z < 0）に正面が通りに接する建物、南に離れた建物、ほかの通り沿いの建物
+  const road = { name: 'Rue de la République', type: 'secondary', width: 8, pts: [[-100, 0], [100, 0]] };
+  const other = { name: 'Rue Réclusane', type: 'residential', width: 6, pts: [[-100, 200], [100, 200]] };
+  const near = bld(rect(0, -10, 10, 6), { height: 14, floorHeight: 3, minHeight: 0 });
+  const far = bld(rect(0, 40, 10, 6), { height: 14, floorHeight: 3, minHeight: 0 });
+  const side = bld(rect(0, 190, 10, 6), { height: 14, floorHeight: 3, minHeight: 0 });
+  const list = findMonuments(proj, { buildings: [near, far, side], areas: [], roads: [road, other], bounds: null }).filter((m) => m.kind === 'shopstreet');
+  assert.equal(list.length, 1);
+  const { fronts } = list[0];
+  assert.equal(fronts.length, 1, '通りに面した北の建物の南の辺だけ');
+  assert.equal(fronts[0].b, near);
+  assert.ok(fronts[0].n[1] > 0.99, '外向きの法線は通り（南）を向く');
+  assert.ok(Math.abs(fronts[0].L - 20) < 1e-9);
+  const mat = new THREE.MeshBasicMaterial();
+  const { group } = buildMonuments(list, { monument: mat, monumentMetal: mat }, { groundAt: () => 0 });
+  const metal = group.children.find((m) => m.name === 'monument-metal');
+  assert.ok(metal && metal.geometry.attributes.position.count > 100, '縦樋・手すりなどの金物のメッシュ');
 });
