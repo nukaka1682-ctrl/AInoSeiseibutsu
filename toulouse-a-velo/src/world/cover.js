@@ -101,6 +101,10 @@ const FRAGMENT = /* glsl */ `
   float wsum = max(dot(w, vec4(1.0)) + pav, 1e-3);
   w /= wsum;
   pav /= wsum;
+  // 河岸の下の段の石の板の所: 覆いの芝・木の下の土も石の板にする（航空写真の緑の斑が敷石の上に出ない。利用者の写真 NCM_0137）
+  w.r += (w.b + w.a) * vSlab;
+  w.b *= 1.0 - vSlab;
+  w.a *= 1.0 - vSlab;
   float big = cvNoise(cp * 0.07 + 5.3);
   float mid = cvNoise(cp * 0.23 + 11.1);
   vec3 grass = texture2D(tGrass, cp / 6.0).rgb;
