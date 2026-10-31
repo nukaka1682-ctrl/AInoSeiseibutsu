@@ -115,7 +115,9 @@ const FRAGMENT = /* glsl */ `
   vec3 setts = texture2D(tSetts, cp / ${SETT_TILE.toFixed(2)}).rgb * c_setts;
   vec3 pub = mix(sidewalk * c_public, mix(setts, paving, texture2D(plazaMap, cuv).r), vOldTown);
   // 河岸の下の段・ポン・ヌフの橋のたもと: 大きな花崗岩の板（利用者の写真 NCM_0136・0137・210627）
-  pub = mix(pub, paving * vec3(0.86, 0.89, 0.95), vSlab); // 少し灰色に寄せる
+  // 板の色は旧市街のばら色を掛けない灰色（橋の歩道の続き・Place du Pont-Neuf の灰色の花崗岩と色をそろえる。写真 211242・NCM_0136）
+  vec3 slab = mix(texture2D(tPaving, cp / 4.0).rgb, vec3(1.0), 0.25) * vec3(0.8, 0.81, 0.83);
+  pub = mix(pub, slab, vSlab);
   // 敷地の中: アスファルト → コンクリート → ところどころ砂利（big の大きい所）
   vec3 priv = mix(sidewalk * c_asphalt, texture2D(tGround, cp / 6.0).rgb * c_concrete, smoothstep(0.42, 0.52, big));
   priv = mix(priv, gravel * c_gravel, smoothstep(0.64, 0.7, big));
@@ -129,6 +131,8 @@ const FRAGMENT = /* glsl */ `
   float jt = max(smoothstep(0.44 - pw.x, 0.44 + pw.x, pf.x), smoothstep(0.42 - pw.y, 0.42 + pw.y, pf.y));
   jt *= 1.0 - smoothstep(0.15, 0.45, max(pw.x, pw.y));
   vec3 pavers = sidewalk * c_pavers * (0.93 + 0.14 * cvHash(floor(pb))) * (1.0 - 0.35 * jt);
+  // 河岸の下の段・ポン・ヌフの橋のたもとの石の板の所: 舗石の歩道も同じ灰色の花崗岩の板に（橋の歩道の続きと色をそろえる）
+  pavers = mix(pavers, slab, vSlab);
   diffuseColor.rgb *= pub * w.r + priv * w.g + lawn * w.b + under * w.a + pavers * pav;
 }
 `;

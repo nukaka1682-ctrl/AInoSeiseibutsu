@@ -6,7 +6,7 @@
 // 地形（terrain.js）があるときは、地面はタイルごとの高さの格子（terrainmesh.js）で、平らな面・歩道・縁石は地形に載せる
 // （MeshWriter の drape。y は地面からの高さ）。水面は本当の水面の高さ、岸は本当の岸の高さから水面まで（bankY）。
 import * as THREE from 'three';
-import { MeshWriter, writeFlatPolygon } from './meshwriter.js';
+import { MeshWriter, triangulate, writeFlatPolygon } from './meshwriter.js';
 import { COVER_COLORS, createCoverShared } from './cover.js';
 import { Grid, centroid, clipPolylineToRect, clipRingToRect, closestOnSegment, freeRects, hash01, pointInPolygon, ringBounds, signedArea } from '../geo.js';
 import { ramblasLayout } from './ramblas.js';
@@ -14,7 +14,7 @@ import { LOCKS, lockFrame } from './locks.js';
 import { RaisedIndex, oldTownBase, planStreets, streetSteps, writePrism } from './streets.js';
 import { CAR_ROADS } from './parse.js';
 import { catenaryStations, mergeIntervals, slicePolyline, subtract, tramCrossCuts } from './markings.js';
-import { bridgeGroups, buildAbutments, buildBridges, conditionUnderpasses, setupDecks } from './bridges.js';
+import { PONT_NEUF_HALF, bridgeGroups, buildAbutments, buildBridges, conditionUnderpasses, pontNeufApproaches, setupDecks } from './bridges.js';
 import { DRAPE_LIFT, FLAT_TERRAIN } from './terrain.js';
 import { buildFarTerrain, createTerrainMaterials, splitGeometry, TERRAIN_ORDER } from './terrainmesh.js';
 import { conditionRoads, despike, sharpenQuays, WALK_DEF } from './terraincond.js';
@@ -69,6 +69,65 @@ const SLAB_ALLEES = [{ name: /^All[ée]es du Pr[ée]sident Franklin Roosevelt$/i
 // Promenade Henri Martin から水際まで灰色〜茶色がかった丸い川石 galets を敷き詰めた斜面がゆるく水へ下りる。ラ・ドラードの前
 // （maxX より東）は石の板の河岸）。遊歩道の中心から水の側へ from〜to m の帯（水に沈む分は水面に隠れる）
 const PEBBLE_BEACHES = [{ name: /^Promenade Henri Martin$/i, maxX: -150, from: 1.6, to: 16, color: c3('#ffffff') }];
+// ポン・ヌフの両端の歩道（利用者の指摘: 橋の付け根・歩道との際が雑。航空写真: 両岸とも橋の淡い花崗岩の歩道がそのまま街の
+// 歩道へ続き、縁石は丸い角で曲がる）。取り付け道路（bridges.js の pontNeufApproaches）の両側に、橋の歩道と同じ幅
+// （車道の縁 PN_ROAD_HALF m から欄干の線 PONT_NEUF_HALF m まで）・同じ花崗岩の板と縁の濃い帯を敷き、先の縁石を半径 PN_KERB_R m で
+// 外へ丸める。東の端（Place du Pont-Neuf）は交差点の横断歩道の手前まで（北 6 m・南 9 m）、西の端（Rue de la République）は
+// Cours Dillon の角まで取り付け道路いっぱい
+const PONT_NEUF_APRONS = { east: { north: 6, south: 9 }, west: { north: Infinity, south: Infinity } };
+const PN_ROAD_HALF = 4.5, PN_KERB_R = 3, PN_GRANITE = c3('#b4b5b4'), PN_EDGE = c3('#8f908f');
+function writePontNeufAprons(w, edge, approaches, clip) {
+  const up = [0, 1, 0];
+  for (const ap of approaches) {
+    const { pts, end } = ap;
+    if (end[0] < clip.minX || end[0] >= clip.maxX || end[1] < clip.minZ || end[1] >= clip.maxZ) continue; // 橋の端のある区画だけで作る
+    const cum = [0];
+    for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+    const at = (s) => {
+      let i = 0;
+      while (i < pts.length - 2 && cum[i + 1] < s) i++;
+      const l = cum[i + 1] - cum[i] || 1, t = Math.min(1, Math.max(0, (s - cum[i]) / l));
+      const T = [(pts[i + 1][0] - pts[i][0]) / l, (pts[i + 1][1] - pts[i][1]) / l];
+      return { C: [pts[i][0] + (pts[i + 1][0] - pts[i][0]) * t, pts[i][1] + (pts[i + 1][1] - pts[i][1]) * t], T };
+    };
+    const d0 = at(0).T, n0 = [-d0[1], d0[0]];
+    const uv = (p) => [((p[0] - end[0]) * d0[0] + (p[1] - end[1]) * d0[1]) / 2.4, ((p[0] - end[0]) * n0[0] + (p[1] - end[1]) * n0[1]) / 2.4];
+    const cfg = PONT_NEUF_APRONS[ap.east ? 'east' : 'west'];
+    for (const sg of [1, -1]) {
+      const side = sg * n0[1] < 0 ? 'north' : 'south';
+      const L = Math.min(cfg[side], cum[cum.length - 1]);
+      if (L < 1) continue;
+      const R = Math.min(PN_KERB_R, L * 0.5), hi = PN_ROAD_HALF, ho = PONT_NEUF_HALF;
+      const off = (s, o) => {
+        const { C, T } = at(s);
+        return [C[0] - T[1] * sg * o, C[1] + T[0] * sg * o];
+      };
+      // 縁石の線（車道の縁、先は外へ丸める）と、外の縁（欄干の線）
+      const kerb = [];
+      for (let s = 0; s < L - R - 1e-6; s += 1) kerb.push({ p: off(s, hi), n: (() => { const { T } = at(s); return [-T[1] * sg, T[0] * sg]; })() });
+      const { T: Tq } = at(L - R), Nq = [-Tq[1] * sg, Tq[0] * sg], Q = off(L - R, hi + R);
+      for (let k = 0; k <= 6; k++) {
+        const f = (k / 6) * (Math.PI / 2), dir = [-Nq[0] * Math.cos(f) + Tq[0] * Math.sin(f), -Nq[1] * Math.cos(f) + Tq[1] * Math.sin(f)];
+        kerb.push({ p: [Q[0] + dir[0] * R, Q[1] + dir[1] * R], n: [-dir[0], -dir[1]] });
+      }
+      const outer = [];
+      for (let s = L; s > 1e-6; s -= 1) outer.push(off(s, ho));
+      outer.push(off(0, ho));
+      const ring = [...kerb.map((k) => k.p), ...outer];
+      const { points, indices } = triangulate(ring, []);
+      for (let i = 0; i < indices.length; i += 3) {
+        const [A, B, C] = [0, 1, 2].map((j) => points[indices[i + j]]);
+        w.tri([A[0], 0, A[1]], [B[0], 0, B[1]], [C[0], 0, C[1]], up, uv(A), uv(B), uv(C), PN_GRANITE);
+      }
+      // 縁石の濃い帯（0.35 m）
+      for (let k = 0; k + 1 < kerb.length; k++) {
+        const a = kerb[k], b = kerb[k + 1];
+        const a2 = [a.p[0] + a.n[0] * 0.35, a.p[1] + a.n[1] * 0.35], b2 = [b.p[0] + b.n[0] * 0.35, b.p[1] + b.n[1] * 0.35];
+        edge.quad([a.p[0], 0, a.p[1]], [b.p[0], 0, b.p[1]], [b2[0], 0, b2[1]], [a2[0], 0, a2[1]], up, uv(a.p), uv(b.p), uv(b2), uv(a2), PN_EDGE);
+      }
+    }
+  }
+}
 export function plazaSurface(area, inOldTown = () => false) {
   const s = namedSurface(area);
   if (s) return s;
@@ -95,6 +154,7 @@ export function createGroundMaterials(tex) {
       grass: flat(tex.grass),
       gravel: flat(tex.gravel),
       galets: flat(tex.galets),
+      granite: flat(tex.granite),
       capitole: flat(tex.capitoleSquare),
       plain: flat(null),
       marks: flat(tex.marks, { alphaTest: 0.5 }), // 路面の絵（自転車・矢印・BUS・30）のアトラス
@@ -1321,6 +1381,8 @@ function* groundDetailSteps(parsed, clip, mats, waterDepthAt, opts) {
     const outer = clipRingToRect(ring, clip.minX, clip.minZ, clip.maxX, clip.maxZ);
     if (outer.length >= 3) writeFlatPolygon(W(ORDER.plaza, 'galets'), outer, [], 0, 2, pb.color);
   }
+  // ---- ポン・ヌフの両端の歩道（橋の花崗岩の歩道の続き）
+  writePontNeufAprons(W(ORDER.sidewalk, 'granite'), W(ORDER.sidewalk + 0.1, 'granite'), pontNeufApproaches(parsed.roads), clip);
   // ---- ジャン・ジョレス通りの遊歩道（ramblas.js）: 淡いベージュの固めた砂と、車道沿いの植え込みの帯（暗い土に低木）
   const rl = parsed.proj ? ramblasLayout(parsed.roads, parsed.proj) : null;
   if (rl) {

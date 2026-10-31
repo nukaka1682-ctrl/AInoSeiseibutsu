@@ -34,7 +34,7 @@ const SLAB_BOTTOM = -1.5; // 近代の橋の桁の下面
 const FLAT_UV = [0.5, 0.5]; // 模様のない面（壁のテクスチャの 1 点）
 const OVERPASS_DEPTH = 1.6; // 陸の上の高架の桁の深さ（利用者のストリートビュー: A620 の桁は約 1.5 m の平らなコンクリート）
 const PARAPET = 1.05; // 欄干の高さ
-const PONT_NEUF_HALF = 10.5; // ポン・ヌフの幅の半分（実物は欄干の外まで約 21 m）
+export const PONT_NEUF_HALF = 10.5; // ポン・ヌフの幅の半分（実物は欄干の外まで約 21 m）
 // ポン・ヌフ: 左岸（西）から右岸へ、7 つのアーチの径間と 6 つの橋脚の厚み（m、水の区間の長さに合わせて伸縮）
 export const PONT_NEUF = { spans: [14.4, 20.4, 25.0, 31.7, 28.6, 25.4, 22.0], piers: [6.2, 6.6, 7.0, 7.2, 7.0, 6.6] };
 // 石・レンガのアーチ橋として作る橋の名前（データに橋の構造・材料のタグがないので、実物が石積みの橋だけを挙げる）。
@@ -813,6 +813,41 @@ export function bridgeStyle(road, v, waterDepthAt, levelAt = null, deckAt = null
   return arched.length ? { kind: pontNeuf ? 'pontneuf' : 'arch', wet: arched } : { kind: 'flat', wet };
 }
 
+// ポン・ヌフの両端の取り付け道路: 橋の way の端（ほかの橋の way とつながらない端）から、橋でない同じ名前の車道を、
+// ほかの道が交わる所まで（40 m まで）たどった折れ線。返り値: [{ end: 橋の端 [x, z], pts: 端から外への折れ線, ways: Set, east }]
+// （streets.js はこの道の歩道を作らず、ground.js が橋の歩道の続きを敷く）
+export function pontNeufApproaches(roads) {
+  const pn = roads.filter((r) => r.name === 'Pont Neuf' && CAR_ROADS.has(r.type) && !r.tunnel && r.pts.length >= 2);
+  const bridge = pn.filter((r) => r.bridge), land = pn.filter((r) => !r.bridge);
+  if (!bridge.length) return [];
+  const near = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1]) < 0.5;
+  const ends = (r) => [r.pts[0], r.pts[r.pts.length - 1]];
+  const others = roads.filter((r) => !pn.includes(r) && !r.tunnel && r.pts.length >= 2);
+  const crossed = (p) => others.some((r) => r.pts.some((q) => near(p, q)));
+  const out = [];
+  const bEnds = bridge.flatMap((b) => ends(b).filter((p) => !bridge.some((o) => o !== b && ends(o).some((q) => near(p, q)))));
+  for (const e of bEnds) {
+    const pts = [e], ways = new Set();
+    let len = 0;
+    while (len < 40 && !(pts.length > 1 && crossed(pts[pts.length - 1]))) {
+      const cur = pts[pts.length - 1];
+      const nx = land.find((r) => !ways.has(r) && ends(r).some((q) => near(q, cur)));
+      if (!nx) break;
+      const seq = near(nx.pts[0], cur) ? nx.pts : nx.pts.slice().reverse();
+      for (const p of seq.slice(1)) {
+        len += Math.hypot(p[0] - pts[pts.length - 1][0], p[1] - pts[pts.length - 1][1]);
+        pts.push(p);
+      }
+      ways.add(nx);
+    }
+    if (pts.length >= 2) out.push({ end: e, pts, ways, length: len });
+  }
+  // 東の端（x の大きい方）に印
+  const xs = out.map((a) => a.end[0]);
+  for (const a of out) a.east = a.end[0] === Math.max(...xs);
+  return out;
+}
+
 // 橋面と欄干（way ごと）。並んだ橋の橋面の上には欄干を立てない
 function writeDeck({ deck, body, walk, marks }, road, half, kind, info, clipRect) {
   const topY = CAR_ROADS.has(road.type) ? 0.08 : 0.14; // 歩道橋は少し高くして、重なっても Z ファイティングしないように
@@ -904,6 +939,25 @@ function writeDeck({ deck, body, walk, marks }, road, half, kind, info, clipRect
           const q0 = cp(j), q1 = cp(j + 1), tm = (q0.th + q1.th) / 2, cn = Math.cos(tm), sn = Math.sin(tm);
           const nn = [n[0] * cn + 0, sn, n[2] * cn];
           walk.quad([q0.a[0], q0.y, q0.a[1]], [q0.b[0], q0.y, q0.b[1]], [q1.b[0], q1.y, q1.b[1]], [q1.a[0], q1.y, q1.a[1]], nn, [0, 0.1 + j * 0.04], [l / 2.4, 0.1 + j * 0.04], [l / 2.4, 0.14 + j * 0.04], [0, 0.14 + j * 0.04], copeC);
+        }
+        // 欄干の端（橋の way の端で欄干が終わる所）: 切り口をふさぐ端の石（蛇腹・欄干・丸い笠の断面）
+        const wayEnd = (q) => [road.pts[0], road.pts[road.pts.length - 1]].some((e) => Math.hypot(e[0] - q[0], e[1] - q[1]) < 0.05); // 区画の切れ目でなく way の端
+        for (const [atEnd, p, pi, pc, sgnU] of [[i === 0 && wayEnd(pts[0]), a, ia, ca, -1], [i + 2 === side.length && wayEnd(pts[pts.length - 1]), b, ib, cb, 1]]) {
+          if (!atEnd) continue;
+          const ux = (dx / l) * sgnU, uz = (dz / l) * sgnU, nu = [ux, 0, uz];
+          const pp = sgnU < 0 ? pa : pb;
+          const prof = [[pp, ct], [pp, top - 0.06]];
+          for (let j = 1; j < R; j++) {
+            const th = (Math.PI * j) / R, f = (1 - Math.cos(th)) / 2;
+            prof.push([[pp[0] + (pi[0] - pp[0]) * f, pp[1] + (pi[1] - pp[1]) * f], top - 0.06 + Math.sin(th) * rise]);
+          }
+          prof.push([pi, top - 0.06], [pi, topY]);
+          const V = prof.map(([q, y]) => [q[0], y, q[1]]);
+          const c0 = [(pp[0] + pi[0]) / 2, (ct + top) / 2, (pp[1] + pi[1]) / 2];
+          for (let j = 0; j + 1 < V.length; j++) walk.tri(c0, V[j], V[j + 1], nu, [0, 0.1], [0.1, 0.1], [0.1, 0.2], stoneC);
+          walk.tri(c0, V[V.length - 1], V[0], nu, [0, 0.1], [0.1, 0.1], [0.1, 0.2], stoneC);
+          // 蛇腹の切り口
+          body.quad([pc[0], CORNICE, pc[1]], [p[0], CORNICE, p[1]], [p[0], ct, p[1]], [pc[0], ct, pc[1]], nu, FLAT_UV, FLAT_UV, FLAT_UV, FLAT_UV, COL.cornice);
         }
       }
     }
