@@ -150,6 +150,31 @@ if (shots.includes('ride')) {
   await sim(12, { fwd: 0, side: 0 });
   await shot('ride-train-leaving');
 }
+// ホームで電車が着くのを待つ（来る方を見る）
+if (shots.includes('arrive')) {
+  const yaw = await page.evaluate(() => {
+    const st = window.__metro.station, L = window.__metro.stations.get(st.id).plan.lines[0], f = L.frame;
+    const w = window.__metroDebug.walker, [x, z] = f.at(-14, 4.0);
+    w.place(x, L.yp, z);
+    window.__metro.camInit = false;
+    // 電車の来る方（-s）を少し斜めに
+    return Math.atan2(-f.ax * 0.95 + f.nx * -0.3, f.az * 0.95 - f.nz * -0.3);
+  });
+  await look(yaw, -0.02);
+  for (let k = 0; k < 70; k++) {
+    const d = await page.evaluate(() => {
+      const st = window.__metro.station;
+      const t = window.__metro.trains.find((q) => q.dir === 1 && q.stops[0] === st);
+      return t ? Math.abs(st.S[t.line] - t.S) : -1;
+    });
+    if (d >= 0 && d < 75) break;
+    await sim(1, { fwd: 0, side: 0 });
+  }
+  await sim(0.5, { fwd: 0, side: 0 });
+  await shot('arrive-1');
+  await sim(2.5, { fwd: 0, side: 0 });
+  await shot('arrive-2');
+}
 // 説明の写真（docs/）: 自由なカメラで
 if (shots.includes('docs')) {
   const views = await page.evaluate(() => {

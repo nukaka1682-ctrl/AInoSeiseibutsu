@@ -187,16 +187,44 @@ function setupSurfaceNav(world, terrain) {
 }
 
 // ---------------------------------------------------------------- 駅・トンネルを組み立てる・捨てる
-function ensureStation(id) {
+function planFor(id) {
+  const b = base, s = b.network.byId.get(id);
+  return planStation(s, b.entrancesOf(s), b.terrain.h(s.x, s.z), b.network);
+}
+
+// 次の駅を、電車がトンネルに入ってから 2 回に分けて組み立てる（間取りの計算と、メッシュ。走っている間に止まらないように）
+function prepareStation(id) {
+  if (state.stations.has(id)) return;
+  state.prepare = { id, at: state.time + 2.5, plan: null };
+}
+
+function stepPrepare() {
+  const p = state.prepare;
+  if (!p || state.time < p.at) return;
+  if (state.stations.has(p.id)) state.prepare = null;
+  else if (!p.plan) {
+    p.plan = planFor(p.id);
+    p.at = state.time + 0.4;
+  } else {
+    ensureStation(p.id, p.plan);
+    state.prepare = null;
+  }
+}
+
+function ensureStation(id, preplanned = null) {
   const b = base;
   if (state.stations.has(id)) return state.stations.get(id);
   const s = b.network.byId.get(id);
   const t0 = performance.now();
-  const plan = planStation(s, b.entrancesOf(s), b.terrain.h(s.x, s.z), b.network);
+  const plan = preplanned || planFor(id);
+  const t1 = performance.now();
   const layer = buildStationNav(plan);
   const streetAt = (x, z) => b.world.roadnet.streetNameAt(x, z)?.name || '';
+  const t2 = performance.now();
   const mesh = buildStationMesh(plan, { streetAt });
+  const t3 = performance.now();
   const crowd = stationCrowd(plan, layer, (s.id.length * 7919 + s.id.charCodeAt(0) * 31 + Math.floor(Math.random() * 1000)) | 0);
+  console.info(`  間取り ${(t1 - t0).toFixed(0)} ms・歩ける所 ${(t2 - t1).toFixed(0)} ms・メッシュ ${(t3 - t2).toFixed(0)} ms・人 ${(performance.now() - t3).toFixed(0)} ms`);
   if (crowd) mesh.group.add(crowd);
   scene.add(mesh.group);
   nav.add(layer);
@@ -236,6 +264,7 @@ function releaseStations() {
     if (t.at) keep.add(t.at.id);
     if (t.player && t.stops[0]) keep.add(t.stops[0].id);
   }
+  if (state.prepare) keep.add(state.prepare.id);
   for (const [id, rec] of state.stations) {
     if (keep.has(id)) continue;
     scene.remove(rec.group);
@@ -426,7 +455,7 @@ function onDepart(t, from) {
   }
   const next = t.stops[0];
   if (t.player) {
-    ensureStation(next.id);
+    prepareStation(next.id);
     base.world.stream.update(next.x, next.z); // 着く前に地上の街並みを読み込んでおく
     audio.announce(`Prochaine station : ${next.name}.`);
     toast(`次は <b>${next.name}</b>（${next.ja}）`, 3);
@@ -920,6 +949,7 @@ addEventListener('resize', () => {
 // ---------------------------------------------------------------- 毎フレーム
 function update(dt, ctl = null) {
   state.time += dt;
+  stepPrepare();
   updateTrains(dt);
   walker.update(dt, ctl || readControls(dt), nav, state.viewYaw);
   for (const ev of walker.events.splice(0)) if (ev.type === 'step') audio.step(ev.surface === 'street' || !walker.region ? 'street' : 'tile', ev.run);
