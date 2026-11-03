@@ -31,8 +31,8 @@ export const NEAR = 650; // これより近いタイルを作る（m、タイル
 export const FAR = 1000; // これより遠いタイルは捨てる
 const pause = () => new Promise((r) => setTimeout(r, 0));
 
-// terrain: 地形（world/terrain.js。なければ平ら）
-export async function assembleStreamWorld({ base, bbox, presetId, buildingMats, groundMats, progress = () => {}, terrain = FLAT_TERRAIN }) {
+// terrain: 地形（world/terrain.js。なければ平ら）。near・far: タイルを作る・捨てる距離（m。歩くゲームは小さく）
+export async function assembleStreamWorld({ base, bbox, presetId, buildingMats, groundMats, progress = () => {}, terrain = FLAT_TERRAIN, near = NEAR, far = FAR }) {
   const { proj, rect } = areaFrame(bbox);
   const layout = tileLayout(rect);
   progress('道路・川・公園を解析中…', 0.05);
@@ -70,7 +70,7 @@ export async function assembleStreamWorld({ base, bbox, presetId, buildingMats, 
   const streamer = new TileStreamer({
     presetId, bbox, rect, proj, layout, parsed, roadnet, inWater, onRoad, avenues, inOldTown, inCore, inGreySquare,
     materials: buildingMats, groundMats, waterDepthAt: ground.waterDepthAt, bankTrees: ground.bankTrees || [], collision, group,
-    terrain, far: ground.far, quayCentre: proj.project(43.5994, 1.4364),
+    terrain, far: ground.far, quayCentre: proj.project(43.5994, 1.4364), near, farDist: far,
   });
   for (const lm of landmarks) lm.y = terrain.h(lm.x, lm.z);
   collision.terrain = terrain;
@@ -119,7 +119,8 @@ class TileStreamer {
   update(x, z) {
     this.focus = [x, z];
     const L = this.layout;
-    const reach = Math.ceil(NEAR / L.size) + 1;
+    const NEAR_ = this.near ?? NEAR, FAR_ = this.farDist ?? FAR;
+    const reach = Math.ceil(NEAR_ / L.size) + 1;
     const c = tileAt(L, Math.min(Math.max(x, L.rect.minX), L.rect.maxX - 1), Math.min(Math.max(z, L.rect.minZ), L.rect.maxZ - 1));
     if (c) {
       for (let j = c[1] - reach; j <= c[1] + reach; j++) {
@@ -128,14 +129,14 @@ class TileStreamer {
           const key = this.key(i, j);
           if (this.tiles.has(key)) continue;
           const bounds = tileBounds(L, i, j);
-          if (this.distTo(bounds, x, z) < NEAR) this.tiles.set(key, { i, j, key, bounds, state: 'queued' });
+          if (this.distTo(bounds, x, z) < NEAR_) this.tiles.set(key, { i, j, key, bounds, state: 'queued' });
         }
       }
     }
     for (const t of this.tiles.values()) {
       const d = this.distTo(t.bounds, x, z);
-      if (d > FAR && t.state === 'ready') this.unload(t);
-      else if (d > NEAR && t.state === 'queued') this.tiles.delete(t.key);
+      if (d > FAR_ && t.state === 'ready') this.unload(t);
+      else if (d > NEAR_ && t.state === 'queued') this.tiles.delete(t.key);
     }
     this.pump();
     // 街の小物は自転車の近くの物だけ描く
@@ -251,7 +252,7 @@ class TileStreamer {
       if (mx >= B.minX && mx < B.maxX && mz >= B.minZ && mz < B.maxZ) cw.addSegment(q.ax, q.az, q.bx, q.bz); // 岸壁・高架の下の擁壁（タイルに中点が入る壁だけ）
     }
     for (const e of T.metro || []) {
-      if (e.x >= B.minX && e.x < B.maxX && e.z >= B.minZ && e.z < B.maxZ) for (const s of entranceWalls(e)) cw.addSegment(...s); // メトロの出入口の吹き抜け
+      if (e.x >= B.minX && e.x < B.maxX && e.z >= B.minZ && e.z < B.maxZ) for (const s of entranceWalls(e, !!T.metroWalk)) cw.addSegment(...s); // メトロの出入口の吹き抜け（メトロのゲームでは階段を下りられる）
     }
     for (const c of mon.colliders) {
       if (c.length === 4) cw.addSegment(...c); // 像の台・塔の鉄柵（円 [x, z, r] か線分 [ax, az, bx, bz]）

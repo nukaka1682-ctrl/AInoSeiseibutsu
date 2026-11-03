@@ -105,3 +105,22 @@ test('穴の向きは、近くの建物の壁の向き（15° 以内）にそろ
   assert.ok(Math.abs(deg(snapToStreetGrid((40 * Math.PI) / 180, 0, 0, segs)) - 40) < 1e-6, '離れた向きはそのまま');
   assert.equal(snapToStreetGrid(0.3, 500, 500, segs), 0.3, '近くに建物がなければそのまま');
 });
+
+test('メトロの代わりの出入口: 車道と建物を避けて、駅の近くの広い歩道に、道に沿って置く', async () => {
+  const { placeEntrance } = await import('../../src/data/metro.js');
+  // 東西の道（車道の幅 8 m）。北の歩道は 8 m（z −4〜−12）、南の歩道は 5 m（z 4〜9）で、その先は建物
+  const roads = [{ pts: [[-120, 0], [120, 0]], half: 4 }];
+  const rings = [
+    [[-100, 9], [100, 9], [100, 40], [-100, 40]],
+    [[-100, -12], [100, -12], [100, -40], [-100, -40]],
+  ];
+  const e = placeEntrance({ rings, roads });
+  assert.ok(e, '置ける');
+  assert.ok(e.z <= -6.7 && e.z >= -9.3, `北の歩道の上 z=${e.z.toFixed(2)}`);
+  assert.ok(Math.abs(Math.sin(e.ang)) < 0.05, '道に沿う');
+  // 下の端（扉）は駅の中心に近い方
+  const bx = e.x + Math.cos(e.ang) * e.down * (e.len / 2), tx = e.x - Math.cos(e.ang) * e.down * (e.len / 2);
+  assert.ok(Math.abs(bx) < Math.abs(tx));
+  // 歩道の狭い所しかなければ置かない
+  assert.equal(placeEntrance({ rings: [rings[0], [[-100, -9], [100, -9], [100, -40], [-100, -40]]], roads }), null);
+});

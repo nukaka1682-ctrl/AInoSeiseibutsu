@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <title>Toulouse en métro — トゥールーズ・メトロ散歩</title>
+    <meta name="description" content="実在のトゥールーズのメトロ（VAL）に乗り、駅の中を歩いて地上へ出て、駅のまわり 100 m を散歩する 3D ゲーム" />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='18' fill='%23f9b80d'/><circle cx='50' cy='50' r='34' fill='none' stroke='%231d2a55' stroke-width='8'/><text x='50' y='66' font-size='44' font-weight='800' text-anchor='middle' fill='%231d2a55' font-family='Arial'>M</text></svg>" />
+    <link rel="stylesheet" href="./src/style.css" />
+    <link rel="stylesheet" href="./src/metro/metro.css" />
+  </head>
+  <body class="metro">
+    <div id="app"></div>
+
+    <!-- タイトル画面 -->
+    <section id="title-screen" class="screen">
+      <div class="panel title-panel">
+        <h1>Toulouse <em>en métro</em></h1>
+        <p class="subtitle">トゥールーズのメトロ（無人運転の VAL）に乗って、駅から地上へ出て、駅のまわり 100 m を歩こう。<br />
+          街並み・地形・駅の出入口は実際の地図データ（IGN）から、駅と車両は写真を手本に 3D で作っています。</p>
+
+        <h2>駅</h2>
+        <div class="line-pick">
+          <label class="line-tab"><input type="radio" name="line" value="A" checked /><span class="badge a">A</span> A 線</label>
+          <label class="line-tab"><input type="radio" name="line" value="B" /><span class="badge b">B</span> B 線</label>
+        </div>
+        <select id="station-select" size="8"></select>
+
+        <h2>はじめる場所</h2>
+        <div class="choices">
+          <label class="choice"><input type="radio" name="start" value="train" checked />
+            <span><b>電車で着く</b><small>ひとつ前の駅から VAL に乗って、選んだ駅に着くところから</small></span></label>
+          <label class="choice"><input type="radio" name="start" value="platform" />
+            <span><b>ホームから</b><small>駅のホームに立ったところから</small></span></label>
+          <label class="choice"><input type="radio" name="start" value="street" />
+            <span><b>地上の出入口から</b><small>駅の出入口の前の通りから（階段を下りて駅へ）</small></span></label>
+        </div>
+
+        <details class="settings">
+          <summary>グラフィック設定</summary>
+          <label><input type="checkbox" id="opt-shadows" checked /> 地上の影を描画する</label>
+          <label><input type="checkbox" id="opt-hires" /> 高解像度（重い）</label>
+        </details>
+
+        <button id="start-btn" class="primary">出発する 🚇</button>
+
+        <div class="controls-help">
+          <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd>/<kbd>↑</kbd><kbd>↓</kbd> 歩く　<kbd>Shift</kbd> 走る　マウス・<kbd>←</kbd><kbd>→</kbd> 見回す</div>
+          <div><kbd>V</kbd>/<kbd>C</kbd> 一人称 ⇄ 三人称　<kbd>M</kbd> 路線図　<kbd>T</kbd>（車内で）早送り　<kbd>Esc</kbd> ポーズ</div>
+          <div class="muted">画面をクリックするとマウスで見回せます。ゲームパッド・スマホのタッチ操作にも対応</div>
+        </div>
+        <p class="credits">地図データ IGN BD TOPO®・LiDAR HD・地籍（Licence Ouverte / Etalab 2.0）／ 写真の手本 Wikimedia Commons ／ <a href="./index.html">自転車のゲーム Toulouse à vélo</a></p>
+      </div>
+    </section>
+
+    <!-- 読み込み画面 -->
+    <section id="loading-screen" class="screen hidden">
+      <div class="panel loading-panel">
+        <div class="spinner">🚇</div>
+        <h2>駅と街並みを組み立て中…</h2>
+        <pre id="loading-text"></pre>
+        <div class="bar"><div id="loading-bar"></div></div>
+      </div>
+    </section>
+
+    <section id="error-screen" class="screen hidden">
+      <div class="panel">
+        <h2>読み込みに失敗しました</h2>
+        <pre id="error-text"></pre>
+        <button id="retry-btn" class="primary">もう一度試す</button>
+      </div>
+    </section>
+
+    <!-- HUD -->
+    <div id="hud" class="hidden">
+      <div id="hud-place"></div>
+      <div id="hud-ride" class="hidden"></div>
+      <canvas id="minimap" width="220" height="220"></canvas>
+      <div id="hud-view"></div>
+      <div id="hud-prompt"></div>
+      <div id="toast"></div>
+      <div id="crosshair"></div>
+      <div id="hud-buttons">
+        <button data-action="map" title="路線図 (M)">🗺️</button>
+        <button data-action="camera" title="一人称 ⇄ 三人称 (V)">👁️</button>
+        <button data-action="pause" title="ポーズ (Esc)">⏸</button>
+      </div>
+      <div id="touch-controls">
+        <div class="touch-left">
+          <button data-touch="left">◀</button>
+          <button data-touch="fwd">▲</button>
+          <button data-touch="back">▼</button>
+          <button data-touch="right">▶</button>
+        </div>
+      </div>
+      <div id="attribution">地図 © IGN BD TOPO · 地籍・LiDAR HD © IGN（Licence Ouverte）</div>
+    </div>
+
+    <!-- 路線図 -->
+    <section id="map-screen" class="screen hidden">
+      <div class="panel line-map-panel">
+        <h2>Tisséo 路線図 <small class="muted">駅を選ぶとその駅のホームへ移動します</small></h2>
+        <div id="line-map"></div>
+        <button id="close-map" class="primary">閉じる (M)</button>
+      </div>
+    </section>
+
+    <!-- ポーズ -->
+    <section id="pause-screen" class="screen hidden">
+      <div class="panel">
+        <h2>ポーズ</h2>
+        <div id="pause-info"></div>
+        <button id="resume-btn" class="primary">再開 (Esc)</button>
+        <button id="mute-btn">音: オン</button>
+        <button id="title-btn">タイトルに戻る</button>
+      </div>
+    </section>
+
+    <script type="module" src="./src/metro/main.js"></script>
+  </body>
+</html>

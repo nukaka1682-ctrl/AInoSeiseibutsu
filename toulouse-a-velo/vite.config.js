@@ -8,5 +8,7 @@ export default defineConfig({
   build: {
     target: 'es2022',
     chunkSizeWarningLimit: 1500,
+    // 2 つのゲーム: 自転車（index.html）とメトロ（metro.html）
+    rollupOptions: { input: { main: 'index.html', metro: 'metro.html' } },
   },
 });
