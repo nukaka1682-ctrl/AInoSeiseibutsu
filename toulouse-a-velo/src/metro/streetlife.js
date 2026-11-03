@@ -3,11 +3,14 @@
 //   形は部品ごとに InstancedMesh（脚・胴・頭・髪。描く回数は 4 回）。服・肌・髪の色は人ごと
 // - 自転車: 出入口の吹き抜けの横の歩道に、吹き抜けに沿って並べた柵と、柵につないだ自転車（フレームの色はいろいろ）。
 //   ときどき電動キックボード（スタンドで少し傾いて立つ）
+// - 通りに面した店: カフェのテラス（縞の日よけ・丸いテーブルと籐の椅子）、薬局の緑の十字、たばこ屋の赤い「carotte」
 // - 雲: カメラの上 1500 m の大きな円盤に、シェーダーで fbm の雲（ゆっくり流れる。地平線に向かって薄く）
 import * as THREE from 'three';
 import { Builder } from './geom.js';
 import { mulberry32 } from '../geo.js';
 import { entranceFrame, inEntrance, rimAt } from '../world/metro.js';
+import { CAR_ROADS } from '../world/parse.js';
+import { CollisionWorld } from '../game/collision.js';
 
 const TOPS = ['#2a3a5e', '#7a2b23', '#2f5d3a', '#d8d4cc', '#1c1c1e', '#8c6a3f', '#4d6f9c', '#b84c66', '#e3b23c', '#5b5b63', '#f2efe8', '#3f6f6a'];
 const BOTTOMS = ['#2b2f3a', '#3c3f46', '#1e2433', '#6b5a48', '#20232a', '#5d6470', '#c8b896', '#283a5a'];
@@ -83,11 +86,14 @@ export class StreetLife {
     this.station = station;
     this.pits = this.pitsOf(station);
     this.people = [];
-    if (this.parked) {
-      this.group.remove(this.parked);
-      this.parked.traverse((o) => o.geometry?.dispose());
-      this.parked = null;
+    for (const g of [this.parked, this.shops]) {
+      if (!g) continue;
+      this.group.remove(g);
+      g.traverse((o) => o.geometry?.dispose());
     }
+    this.parked = this.shops = null;
+    if (this.solid) this.world.collision.remove(this.solid);
+    this.solid = null;
     this.pending = 0.01;
   }
 
@@ -120,6 +126,13 @@ export class StreetLife {
     this.legs.count = this.people.length * 2;
     this.parked = parkedVehicles(this, s, this.pits, rnd);
     if (this.parked) this.group.add(this.parked);
+    const shops = shopFronts(this, s, rnd);
+    if (shops) {
+      this.shops = shops.group;
+      this.group.add(this.shops);
+      this.solid = shops.solid;
+      this.world.collision.add(this.solid);
+    }
     return true;
   }
 
@@ -267,6 +280,189 @@ function parkedVehicles(life, station, pits, rnd) {
   };
   const g = B.build(mats, { shadows: true, name: 'parked' });
   return g;
+}
+
+// ---------------------------------------------------------------- 通りに面した店
+// 通りに面した壁の候補: 道路の縁から外へ光線を飛ばして当たった所 { x, z（壁の点）, nx, nz（道路から壁へ）, ux, uz（通りの向き）, walk（歩道の幅） }
+function facadeSpots(life, s, reach = 65) {
+  const w = life.world, rn = w.roadnet, out = [], seen = new Set();
+  rn.segGrid.query(s.x - reach, s.z - reach, s.x + reach, s.z + reach, (i) => {
+    if (seen.has(i)) return;
+    seen.add(i);
+    const g = rn.segs[i], road = g.road;
+    if (!CAR_ROADS.has(road.type) && road.type !== 'pedestrian' && road.type !== 'living_street') return;
+    const L = Math.hypot(g.bx - g.ax, g.bz - g.az);
+    if (L < 4) return;
+    const ux = (g.bx - g.ax) / L, uz = (g.bz - g.az) / L;
+    for (let t = 2; t < L - 2; t += 3) {
+      const cx = g.ax + ux * t, cz = g.az + uz * t;
+      if (Math.hypot(cx - s.x, cz - s.z) > reach) continue;
+      for (const sd of [1, -1]) {
+        const nx = -uz * sd, nz = ux * sd, e0 = road.width / 2 + 0.3;
+        const ax = cx + nx * e0, az = cz + nz * e0;
+        const f = w.collision.raycast(ax, az, ax + nx * 10, az + nz * 10);
+        if (f >= 1 || f * 10 < 1.4) continue;
+        const d = f * 10, x = ax + nx * d, z = az + nz * d;
+        // 歩道（壁の手前 0.6 m と、歩道の真ん中）が歩ける所
+        if (!life.ok(x - nx * 0.6, z - nz * 0.6, s.x, s.z) || !life.ok(ax + nx * d * 0.5, az + nz * d * 0.5, s.x, s.z)) continue;
+        out.push({ x, z, nx, nz, ux, uz, walk: d, ax, az });
+      }
+    }
+  });
+  return out;
+}
+
+// 同じ壁が span m 続くか（両端から同じように光線を飛ばして、歩道の幅が近い）
+function facadeRun(life, p, span) {
+  const w = life.world;
+  for (const k of [-span / 2, span / 2]) {
+    const ax = p.ax + p.ux * k, az = p.az + p.uz * k;
+    const f = w.collision.raycast(ax, az, ax + p.nx * 10, az + p.nz * 10);
+    if (f >= 1 || Math.abs(f * 10 - p.walk) > 0.5) return false;
+  }
+  return true;
+}
+
+let stripeTex = null, carotteTex = null, pharmaTex = null;
+function canvasTex(w, h, draw, repeat = false) {
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  draw(c.getContext('2d'), w, h);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  if (repeat) t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  return t;
+}
+
+function shopMaterials() {
+  stripeTex ||= canvasTex(64, 8, (x, W, H) => {
+    x.fillStyle = '#b3221d';
+    x.fillRect(0, 0, W, H);
+    x.fillStyle = '#f3ede2';
+    x.fillRect(W / 2, 0, W / 2, H);
+  }, true);
+  carotteTex ||= canvasTex(128, 256, (x, W, H) => {
+    x.clearRect(0, 0, W, H);
+    x.fillStyle = '#d4161c';
+    x.beginPath();
+    x.moveTo(W / 2, 4);
+    x.lineTo(W - 6, H / 2);
+    x.lineTo(W / 2, H - 4);
+    x.lineTo(6, H / 2);
+    x.closePath();
+    x.fill();
+    x.fillStyle = '#ffffff';
+    x.font = 'bold 26px Arial';
+    x.textAlign = 'center';
+    x.textBaseline = 'middle';
+    x.fillText('TABAC', W / 2, H / 2);
+  });
+  pharmaTex ||= canvasTex(512, 96, (x, W, H) => {
+    x.fillStyle = '#f4f6f2';
+    x.fillRect(0, 0, W, H);
+    x.fillStyle = '#138a3e';
+    x.font = 'bold 58px Arial';
+    x.textAlign = 'center';
+    x.textBaseline = 'middle';
+    x.fillText('PHARMACIE', W / 2, H / 2 + 3);
+  });
+  return {
+    paint: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.2 }),
+    awning: new THREE.MeshStandardMaterial({ map: stripeTex, roughness: 0.8, side: THREE.DoubleSide }),
+    green: new THREE.MeshBasicMaterial({ color: '#1fc35a' }),
+    carotte: new THREE.MeshBasicMaterial({ map: carotteTex, alphaTest: 0.5, side: THREE.DoubleSide }),
+    pharma: new THREE.MeshBasicMaterial({ map: pharmaTex }),
+  };
+}
+
+// カフェのテラス・薬局・たばこ屋を、駅のまわりの通りに面した壁に 1 つずつ
+function shopFronts(life, s, rnd) {
+  if (typeof document === 'undefined') return null;
+  const w = life.world, spots = facadeSpots(life, s);
+  for (let i = spots.length - 1; i > 0; i--) {
+    const j = Math.floor(rnd() * (i + 1));
+    [spots[i], spots[j]] = [spots[j], spots[i]];
+  }
+  const B = new Builder(), solid = new CollisionWorld({ minX: s.x - 90, minZ: s.z - 90, maxX: s.x + 90, maxZ: s.z + 90 });
+  solid.rect = { minX: s.x - 90, minZ: s.z - 90, maxX: s.x + 90, maxZ: s.z + 90 };
+  const used = [];
+  const far = (p, m) => used.every((q) => Math.hypot(p.x - q.x, p.z - q.z) > m) && !inEntrance(life.pits, p.x - p.nx * 2, p.z - p.nz * 2, 3);
+  const yAt = (x, z) => {
+    const y = w.groundAt(x, z, w.terrain.h(x, z) + 1.5);
+    return Number.isFinite(y) ? y : w.terrain.h(x, z);
+  };
+  // カフェのテラス（歩道の広い所）
+  const cafe = spots.find((p) => p.walk >= 3.8 && far(p, 0) && facadeRun(life, p, 7));
+  if (cafe) {
+    used.push(cafe);
+    terrace(B, solid, cafe, yAt(cafe.x - cafe.nx, cafe.z - cafe.nz), rnd);
+  }
+  // 薬局（緑の十字）とたばこ屋
+  const ph = spots.find((p) => p.walk >= 2 && far(p, 14) && facadeRun(life, p, 3));
+  if (ph) {
+    used.push(ph);
+    const y = yAt(ph.x - ph.nx, ph.z - ph.nz);
+    const ox = ph.x - ph.nx * 0.55, oz = ph.z - ph.nz * 0.55, cy = y + 3.4;
+    B.box('paint', ph.x - ph.nx * 0.25, ph.z - ph.nz * 0.25, cy - 0.03, cy + 0.03, ph.nx, ph.nz, 0.5, 0.04, { color: [0.3, 0.32, 0.34] });
+    B.box('green', ox, oz, cy - 0.11, cy + 0.11, ph.nx, ph.nz, 0.62, 0.12);
+    B.box('green', ox, oz, cy - 0.31, cy + 0.31, ph.nx, ph.nz, 0.22, 0.12);
+    // 店の上の「PHARMACIE」
+    const tx = ph.x - ph.nx * 0.03 + ph.ux * 1.6, tz = ph.z - ph.nz * 0.03 + ph.uz * 1.6;
+    const nn = [-ph.nx, -ph.nz], uu = [nn[1], -nn[0]]; // 見る人の右
+    const P = (a, b) => [tx + uu[0] * a, y + b, tz + uu[1] * a];
+    B.quad('pharma', P(-1.3, 2.75), P(1.3, 2.75), P(1.3, 3.2), P(-1.3, 3.2), [nn[0], 0, nn[1]], { uvs: [[0, 0], [1, 0], [1, 1], [0, 1]] });
+  }
+  const tb = spots.find((p) => p.walk >= 1.8 && far(p, 14));
+  if (tb) {
+    used.push(tb);
+    const y = yAt(tb.x - tb.nx, tb.z - tb.nz), cy = y + 3.3;
+    const ox = tb.x - tb.nx * 0.5, oz = tb.z - tb.nz * 0.5;
+    B.box('paint', tb.x - tb.nx * 0.2, tb.z - tb.nz * 0.2, cy + 0.42, cy + 0.46, tb.nx, tb.nz, 0.45, 0.04, { color: [0.3, 0.32, 0.34] });
+    const P = (a, b) => [ox + tb.nx * a, cy + b, oz + tb.nz * a];
+    B.quad('carotte', P(-0.22, -0.45), P(0.22, -0.45), P(0.22, 0.45), P(-0.22, 0.45), [tb.ux, 0, tb.uz], { uvs: [[0, 0], [1, 0], [1, 1], [0, 1]] });
+  }
+  if (!used.length) return null;
+  const group = B.build(shopMaterials(), { shadows: true, name: 'shops' });
+  life.shopSpots = { cafe, pharmacie: ph, tabac: tb }; // 撮影・確認用
+  return { group, solid };
+}
+
+// カフェのテラス: 壁に縞の日よけ、その下に丸いテーブルと籐の椅子（椅子は通りの方を向く）
+function terrace(B, solid, p, y, rnd) {
+  const out = [-p.nx, -p.nz]; // 壁から通りへ
+  const W = 3.2, D = 2.1;
+  const P = (a, d, h) => [p.x + p.ux * a + out[0] * d, y + h, p.z + p.uz * a + out[1] * d];
+  // 日よけ（壁の 3.1 m から、2.1 m 先で 2.45 m）と前の垂れ
+  const nn = [out[0] * 0.3, 0.95, out[1] * 0.3];
+  B.quad('awning', P(-W, 0.02, 3.1), P(W, 0.02, 3.1), P(W, D, 2.45), P(-W, D, 2.45), nn, { uvs: [[0, 0], [2 * W / 0.5, 0], [2 * W / 0.5, 1], [0, 1]] });
+  B.quad('awning', P(-W, D, 2.45), P(W, D, 2.45), P(W, D, 2.2), P(-W, D, 2.2), [out[0], 0, out[1]], { uvs: [[0, 0], [2 * W / 0.5, 0], [2 * W / 0.5, 0.3], [0, 0.3]] });
+  for (const a of [-W, W]) B.quad('awning', P(a, 0.02, 3.1), P(a, D, 2.45), P(a, D, 2.2), P(a, 0.02, 2.2 + 0.0), [p.ux, 0, p.uz], { uvs: [[0, 0], [1, 0], [1, 0.3], [0, 0.3]] });
+  // テーブルと椅子
+  const wood = [0.55, 0.38, 0.22], rattan = [[0.72, 0.6, 0.38], [0.2, 0.32, 0.5], [0.62, 0.2, 0.18]][Math.floor(rnd() * 3)], metal = [0.12, 0.12, 0.13];
+  for (const a of [-2.3, -0.8, 0.8, 2.3]) {
+    const [tx, , tz] = P(a, 1.25, 0);
+    B.cyl('paint', tx, tz, y + 0.72, y + 0.75, 0.33, { seg: 16, color: [0.92, 0.91, 0.88] });
+    B.cyl('paint', tx, tz, y + 0.02, y + 0.72, 0.035, { seg: 6, color: metal });
+    B.cyl('paint', tx, tz, y, y + 0.03, 0.22, { seg: 10, color: metal });
+    solid.addCircle(tx, tz, 0.42);
+    for (const k of [-0.42, 0.42]) {
+      if (rnd() < 0.15) continue;
+      const [cx, , cz] = P(a + k, 0.75, 0);
+      // 座面・背もたれ（壁の側）・脚
+      B.box('paint', cx, cz, y + 0.44, y + 0.48, p.ux, p.uz, 0.4, 0.4, { color: rattan });
+      const [bx, , bz] = P(a + k, 0.57, 0);
+      B.box('paint', bx, bz, y + 0.48, y + 0.86, p.ux, p.uz, 0.4, 0.04, { color: rattan });
+      for (const [da, dd] of [[-0.17, -0.17], [0.17, -0.17], [-0.17, 0.17], [0.17, 0.17]]) {
+        const [lx, , lz] = P(a + k + da, 0.75 + dd, 0);
+        B.box('paint', lx, lz, y, y + 0.45, p.ux, p.uz, 0.025, 0.025, { color: wood });
+      }
+    }
+  }
+  // 黒板の立て看板（メニュー）
+  const [mx, , mz] = P(W + 0.4, 1.6, 0);
+  B.box('paint', mx, mz, y, y + 0.95, p.ux, p.uz, 0.5, 0.06, { color: [0.08, 0.09, 0.09] });
 }
 
 // 自転車（中心 (x, z)、前の向き (fx, fz)、地面 y）
