@@ -769,6 +769,7 @@ export function buildGroundBase(parsed, rect, mats, terrain = FLAT_TERRAIN, layo
     T.metro = chooseEntrances(projectEntrances(T.metroRaw, T.proj).filter((e) => !inWater(e.x, e.z) && !(e.kind === 'metro' && inCarriageway(e.x, e.z))), !!T.metroWalk);
     orientRamps(T.metro, parsed.roads);
     fillMetroPits(T, T.metro);
+    T.metroAdjust?.(T.metro); // メトロのゲーム: 出入口の階段の深さを駅の改札階にそろえる
     conditionRoads(T, parsed.roads, inWater);
     // ブリエンヌ運河の岸は草の土手（利用者の写真 NCM_0186）。地形の段を岸壁にしない
     const brienne = parsed.proj ? BRIENNE.line.map((ll) => parsed.proj.project(...ll)) : [];

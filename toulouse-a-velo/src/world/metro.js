@@ -189,10 +189,16 @@ export function entranceDoor(e) {
   return { dw: Math.min(e.wid - 0.6, 3.6) / 2, dh: Math.min(2.4, H - 0.3), yb, x, z, dx: f.dx, dz: f.dz, sx: f.sx, sz: f.sz, H };
 }
 
-// 吹き抜けの深さ（段の数は STEP_H ごと）
+// 吹き抜けの深さ（段の数は STEP_H ごと）。e.H があればその深さ（メトロのゲームで、階段の下を駅の改札階の床にそろえる）
 export function entranceDepth(e) {
   if (e.kind === 'parking') return Math.min(5.5, Math.max(RAMP_PORTAL_H + 0.6, (e.depth || 3) + 0.8));
+  if (e.H != null) return e.H;
   return Math.min(6.5, Math.max(3.5, (e.depth || 3) + 1.2));
+}
+
+// 階段で下りられる深さの上限（踏み面 0.3 m・蹴上げ 0.18 m まで。下の踊り場 LANDING を除いた長さで）
+export function entranceMaxDepth(e) {
+  return Math.max(2.8, (e.len - LANDING) * 0.6);
 }
 
 // 看板の絵（左半分: 黄色地に紺の丸と M。右半分: 駐車場の青地に白い P）

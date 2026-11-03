@@ -8,9 +8,9 @@
 import * as THREE from 'three';
 import { Builder } from './geom.js';
 import { LAYOUT, LINE_COLORS, wallT } from './network.js';
-import { CORR_H, ESC_FLAT, HALL_H, PLAT_H, RISE, TREAD, MID_LANDING, corridorPieces, corridorProfile, escalatorHeight, flightHeight, gateLanes, hallBoundary, inRect, offsetPolyline } from './stationplan.js';
+import { CORR_H, ESC_FLAT, HALL_H, PLAT_H, RISE, TREAD, MID_LANDING, corridorPieces, corridorProfile, escalatorHeight, flightHeight, gateLanes, hallBoundary, inRect, offsetPolyline, pitInfo, wellPoly } from './stationplan.js';
 import { drawLineBadge, drawMetroLogo, fitText, metroTextures, signTexture, stripedTileTexture } from './textures.js';
-import { entranceDoor } from '../world/metro.js';
+import { entranceDoor, entranceFrame } from '../world/metro.js';
 import { hash01, mulberry32 } from '../geo.js';
 
 const C = {
@@ -133,19 +133,59 @@ function directionDraw(line, terminus, { bg = '#1f4e9e', fg = '#ffffff', arrow =
   };
 }
 
+// 出口の看板（緑の地に白い文字と、扉から出る矢印の絵）
 function exitDraw(street) {
   return (x, W, H) => {
-    x.fillStyle = '#f7c600';
+    x.fillStyle = '#00864b';
     x.fillRect(0, 0, W, H);
-    x.fillStyle = '#1b1b1b';
+    const s = H * (street ? 0.62 : 0.78), cx = H * 0.12 + s / 2, cy = H * (street ? 0.36 : 0.5);
+    x.strokeStyle = '#ffffff';
+    x.fillStyle = '#ffffff';
+    x.lineWidth = s * 0.08;
+    x.strokeRect(cx - s * 0.42, cy - s * 0.42, s * 0.5, s * 0.84);
+    x.beginPath();
+    x.moveTo(cx - s * 0.1, cy);
+    x.lineTo(cx + s * 0.32, cy);
+    x.stroke();
+    x.beginPath();
+    x.moveTo(cx + s * 0.44, cy);
+    x.lineTo(cx + s * 0.22, cy - s * 0.16);
+    x.lineTo(cx + s * 0.22, cy + s * 0.16);
+    x.closePath();
+    x.fill();
     x.textBaseline = 'middle';
     x.textAlign = 'left';
-    x.font = `800 ${Math.round(H * 0.5)}px "Helvetica Neue", Arial, sans-serif`;
-    x.fillText('Sortie', H * 0.3, H * (street ? 0.36 : 0.53));
+    const tx = H * 0.24 + s;
+    x.font = `700 ${Math.round(H * (street ? 0.42 : 0.5))}px "Helvetica Neue", Arial, sans-serif`;
+    x.fillText('Sortie', tx, cy + H * 0.02);
     if (street) {
-      fitText(x, street, W - H * 0.6, H * 0.3, '600');
-      x.fillText(street, H * 0.3, H * 0.76);
+      fitText(x, street, W - H * 0.3, H * 0.26, '500');
+      x.fillText(street, H * 0.14, H * 0.8);
     }
+  };
+}
+
+// 改札の上の案内（青の地に線の丸と、左右の方面）
+function gateSignDraw(line, left, right) {
+  return (x, W, H) => {
+    x.fillStyle = '#1f4e9e';
+    x.fillRect(0, 0, W, H);
+    drawLineBadge(x, line, W / 2, H / 2, H * 0.36);
+    x.fillStyle = '#ffffff';
+    x.textBaseline = 'middle';
+    const half = W / 2 - H * 0.6;
+    x.textAlign = 'left';
+    x.font = `700 ${Math.round(H * 0.6)}px Arial`;
+    x.fillText('←', H * 0.15, H * 0.52);
+    left = `Direction ${left}`;
+    right = `Direction ${right}`;
+    fitText(x, left, half - H * 0.9, H * 0.36, '600');
+    x.fillText(left, H * 0.85, H * 0.53);
+    x.textAlign = 'right';
+    x.font = `700 ${Math.round(H * 0.6)}px Arial`;
+    x.fillText('→', W - H * 0.15, H * 0.52);
+    fitText(x, right, half - H * 0.9, H * 0.36, '600');
+    x.fillText(right, W - H * 0.85, H * 0.53);
   };
 }
 
@@ -221,7 +261,7 @@ export function buildStationMesh(plan, { streetAt = () => '' } = {}) {
   const tileKey = `tile:${style.accent}`;
   const mtl = { ...mats, [tileKey]: Object.assign(mats.tile.clone(), { map: stripedTileTexture(style.accent) }) };
   const B = new Builder(), signs = new Signs();
-  const { hall, ym } = plan, WT = hall.WT, P = LAYOUT.psd;
+  const { ym } = plan, WT = wallT(), P = LAYOUT.psd;
   const st = plan.station;
   const nameKey = signs.material('name', 2.4, 0.6, nameDraw(st.name, style.accent));
   const doorsMeshes = [];
@@ -288,41 +328,52 @@ export function buildStationMesh(plan, { streetAt = () => '' } = {}) {
         const [sx, sz] = T(s + 4.5, (WT - 0.02) * side);
         if (s + 4.5 < ws0 - 1.5 || s + 4.5 > ws1 + 1.5) signs.panel(nameKey, sx, yp + 2.15, sz, -f.ax * side, -f.az * side, 2.4, 0.6, n[0], n[1]);
       }
-      // 吊り看板: 出口（階段の下の端の前）と方面（ホームの真ん中）
+      // 吊り看板: 出口（階段の下の端の前）と方面（階段から離れた所）
       const sBot = well.s1; // 吹き抜けの奥の端（階段の下）
       const exitKey = signs.material('exit-plat', 1.6, 0.4, exitDraw(''));
-      hangSign(B, signs, exitKey, T(sBot + side * 1.5, (P + WT) / 2 * side), yc - 0.9, [f.nx, f.nz], 1.6, 0.4, yCeil);
+      hangSign(B, signs, exitKey, T(sBot + well.dirS * 1.5, (P + WT) / 2 * side), yc - 0.9, [f.nx, f.nz], 1.6, 0.4, yCeil);
       const dirKey = signs.material(`dir-${L.line}-${side}`, 3.2, 0.42, directionDraw(L.line, term));
-      hangSign(B, signs, dirKey, T(-sign(side) * 8, (P + WT) / 2 * side), yc - 0.9, [f.nx, f.nz], 3.2, 0.42, yCeil);
+      const sDir = [-14, 14, 0, -24, 24].find((q) => Math.abs(q) < Lb - 3 && (q < ws0 - 4 || q > ws1 + 4)) ?? 0;
+      hangSign(B, signs, dirKey, T(sDir, (P + WT) / 2 * side), yc - 0.9, [f.nx, f.nz], 3.2, 0.42, yCeil);
     }
     // 線路（走行路・案内軌条・中央の柱）
     trackZone(B, L, plan, style);
   }
 
   // ---------------------------------------------------------------- 改札階
-  const hallKey = style.hallFloor;
+  const hallKey = style.hallFloor, yH = ym + HALL_H;
+  const pits = plan.direct.map((e) => ({ e, poly: pitInfo(e, plan.frame).poly, door: entranceDoor(e), f: entranceFrame(e) }));
   for (const r of plan.rects) {
     const at = r.frame.at;
-    const well = plan.wells.find((w) => r.kind === 'wing' && w.line === r.line && w.side === r.side);
-    const pieces = [];
-    if (!well) pieces.push([r.s0, r.s1, r.t0, r.t1]);
-    else {
-      const ws0 = Math.min(well.s0, well.s1), ws1 = Math.max(well.s0, well.s1);
-      const tFree = well.side > 0 ? [r.t0, well.t0] : [well.t1, r.t1], tw = well.side > 0 ? [well.t0, r.t1] : [r.t0, well.t1];
-      pieces.push([r.s0, r.s1, ...tFree]);
-      if (ws0 > r.s0 + 0.01) pieces.push([r.s0, ws0, ...tw]);
-      if (ws1 < r.s1 - 0.01) pieces.push([ws1, r.s1, ...tw]);
+    const outer = rect(at, r.s0, r.s1, r.t0, r.t1);
+    const ph = pits.filter((p) => p.poly.every(([x, z]) => inRect(r, x, z, 0)));
+    if (ph.length) {
+      // 出入口の吹き抜けの所は床と天井に穴（吹き抜けの囲いの中は出入口の階段）
+      B.floorPoly(hallKey, outer, ph.map((p) => p.poly), ym);
+      B.floorPoly('ceiling', outer, ph.map((p) => p.poly), yH, { up: false });
+    } else {
+      const cuts = plan.wells.map((w) => localBox(r.frame, wellPoly(w)));
+      for (const [s0, s1, t0, t1] of rectMinus(r, cuts)) B.floor(hallKey, rect(at, s0, s1, t0, t1), ym);
+      B.floor('ceiling', outer, yH, { up: false });
     }
-    for (const [s0, s1, t0, t1] of pieces) {
-      B.floor(hallKey, rect(at, s0, s1, t0, t1), ym + (r.kind === 'wing' ? 0.003 : 0));
-      B.floor('ceiling', rect(at, s0, s1, t0, t1), ym + HALL_H, { up: false });
-    }
-    if (well) B.floor('ceiling', rect(at, Math.min(well.s0, well.s1), Math.max(well.s0, well.s1), well.t0, well.t1), ym + HALL_H, { up: false });
-    // 照明の帯（長い向き）
-    for (const tl of [-(r.t1 - r.t0) / 4, (r.t1 - r.t0) / 4]) {
-      const tm = (r.t0 + r.t1) / 2 + tl;
-      const [cx, cz] = at((r.s0 + r.s1) / 2, tm);
-      B.box('light', cx, cz, ym + HALL_H - 0.07, ym + HALL_H - 0.005, r.frame.ax, r.frame.az, r.s1 - r.s0 - 1.5, 0.14);
+    // 照明の帯（長い向きに 3.6 m おき。出入口の吹き抜けを避ける）
+    const nT = Math.max(1, Math.round((r.t1 - r.t0) / 3.6));
+    for (let k = 0; k < nT; k++) {
+      const t = r.t0 + ((k + 0.5) * (r.t1 - r.t0)) / nT;
+      let a = null;
+      const flush = (b) => {
+        if (a != null && b - a > 1) {
+          const [cx, cz] = at((a + b) / 2, t);
+          B.box('light', cx, cz, yH - 0.07, yH - 0.005, r.frame.ax, r.frame.az, b - a, 0.14);
+        }
+        a = null;
+      };
+      for (let s = r.s0 + 0.8; s <= r.s1 - 0.8 + 1e-6; s += 0.4) {
+        const [x, z] = at(s, t);
+        if (ph.some((p) => inPit(p, x, z, 0.5))) flush(s - 0.4);
+        else if (a == null) a = s;
+      }
+      flush(r.s1 - 0.8);
     }
   }
   // 外周の壁（内側を向く）
@@ -330,18 +381,31 @@ export function buildStationMesh(plan, { streetAt = () => '' } = {}) {
     const mx = (a[0] + b[0]) / 2, mz = (a[1] + b[1]) / 2, dx = b[0] - a[0], dz = b[1] - a[1], l = Math.hypot(dx, dz);
     let n = [-dz / l, dx / l];
     if (!plan.rects.some((r) => inRect(r, mx + n[0] * 0.2, mz + n[1] * 0.2))) n = [-n[0], -n[1]];
-    B.wall(tileKey, a, b, ym, ym + HALL_H, { n });
+    B.wall(tileKey, a, b, ym, yH, { n });
   }
-  // 吹き抜け: 縁・手すり・階段・エスカレーター
-  for (const w of plan.wells) wellMesh(B, plan, w, mats);
+  // 通路の口の上（通路の天井からホールの天井まで）
+  for (const o of plan.openings) B.wall(tileKey, o.a, o.b, ym + CORR_H, yH, { n: o.n });
+  // ホールの中の出入口の吹き抜けの囲い（外側にタイル。下の端に扉の口）と、扉の前の数段の階段
+  for (const p of pits) pitBoxMesh(B, p, ym, yH, tileKey);
+  for (const e of plan.boxed || []) pitBoxMesh(B, { e, f: entranceFrame(e), door: entranceDoor(e) }, ym, yH, tileKey, true);
+  for (const ds of plan.doorSteps) doorStepsMesh(B, ds);
+  // 吹き抜け: 縁・腰壁・階段・エスカレーター
+  for (const w of plan.wells) wellMesh(B, plan, w, tileKey);
   for (const s of plan.stairs) {
     if (s.kind === 'stairs') stairsMesh(B, s);
     else escalatorMesh(B, s);
   }
   // 改札
   for (const g of plan.gates) gatesMesh(B, signs, g, ym, plan);
-  // 券売機と作品（コンコースの壁ぎわ）
-  concourseFurniture(B, signs, plan, style);
+  // 吹き抜けの上の方面の吊り看板（下りる人の前に）
+  for (const w of plan.wells) {
+    const L = plan.lines.find((q) => q.line === w.line), term = L.dirs.find((d) => d.side === w.side).terminus?.name || '';
+    const key = signs.material(`well-${w.line}-${w.side}`, 3.0, 0.42, directionDraw(w.line, term, { arrow: '↓' }));
+    const c = w.frame.at(w.s0 - w.dirS * 0.4, (w.t0 + w.t1) / 2);
+    hangSign(B, signs, key, c, yH - 0.62, [w.frame.nx, w.frame.nz], 3.0, 0.42, yH);
+  }
+  // 券売機・出口の看板・駅名・作品（改札の外のホール）
+  hallFurniture(B, signs, plan, style, pits, streetAt);
 
   // ---------------------------------------------------------------- 通路
   for (const c of plan.corridors) corridorMesh(B, signs, c, tileKey, streetAt);
@@ -369,8 +433,48 @@ export function buildStationMesh(plan, { streetAt = () => '' } = {}) {
   return { group, doors: doorsMeshes, style };
 }
 
-function sign(v) {
-  return v >= 0 ? 1 : -1;
+// 局所座標の外接長方形（frame の s, t）
+function localBox(frame, poly) {
+  const L = poly.map(([x, z]) => frame.local(x, z));
+  return { s0: Math.min(...L.map((p) => p[0])), s1: Math.max(...L.map((p) => p[0])), t0: Math.min(...L.map((p) => p[1])), t1: Math.max(...L.map((p) => p[1])) };
+}
+
+// 長方形 r から長方形 cuts を除いた残りを、長方形 [s0, s1, t0, t1] に分ける
+function rectMinus(r, cuts) {
+  const cl = (v, a, b) => Math.max(a, Math.min(b, v));
+  const ss = [r.s0, r.s1], ts = [r.t0, r.t1];
+  const cs = cuts.filter((c) => c.s1 > r.s0 + 0.01 && c.s0 < r.s1 - 0.01 && c.t1 > r.t0 + 0.01 && c.t0 < r.t1 - 0.01);
+  for (const c of cs) {
+    ss.push(cl(c.s0, r.s0, r.s1), cl(c.s1, r.s0, r.s1));
+    ts.push(cl(c.t0, r.t0, r.t1), cl(c.t1, r.t0, r.t1));
+  }
+  const uniq = (a) => [...new Set(a.map((v) => Math.round(v * 1000) / 1000))].sort((p, q) => p - q);
+  const S = uniq(ss), T = uniq(ts), out = [];
+  for (let j = 0; j + 1 < T.length; j++) {
+    let run = null;
+    for (let i = 0; i + 1 < S.length; i++) {
+      const sm = (S[i] + S[i + 1]) / 2, tm = (T[j] + T[j + 1]) / 2;
+      const cut = cs.some((c) => sm > c.s0 && sm < c.s1 && tm > c.t0 && tm < c.t1);
+      if (cut) {
+        if (run != null) out.push([S[run], S[i], T[j], T[j + 1]]);
+        run = null;
+      } else if (run == null) run = i;
+    }
+    if (run != null) out.push([S[run], S[S.length - 1], T[j], T[j + 1]]);
+  }
+  return out;
+}
+
+// (x, z) が出入口の吹き抜け（m m 広げた長方形）の中か
+function inPit(p, x, z, m = 0) {
+  const e = p.e, f = p.f, u = (x - e.x) * f.dx + (z - e.z) * f.dz, v = (x - e.x) * f.sx + (z - e.z) * f.sz;
+  return Math.abs(u) < e.len / 2 + m && Math.abs(v) < e.wid / 2 + m;
+}
+
+function segDist(x, z, a, b) {
+  const dx = b[0] - a[0], dz = b[1] - a[1], l2 = dx * dx + dz * dz || 1;
+  const u = Math.max(0, Math.min(1, ((x - a[0]) * dx + (z - a[1]) * dz) / l2));
+  return Math.hypot(a[0] + dx * u - x, a[1] + dz * u - z);
 }
 
 function pt3([x, z], y) {
@@ -389,11 +493,12 @@ function bench(B, x, z, y, ux, uz) {
 }
 
 // 天井から吊った看板（両面）。c: [x, z]、along: 板の横の向き
-function hangSign(B, signs, key, c, y, along, w, h, yCeil) {
+// oneSided: 表（along の左を向く面。along が見る人の右）だけ（矢印のある看板）
+function hangSign(B, signs, key, c, y, along, w, h, yCeil, oneSided = false) {
   const [x, z] = c, [ux, uz] = along, nx = -uz, nz = ux;
   B.box('paint', x, z, y - h / 2, y + h / 2, ux, uz, w + 0.04, 0.06, { color: C.darkSteel });
   signs.panel(key, x, y, z, ux, uz, w, h, nx, nz, 0.032);
-  signs.panel(key, x, y, z, -ux, -uz, w, h, -nx, -nz, 0.032);
+  if (!oneSided) signs.panel(key, x, y, z, -ux, -uz, w, h, -nx, -nz, 0.032);
   for (const k of [-w / 2 + 0.15, w / 2 - 0.15]) B.bar('steel', [x + ux * k, y + h / 2, z + uz * k], [x + ux * k, yCeil, z + uz * k], 0.025);
 }
 
@@ -524,20 +629,95 @@ function trackZone(B, L, plan, style) {
   }
 }
 
-function wellMesh(B, plan, w, mats) {
+// 吹き抜け（改札階からホームへ）: 床の縁の面と、まわりの腰壁（A 線はタイル張りの腰壁、B 線はガラス）
+function wellMesh(B, plan, w, tileKey) {
   const f = w.frame, at = f.at, ym = plan.ym, yc = w.yBot + PLAT_H;
   const tIn = w.side > 0 ? w.t0 : w.t1, tOut = w.side > 0 ? w.t1 : w.t0;
-  const sFar = w.s1;
+  const sFar = w.s1, into = Math.sign(tOut - tIn), d = w.dirS;
   // 床の縁（改札階の床からホーム階の天井まで）
-  const into = Math.sign(tOut - tIn); // 吹き抜けの中を向く
-  B.wall('paint', at(w.s0, tIn), at(sFar, tIn), yc, ym, { n: [f.nx * into, f.nz * into], color: [0.85, 0.85, 0.85] });
-  B.wall('paint', at(sFar, tIn), at(sFar, tOut), yc, ym, { n: [-f.ax * w.side, -f.az * w.side], color: [0.85, 0.85, 0.85] });
+  B.wall(tileKey, at(w.s0, tIn), at(sFar, tIn), yc, ym, { n: [f.nx * into, f.nz * into] });
+  B.wall(tileKey, at(sFar, tIn), at(sFar, tOut), yc, ym, { n: [-f.ax * d, -f.az * d] });
+  const len = Math.abs(sFar - w.s0), sm = (w.s0 + sFar) / 2;
+  if (w.line === 'A') {
+    // タイル張りの腰壁（厚さ 0.16 m、高さ 1.05 m）とステンレスの笠木
+    const T = 0.16, H = 1.05;
+    const [x1, z1] = at(sm + d * T / 2, tIn - into * T / 2);
+    B.box(tileKey, x1, z1, ym, ym + H, f.ax, f.az, len + T, T);
+    B.box('steel', x1, z1, ym + H, ym + H + 0.05, f.ax, f.az, len + T + 0.04, T + 0.04);
+    const [x2, z2] = at(sFar + d * T / 2, (tIn + tOut) / 2);
+    B.box(tileKey, x2, z2, ym, ym + H, f.nx, f.nz, Math.abs(tOut - tIn), T);
+    B.box('steel', x2, z2, ym + H, ym + H + 0.05, f.nx, f.nz, Math.abs(tOut - tIn) + 0.04, T + 0.04);
+    return;
+  }
   // ガラスの手すり（内側の辺と奥の端）
-  for (const [a, b] of [[at(w.s0 + 0.05 * w.side, tIn), at(sFar, tIn)], [at(sFar, tIn), at(sFar, tOut)]]) {
-    const mx = (a[0] + b[0]) / 2, mz = (a[1] + b[1]) / 2, dx = b[0] - a[0], dz = b[1] - a[1], l = Math.hypot(dx, dz);
+  for (const [p, q] of [[at(w.s0, tIn), at(sFar, tIn)], [at(sFar, tIn), at(sFar, tOut)]]) {
+    const mx = (p[0] + q[0]) / 2, mz = (p[1] + q[1]) / 2, dx = q[0] - p[0], dz = q[1] - p[1], l = Math.hypot(dx, dz);
     B.box('glass', mx, mz, ym + 0.05, ym + 1.0, dx / l, dz / l, l, 0.02);
     B.box('steel', mx, mz, ym + 1.0, ym + 1.06, dx / l, dz / l, l, 0.06);
     B.box('steel', mx, mz, ym, ym + 0.08, dx / l, dz / l, l, 0.06);
+  }
+}
+
+// 改札階の中の出入口の吹き抜けの囲い（外側の面。タイル張り）。下の端に扉の口
+function pitBoxMesh(B, p, ym, yH, tileKey, closed = false) {
+  const e = p.e, f = p.f, d = p.door, L = e.len / 2 + 0.03, W = e.wid / 2 + 0.03;
+  const Q = (u, v) => f.at(u, v);
+  B.wall(tileKey, Q(-L, -W), Q(L, -W), ym, yH, { n: [-f.sx, -f.sz] });
+  B.wall(tileKey, Q(-L, W), Q(L, W), ym, yH, { n: [f.sx, f.sz] });
+  B.wall(tileKey, Q(-L, -W), Q(-L, W), ym, yH, { n: [-f.dx, -f.dz] });
+  if (closed) {
+    B.wall(tileKey, Q(L, -W), Q(L, W), ym, yH, { n: [f.dx, f.dz] });
+    return;
+  }
+  const dw = d.dw + 0.08, top = Math.min(yH, d.yb + d.dh + 0.08);
+  B.wall(tileKey, Q(L, -W), Q(L, -dw), ym, yH, { n: [f.dx, f.dz] });
+  B.wall(tileKey, Q(L, dw), Q(L, W), ym, yH, { n: [f.dx, f.dz] });
+  if (top < yH - 0.01) B.wall(tileKey, Q(L, -dw), Q(L, dw), top, yH, { n: [f.dx, f.dz] });
+  if (d.yb > ym + 0.02) B.wall('granite', Q(L, -dw), Q(L, dw), ym, d.yb, { n: [f.dx, f.dz] });
+  // 扉の口の縁（ステンレス）
+  for (const v of [-dw, dw]) {
+    const [x, z] = Q(L + 0.02, v);
+    B.box('steel', x, z, d.yb, top, f.dx, f.dz, 0.06, 0.1);
+  }
+  const [x, z] = Q(L + 0.02, 0);
+  B.box('steel', x, z, top - 0.08, top, f.sx, f.sz, 2 * dw + 0.1, 0.06);
+}
+
+// 出入口の扉の前の数段の階段（扉の高さから改札階の床へ）
+function doorStepsMesh(B, ds) {
+  const d = ds.door, h = ds.w / 2, st = ds.st;
+  const P = (u, v) => [d.x + d.dx * u + d.sx * v, d.z + d.dz * u + d.sz * v];
+  const y = (k) => ds.y0 + ((ds.y1 - ds.y0) * k) / st.n;
+  const per = Math.ceil(st.n / st.flights);
+  B.floor('darkGranite', [P(0, -h), P(0.2, -h), P(0.2, h), P(0, h)], ds.y0);
+  const side = (u0, u1, yy) => {
+    for (const v of [-h, h]) B.wall('granite', P(u0, v), P(u1, v), ds.y1, yy, { n: [d.sx * Math.sign(v), d.sz * Math.sign(v)] });
+  };
+  side(0, 0.2, ds.y0);
+  let u = 0.2, k = 0;
+  for (let fl = 0; fl < st.flights; fl++) {
+    const steps = Math.min(per, st.n - k);
+    for (let i = 0; i < steps; i++) {
+      const yy = y(k + i + 1);
+      B.wall('granite', P(u, -h), P(u, h), yy, y(k + i), { n: [d.dx, d.dz] });
+      if (k + i + 1 < st.n) {
+        B.floor('darkGranite', [P(u, -h), P(u + TREAD, -h), P(u + TREAD, h), P(u, h)], yy);
+        side(u, u + TREAD, yy);
+      }
+      u += TREAD;
+    }
+    k += steps;
+    if (fl + 1 < st.flights) {
+      B.floor('darkGranite', [P(u, -h), P(u + MID_LANDING, -h), P(u + MID_LANDING, h), P(u, h)], y(k));
+      side(u, u + MID_LANDING, y(k));
+      u += MID_LANDING;
+    }
+  }
+  // 両側の手すり
+  for (const v of [-h + 0.05, h - 0.05]) {
+    const a = P(0.1, v), b = P(0.2 + st.run, v);
+    B.bar('steel', [a[0], ds.y0 + 0.9, a[1]], [b[0], ds.y1 + 0.9, b[1]], 0.045);
+    for (const [pp, yy] of [[a, ds.y0], [b, ds.y1]]) B.bar('steel', [pp[0], yy, pp[1]], [pp[0], yy + 0.9, pp[1]], 0.04);
   }
 }
 
@@ -603,7 +783,7 @@ function escalatorMesh(B, s) {
 }
 
 function gatesMesh(B, signs, g, ym, plan) {
-  const f = g.frame, at = f.at, lanes = gateLanes(g);
+  const f = g.frame, at = f.at, lanes = gateLanes(g), yH = ym + HALL_H;
   // 改札の箱（ステンレス、上は黒）
   const housings = [];
   let t = lanes[0][0] - 0.3;
@@ -616,23 +796,24 @@ function gatesMesh(B, signs, g, ym, plan) {
     const [x, z] = at(g.s, (a + b) / 2);
     B.box('steel', x, z, ym, ym + 0.98, f.ax, f.az, 1.4, b - a);
     B.box('paint', x, z, ym + 0.98, ym + 1.02, f.ax, f.az, 1.4, b - a, { color: C.black });
-    // 緑の矢印のランプ（両面）
-    for (const sg of [1, -1]) {
-      const [lx, lz] = at(g.s + sg * 0.701, (a + b) / 2);
-      B.box(sg * g.side > 0 ? 'red' : 'green', lx, lz, ym + 0.75, ym + 0.83, f.nx, f.nz, Math.min(0.1, b - a - 0.04), 0.004);
-    }
   }
-  // 三脚（通路ごとに 3 本の腕）
-  for (const [a, b] of lanes) {
+  // 通路ごとのランプ（入る通路は改札の外の側が緑の矢印・中の側が赤、出る通路は逆）と三脚
+  lanes.forEach(([a, b], k) => {
+    const entry = g.both ? k % 2 === 0 : true;
+    for (const sg of [1, -1]) {
+      const outside = sg * g.side < 0; // 改札の外の側の面
+      const [lx, lz] = at(g.s + sg * 0.701, a - 0.15);
+      B.box(outside === entry ? 'green' : 'red', lx, lz, ym + 0.75, ym + 0.83, f.nx, f.nz, 0.1, 0.004);
+    }
     const [x, z] = at(g.s, a + 0.02);
-    for (let k = 0; k < 3; k++) {
-      const ang = (k / 3) * Math.PI * 2;
+    for (let i = 0; i < 3; i++) {
+      const ang = (i / 3) * Math.PI * 2;
       const dir = [Math.cos(ang) * 0.3, Math.sin(ang) * 0.3];
       const tip = at(g.s + dir[0] * 0.4, a + 0.05 + 0.45);
       B.bar('steel', [x, ym + 0.88, z], [tip[0], ym + 0.88 + dir[1] * 0.5, tip[1]], 0.035);
     }
     void b;
-  }
+  });
   // ガラスの仕切り（改札の両脇から壁まで）
   for (const [a, b] of [[g.t0, housings[0][0]], [housings[housings.length - 1][1], g.t1]]) {
     if (b - a < 0.05) continue;
@@ -641,68 +822,143 @@ function gatesMesh(B, signs, g, ym, plan) {
     B.box('steel', x, z, ym + 1.15, ym + 1.2, f.nx, f.nz, b - a, 0.05);
     B.box('steel', x, z, ym, ym + 0.06, f.nx, f.nz, b - a, 0.05);
   }
-  // 方面の吊り看板（改札の上。コンコースの側を向く）
-  const term = g.dir?.terminus?.name || '';
-  const key = signs.material(`gate-${g.line}-${g.side}`, 3.4, 0.45, directionDraw(g.line, term, { arrow: '' }));
+  // 改札の上の案内（改札の外の側を向く）: 1 つの線の駅は左右の方面、十字の駅はその改札の方面。中の側には出口
   const [hx, hz] = at(g.s - g.side * 0.8, 0);
-  hangSign(B, signs, key, [hx, hz], ym + HALL_H - 0.75, [f.nx, f.nz], 3.4, 0.45, ym + HALL_H);
-  void plan;
+  if (g.both) {
+    const L = plan.lines.find((q) => q.line === g.line);
+    const name = (side) => L.dirs.find((d) => d.side === side).terminus?.name || '';
+    const key = signs.material(`gate-${g.line}-${g.end}`, 4.6, 0.45, gateSignDraw(g.line, name(g.end), name(-g.end)));
+    hangSign(B, signs, key, [hx, hz], yH - 0.75, [-f.nx * g.end, -f.nz * g.end], 4.6, 0.45, yH, true);
+  } else {
+    const term = g.dir?.terminus?.name || '';
+    const key = signs.material(`gate-${g.line}-${g.side}`, 3.4, 0.45, directionDraw(g.line, term, { arrow: '' }));
+    hangSign(B, signs, key, [hx, hz], yH - 0.75, [f.nx, f.nz], 3.4, 0.45, yH);
+  }
+  const [ex, ez] = at(g.s + g.side * 0.8, 0);
+  const exitKey = signs.material('exit-gate', 1.8, 0.45, exitDraw(''));
+  hangSign(B, signs, exitKey, [ex, ez], yH - 0.75, [f.nx, f.nz], 1.8, 0.45, yH);
 }
 
-function concourseFurniture(B, signs, plan, style) {
-  const fP = plan.rects[0].frame, at = fP.at, ym = plan.ym, hall = plan.hall;
-  // 券売機: コンコースの長い壁の、通路の入口でない所に 2 台ずつ
+// 改札の外のホールの備品: 券売機（壁ぎわ）、出口の吊り看板（通路の口・出入口の扉の前）、駅名の板、作品
+function hallFurniture(B, signs, plan, style, pits, streetAt) {
+  const ym = plan.ym, yH = ym + HALL_H;
+  const halls = plan.rects.filter((r) => r.kind === 'unpaid');
+  const inHall = (x, z) => halls.some((r) => inRect(r, x, z, 0));
+  // 物を置けない所: 通路の口の前、出入口の吹き抜けと扉の前、改札の前
+  const busy = (x, z, m = 0) => {
+    for (const o of plan.openings) if (segDist(x, z, o.a, o.b) < o.w / 2 + 1.2 + m) return true;
+    for (const p of pits) {
+      if (inPit(p, x, z, 0.5 + m)) return true;
+      const d = p.door, u = (x - d.x) * d.dx + (z - d.z) * d.dz, v = (x - d.x) * d.sx + (z - d.z) * d.sz;
+      if (u > -0.5 && u < 4.5 + m && Math.abs(v) < d.dw + 1.2 + m) return true;
+    }
+    for (const g of plan.gates) {
+      const [s, t] = g.frame.local(x, z);
+      if (Math.abs(s - g.s) < 2.8 + m && t > g.t0 - 1 && t < g.t1 + 1) return true;
+    }
+    return false;
+  };
+  // 壁ぎわの置き場所（外周の壁の、改札の外のホールの側）: { x, z, n: 内向き, u: 壁の向き, wall }
+  const spots = [];
+  hallBoundary(plan).forEach(([a, b], wi) => {
+    const dx = b[0] - a[0], dz = b[1] - a[1], l = Math.hypot(dx, dz);
+    if (l < 1.2) return;
+    const ux = dx / l, uz = dz / l;
+    let n = [-uz, ux];
+    const mx = (a[0] + b[0]) / 2, mz = (a[1] + b[1]) / 2;
+    if (!plan.rects.some((r) => inRect(r, mx + n[0] * 0.2, mz + n[1] * 0.2))) n = [-n[0], -n[1]];
+    if (!inHall(mx + n[0] * 0.3, mz + n[1] * 0.3)) return;
+    for (let u = 0.6; u <= l - 0.6 + 1e-6; u += 0.9) spots.push({ x: a[0] + ux * u, z: a[1] + uz * u, n, u: [ux, uz], wall: wi, at: u, len: l });
+  });
+  const free = (sp, depth, m = 0) => !busy(sp.x + sp.n[0] * depth, sp.z + sp.n[1] * depth, m) && inHall(sp.x + sp.n[0] * depth, sp.z + sp.n[1] * depth);
+  const used = new Set();
+  // 券売機（赤と白。2〜3 台並べる）: 改札に近い壁ぎわ
   const tk = signs.material('ticket', 0.75, 1.75, ticketDraw());
-  for (const sg of [1, -1]) {
-    const open = plan.openings.filter((o) => o.axis === 't' && o.sign === sg);
-    const cands = [-hall.Cs + 1.0, -hall.Cs + 1.9, hall.Cs - 1.0, hall.Cs - 1.9].filter((s) => !open.some((o) => Math.abs(o.pos - s) < o.w / 2 + 0.6));
-    for (const s of cands.slice(0, 2)) {
-      const t = sg * (hall.Ct - 0.3);
-      const [x, z] = at(s, t);
-      B.box('paint', x, z, ym, ym + 1.8, fP.ax, fP.az, 0.8, 0.5, { color: C.ticketRed });
-      const n = [-fP.nx * sg, -fP.nz * sg];
-      signs.panel(tk, x + n[0] * 0.251, ym + 0.95, z + n[1] * 0.251, fP.ax * -sg, fP.az * -sg, 0.75, 1.7, n[0], n[1], 0);
+  const gate = plan.gates[0];
+  const gp = gate ? gate.frame.at(gate.s, 0) : [plan.station.x, plan.station.z];
+  for (const r of halls) {
+    const cand = spots.filter((sp) => inRect(r, sp.x + sp.n[0] * 0.3, sp.z + sp.n[1] * 0.3, 0) && free(sp, 0.3, 0.3))
+      .sort((p, q) => Math.hypot(p.x - gp[0], p.z - gp[1]) - Math.hypot(q.x - gp[0], q.z - gp[1]));
+    let placed = 0;
+    for (const sp of cand) {
+      if (placed >= 3) break;
+      const key = `${sp.wall}:${sp.at.toFixed(1)}`;
+      if (used.has(key)) continue;
+      if (placed && !spots.some((q) => q.wall === sp.wall && used.has(`${q.wall}:${q.at.toFixed(1)}`) && Math.abs(q.at - sp.at) < 1)) continue;
+      used.add(key);
+      placed++;
+      const x = sp.x + sp.n[0] * 0.27, z = sp.z + sp.n[1] * 0.27;
+      B.box('paint', x, z, ym, ym + 1.8, sp.u[0], sp.u[1], 0.8, 0.5, { color: C.ticketRed });
+      signs.panel(tk, x + sp.n[0] * 0.251, ym + 0.95, z + sp.n[1] * 0.251, sp.n[1], -sp.n[0], 0.75, 1.7, sp.n[0], sp.n[1], 0);
+      const r2 = 0.3;
+      for (const [p, q] of [[[-0.42, -r2], [0.42, -r2]], [[0.42, -r2], [0.42, r2]], [[0.42, r2], [-0.42, r2]], [[-0.42, r2], [-0.42, -r2]]]) {
+        const P = (k) => [x + sp.u[0] * k[0] + sp.n[0] * k[1], z + sp.u[1] * k[0] + sp.n[1] * k[1]];
+        const [A, Bq] = [P(p), P(q)];
+        plan.nav?.addWall(A[0], A[1], Bq[0], Bq[1], ym - 0.2, ym + 1.8);
+      }
     }
   }
-  // 出口の吊り看板（通路の入口の前）
+  // 出口の吊り看板: 通路の口と、ホールの中の出入口の扉の前（通りの名前）
   for (const o of plan.openings) {
-    const P0 = o.axis === 't' ? [o.pos, o.sign * (hall.Ct - 1.2)] : [o.sign * (hall.Cs - 1.2), o.pos];
-    const along = o.axis === 't' ? [fP.ax, fP.az] : [fP.nx, fP.nz];
-    const c = plan.corridors.find((q) => Math.abs((o.axis === 't' ? q.local[q.local.length - 1][0] : q.local[q.local.length - 1][1]) - o.pos) < 0.01);
-    const key = signs.material(`exit-${o.axis}-${o.sign}-${o.pos.toFixed(1)}`, 2.0, 0.5, exitDraw(c?.street || ''));
-    hangSign(B, signs, key, at(...P0), ym + HALL_H - 0.6, along, 2.0, 0.5, ym + HALL_H);
+    const c = plan.corridors.find((q) => q.idx === o.idx);
+    const street = c ? streetAt(c.door.e.x, c.door.e.z) || '' : '';
+    const mx = (o.a[0] + o.b[0]) / 2 + o.n[0] * 1.2, mz = (o.a[1] + o.b[1]) / 2 + o.n[1] * 1.2;
+    const dx = o.b[0] - o.a[0], dz = o.b[1] - o.a[1], l = Math.hypot(dx, dz);
+    const key = signs.material(`exit-${o.idx}`, 2.0, 0.5, exitDraw(street));
+    hangSign(B, signs, key, [mx, mz], yH - 0.6, [dx / l, dz / l], 2.0, 0.5, yH);
+  }
+  pits.forEach((p, i) => {
+    const d = p.door, street = streetAt(p.e.x, p.e.z) || '';
+    const key = signs.material(`exit-pit-${i}`, 2.0, 0.5, exitDraw(street));
+    hangSign(B, signs, key, [d.x + d.dx * 1.4, d.z + d.dz * 1.4], yH - 0.6, [d.sx, d.sz], 2.0, 0.5, yH);
+  });
+  // 駅名の板と壁画（長い壁の空いている所）
+  const nameKey = signs.material('name', 2.4, 0.6, nameDraw(plan.station.name, style.accent));
+  const muralKey = signs.material('mural', 3.0, 1.8, muralDraw(plan.station, style.accent));
+  const walls = new Map();
+  for (const sp of spots) if (!used.has(`${sp.wall}:${sp.at.toFixed(1)}`)) (walls.get(sp.wall) || walls.set(sp.wall, []).get(sp.wall)).push(sp);
+  let names = 0, murals = 0;
+  for (const list of [...walls.values()].sort((p, q) => q.length - p.length)) {
+    // 壁の中で、続けて空いている所（板の幅ぶん）
+    const ok = list.filter((sp) => free(sp, 0.4, 0.2));
+    const pick = (w) => ok.find((sp) => ok.filter((q) => Math.abs(q.at - sp.at) <= w / 2 + 0.01).length >= Math.floor(w / 0.9));
+    if (style.art === 'mural' && murals < 1) {
+      const sp = pick(3.4);
+      if (sp) {
+        murals++;
+        signs.panel(muralKey, sp.x + sp.n[0] * 0.02, ym + 1.65, sp.z + sp.n[1] * 0.02, sp.n[1], -sp.n[0], 3.0, 1.8, sp.n[0], sp.n[1], 0);
+        continue;
+      }
+    }
+    if (names < 2) {
+      const sp = pick(2.6);
+      if (sp) {
+        names++;
+        signs.panel(nameKey, sp.x + sp.n[0] * 0.02, ym + 2.55, sp.z + sp.n[1] * 0.02, sp.n[1], -sp.n[0], 2.4, 0.6, sp.n[0], sp.n[1], 0);
+      }
+    }
   }
   // 作品
   if (style.art === 'cone') {
-    // Esquirol の銅色の円錐の柱（コンコースの真ん中）
-    const [x, z] = at(0, 0);
-    const segs = 6;
-    for (let k = 0; k < segs; k++) {
-      const y0 = ym + (HALL_H * k) / segs, y1 = ym + (HALL_H * (k + 1)) / segs;
-      B.cyl('copper', x, z, y0, y1, 0.85 - (0.45 * (k + 0.5)) / segs, { seg: 24, color: C.copper });
+    // Esquirol の銅色の円錐の柱（改札の外のホールの真ん中）
+    const r = halls[0], [x, z] = r.frame.at((r.s0 + r.s1) / 2, (r.t0 + r.t1) / 2);
+    if (!busy(x, z, 0.5)) {
+      const segs = 6;
+      for (let k = 0; k < segs; k++) {
+        const y0 = ym + (HALL_H * k) / segs, y1 = ym + (HALL_H * (k + 1)) / segs;
+        B.cyl('copper', x, z, y0, y1, 0.85 - (0.45 * (k + 0.5)) / segs, { seg: 24, color: C.copper });
+      }
+      for (let k = 0; k < 12; k++) {
+        const a0 = (k / 12) * Math.PI * 2, a1 = ((k + 1) / 12) * Math.PI * 2;
+        plan.nav?.addWall(x + Math.cos(a0) * 0.9, z + Math.sin(a0) * 0.9, x + Math.cos(a1) * 0.9, z + Math.sin(a1) * 0.9, ym - 0.2, yH);
+      }
     }
-  } else if (style.art === 'columns') {
+  } else if (style.art === 'columns' && plan.hall) {
+    const at = plan.rects[0].frame.at;
     for (const [s, t] of [[-6, -6], [6, -6], [-6, 6], [6, 6]]) {
       const [x, z] = at(s, t);
-      B.cyl('concrete', x, z, ym, ym + HALL_H, 0.45, { seg: 20, color: [0.86, 0.86, 0.84] });
+      B.cyl('concrete', x, z, ym, yH, 0.45, { seg: 20, color: [0.86, 0.86, 0.84] });
     }
-  } else {
-    // 壁画（コンコースの長い壁の真ん中。通路の入口でなければ）
-    for (const sg of [1, -1]) {
-      if (plan.openings.some((o) => o.axis === 't' && o.sign === sg && Math.abs(o.pos) < o.w / 2 + 1.6)) continue;
-      const key = signs.material('mural', 3.0, 1.8, muralDraw(plan.station, style.accent));
-      const [x, z] = at(0, sg * (hall.Ct - 0.02));
-      signs.panel(key, x, ym + 1.65, z, fP.ax * -sg, fP.az * -sg, 3.0, 1.8, -fP.nx * sg, -fP.nz * sg, 0);
-      break;
-    }
-  }
-  // 駅名の板（コンコースの壁）
-  const nameKey = signs.material('name', 2.4, 0.6, nameDraw(plan.station.name, style.accent));
-  for (const sg of [1, -1]) {
-    const s = hall.Cs > 6 ? 0 : 0;
-    if (plan.openings.some((o) => o.axis === 't' && o.sign === sg && Math.abs(o.pos - s) < o.w / 2 + 1.4)) continue;
-    const [x, z] = at(s, sg * (hall.Ct - 0.02));
-    signs.panel(nameKey, x, ym + 2.75, z, fP.ax * -sg, fP.az * -sg, 2.4, 0.6, -fP.nx * sg, -fP.nz * sg, 0);
   }
 }
 

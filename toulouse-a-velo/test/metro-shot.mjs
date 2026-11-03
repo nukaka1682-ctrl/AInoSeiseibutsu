@@ -54,58 +54,108 @@ if (shots.includes('all') || shots.includes('tps')) {
   await shot('tps');
   await page.evaluate(() => window.__metroApi.toggleCam());
 }
-// 歩く: ホーム → 改札階 → 通路 → 地上（間取りから道筋を作って、そこへ向かって歩かせる）
+// 歩く: ホーム → 階段 → 改札階 → 改札 → 出入口（ホールの中の吹き抜けか通路）→ 地上。歩ける所を幅優先で探した道筋をたどる
 if (shots.includes('all') || shots.includes('walk')) {
   const plan = await page.evaluate(() => {
-    const st = window.__metro.station, rec = window.__metro.stations.get(st.id), p = rec.plan;
+    const st = window.__metro.station, rec = window.__metro.stations.get(st.id), p = rec.plan, nav = window.__metroDebug.nav;
     const stair = p.stairs.find((s) => s.kind === 'stairs' && s.side === 1 && s.line === st.lines[0]);
     const f = stair.frame;
-    const c = p.corridors[0];
-    return {
-      // 階段の下の端の手前（ホーム）→ 階段の上 → 改札 → コンコース → 通路の入口 → 通路 → 扉 → 地上
-      pts: [
-        [...f.at(stair.s0 + (stair.len + 1.6) * stair.dirS, (3.15 + stair.t0 * Math.sign(stair.t0) - 0.3) / 2 * stair.side), 'platform-passage'],
-        [...f.at(stair.s0 + (stair.len + 0.7) * stair.dirS, (stair.t0 + stair.t1) / 2), 'platform-bottom'],
-        [...f.at(stair.s0 + (stair.len - 0.5) * stair.dirS, (stair.t0 + stair.t1) / 2), 'stairs-low'],
-        [...f.at(stair.s0 - 0.6 * stair.dirS, (stair.t0 + stair.t1) / 2), 'hall-top'],
-        [...f.at(stair.s0 - 0.6 * stair.dirS, 0.46), 'wing'],
-        [...f.at(p.hall.lines[0].c0 * stair.dirS + 1.2 * stair.dirS, 0.46), 'gate-in'],
-        [...f.at(p.hall.lines[0].c0 * stair.dirS - 1.5 * stair.dirS, 0.46), 'concourse'],
-        ...c.pts.slice().reverse().map((q, i) => [...q, `corr${i}`]),
-      ],
-      pit: c.door.e,
-    };
-  });
-  const walkTo = async (x, z, max = 40) => {
-    for (let k = 0; k < max; k++) {
-      const d = await page.evaluate(([x, z]) => {
-        const w = window.__metroDebug.walker;
-        const dx = x - w.x, dz = z - w.z, d = Math.hypot(dx, dz);
-        window.__metro.viewYaw = Math.atan2(dx, -dz);
-        return d;
-      }, [x, z]);
-      if (process.env.VERBOSE_WALK) console.log("  d", d.toFixed(2));
-      if (d < 0.6) return true;
-      await sim(Math.min(1, d / 1.45), { fwd: 1, side: 0, run: false });
-    }
-    return false;
-  };
-  for (const [x, z, name] of plan.pts) {
-    const ok = await walkTo(x, z);
-    await shot(`walk-${name}${ok ? '' : '-STUCK'}`);
-  }
-  // 扉を出て階段を上り、地上へ
-  const e = plan.pit;
-  const up = await page.evaluate((e) => {
+    const start = f.at(stair.s0 + (stair.len + 1.2) * stair.dirS, (stair.t0 + stair.t1) / 2);
+    const open = p.pits.filter((e) => !p.closed.includes(e));
+    const e = p.direct[0] || open[0];
     const fx = Math.cos(e.ang) * e.down, fz = Math.sin(e.ang) * e.down;
-    return [e.x - fx * (e.len / 2 + 3), e.z - fz * (e.len / 2 + 3)];
-  }, e);
-  const ok = await walkTo(up[0], up[1], 60);
-  await sim(0.3, { fwd: 0, side: 0 });
-  await shot(`walk-street${ok ? '' : '-STUCK'}`);
-  await look(await page.evaluate(() => window.__metro.viewYaw + Math.PI), -0.25);
-  await sim(0.3, { fwd: 0, side: 0 });
-  await shot('walk-street-back');
+    const goal = [e.x - fx * (e.len / 2 + 2.5), e.z - fz * (e.len / 2 + 2.5)];
+    // 幅優先（0.25 m の格子、高さは 1.2 m ごとに分ける）。壁から 0.2 m 離れた所だけ（体が通れる）
+    const step = 0.25, key = (x, z, y) => `${Math.round(x / step)},${Math.round(z / step)},${Math.round(y / 1.2)}`;
+    const f0 = nav.floorAt(start[0], start[1], stair.y1);
+    const q = [[start[0], start[1], f0.y, null, f0.region?.kind || 'surface']];
+    const seen = new Map([[key(start[0], start[1], f0.y), 0]]);
+    let found = -1;
+    for (let i = 0; i < q.length && i < 400000; i++) {
+      const [x, z, y, , kind] = q[i];
+      if (kind === 'surface' && Math.hypot(x - goal[0], z - goal[1]) < 0.8) {
+        found = i;
+        break;
+      }
+      for (const [dx, dz] of [[step, 0], [-step, 0], [0, step], [0, -step]]) {
+        const r = nav.step(x, z, y, x + dx, z + dz);
+        if (!r) continue;
+        const k = key(x + dx, z + dz, r.y);
+        if (seen.has(k)) continue;
+        seen.set(k, q.length);
+        if (nav.resolve(x + dx, z + dz, 0.2, r.y).hit) continue;
+        q.push([x + dx, z + dz, r.y, i, r.region?.kind || 'surface']);
+      }
+    }
+    if (found < 0) return { error: `道が見つからない（${q.length} 点）` };
+    const nearGate = (x, z) => p.gates.some((g) => {
+      const [s, t] = g.frame.local(x, z);
+      return Math.abs(s - g.s) < 1.4 && t > g.t0 - 0.3 && t < g.t1 + 0.3;
+    });
+    const path = [];
+    for (let i = found; i != null; i = q[i][3]) path.push(q[i]);
+    path.reverse();
+    // 2 m ごとの点と、場所の種類が変わる所（撮影）。改札を通る所は通路の真ん中を
+    const pts = [];
+    let last = null;
+    const lanes = (g) => Array.from({ length: 6 }, (_, k) => -3.025 + 0.4 + k * 1.05);
+    path.forEach(([x, z, y, , kind], i) => {
+      const change = last && kind !== last;
+      if (i > 0) {
+        const [px, pz] = path[i - 1];
+        for (const g of p.gates) {
+          const [s0, t0] = g.frame.local(px, pz), [s1, t1] = g.frame.local(x, z);
+          if ((s0 - g.s) * (s1 - g.s) > 0 || Math.abs(t1) > 8.2) continue;
+          const tc = lanes(g).reduce((a, b) => (Math.abs(b - t1) < Math.abs(a - t1) ? b : a));
+          const dir = Math.sign(s1 - s0);
+          pts.push([...g.frame.at(g.s - dir * 1.2, tc), null], [...g.frame.at(g.s + dir * 1.2, tc), 'gate']);
+        }
+      }
+      if ((change || i % 8 === 0 || i === path.length - 1) && !nearGate(x, z)) pts.push([x, z, change ? `${kind}-${i}` : null]);
+      last = kind;
+    });
+    return { start, y: f0.y, pts };
+  });
+  if (plan.error) console.log(plan.error);
+  else {
+    await page.evaluate(([x, z, y]) => {
+      const w = window.__metroDebug.walker;
+      w.place(x, y, z);
+      w.region = window.__metroDebug.nav.floorAt(x, z, y)?.region || null;
+    }, [...plan.start, plan.y]);
+    await shot('walk-0-platform');
+    const walkTo = async (x, z, max = 30) => {
+      for (let k = 0; k < max; k++) {
+        const d = await page.evaluate(([x, z]) => {
+          const w = window.__metroDebug.walker;
+          const dx = x - w.x, dz = z - w.z, d = Math.hypot(dx, dz);
+          window.__metro.viewYaw = Math.atan2(dx, -dz);
+          return d;
+        }, [x, z]);
+        if (d < 0.35) return true;
+        await sim(Math.min(1, d / 1.45), { fwd: 1, side: 0, run: false });
+      }
+      return false;
+    };
+    let n = 1;
+    for (const [x, z, name] of plan.pts) {
+      const ok = await walkTo(x, z);
+      if (!ok) {
+        console.log('STUCK', await page.evaluate(([x, z]) => {
+          const w = window.__metroDebug.walker, st = window.__metro.station, p = window.__metro.stations.get(st.id).plan, f = p.frame;
+          return JSON.stringify({ at: f.local(w.x, w.z).map((v) => v.toFixed(2)), y: w.y.toFixed(2), target: f.local(x, z).map((v) => v.toFixed(2)), kind: w.region?.kind || 'surface' });
+        }, [x, z]));
+        await shot(`walk-${n++}-STUCK`);
+        break;
+      }
+      if (name) await shot(`walk-${n++}-${name}`);
+    }
+    await sim(0.3, { fwd: 0, side: 0 });
+    await shot(`walk-${n++}-street`);
+    await look(await page.evaluate(() => window.__metro.viewYaw + Math.PI), -0.25);
+    await sim(0.3, { fwd: 0, side: 0 });
+    await shot(`walk-${n++}-street-back`);
+  }
 }
 // 電車に乗る: 走る → 着いて扉が開く → 降りる → ホームから電車を見る
 if (shots.includes('ride')) {
@@ -179,10 +229,12 @@ if (shots.includes('arrive')) {
 if (shots.includes('docs')) {
   const views = await page.evaluate(() => {
     const st = window.__metro.station, rec = window.__metro.stations.get(st.id), p = rec.plan, L = p.lines[0], f = L.frame;
-    const fP = p.rects[0].frame, g = p.gates.find((q) => q.side === 1 && q.line === L.line);
+    const g = p.gates.find((q) => q.line === L.line);
     const out = {};
     out.platform = { pos: [...f.at(-22, 6.6)].flatMap((v, i) => (i === 0 ? [v, L.yp + 1.65] : [v])), look: [...f.at(8, 4.2)].flatMap((v, i) => (i === 0 ? [v, L.yp + 1.9] : [v])) };
-    out.gates = { pos: [...fP.at(-p.hall.Cs + 1.2, -2.5)].flatMap((v, i) => (i === 0 ? [v, p.ym + 1.65] : [v])), look: [...g.frame.at(g.s + 3, 0.5)].flatMap((v, i) => (i === 0 ? [v, p.ym + 1.0] : [v])) };
+    out.gates = { pos: [...g.frame.at(g.s - g.side * 7, -3.5)].flatMap((v, i) => (i === 0 ? [v, p.ym + 1.65] : [v])), look: [...g.frame.at(g.s + g.side * 3, 0.5)].flatMap((v, i) => (i === 0 ? [v, p.ym + 1.0] : [v])) };
+    const w = p.wells[0];
+    out.well = { pos: [...w.frame.at(w.s0 - w.dirS * 3, -w.side * 2)].flatMap((v, i) => (i === 0 ? [v, p.ym + 1.7] : [v])), look: [...w.frame.at(w.s0 + w.dirS * 4, (w.t0 + w.t1) / 2)].flatMap((v, i) => (i === 0 ? [v, p.ym - 1.0] : [v])) };
     return out;
   });
   for (const [name, v] of Object.entries(views)) {

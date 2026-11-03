@@ -15,8 +15,8 @@ import { areaFrame } from '../world/assemble.js';
 import { setupScene } from '../world/scene.js';
 import { entranceFrame, inEntrance } from '../world/metro.js';
 import { MapRenderer, drawMinimap } from '../ui/minimap.js';
-import { LINES, LINE_COLORS, TRAIN_CARS, buildNetwork, runTime, stationFrame, stationList, terminusOf } from './network.js';
-import { buildStationNav, planStation, stationLevelsFor } from './stationplan.js';
+import { LINES, LINE_COLORS, TRAIN_CARS, buildNetwork, relevelNetwork, runTime, stationFrame, stationList, terminusOf } from './network.js';
+import { adjustStationPits, buildStationNav, planStation, stationLevelsFor } from './stationplan.js';
 import { buildStationMesh } from './stationmesh.js';
 import { Nav } from './nav.js';
 import { Walker } from './walker.js';
@@ -135,20 +135,22 @@ async function loadAll() {
   const { terrain } = await loadTerrain({ filePromise: terrainFile, bbox, osm: data.osm, onStatus: (t) => setLoading(t, 0.15) });
   terrain.metroWalk = true; // 出入口の吹き抜けの下の扉を開け、階段を下りられるように（world/ground.js・stream.js）
   const metro = await metroFile;
+  // 路線網（駅の向き）。出入口の階段の深さは、駅の改札階の床にそろえる（地上の出入口を組み立てる前に。world/ground.js）
+  const { proj } = areaFrame(bbox);
+  const network = buildNetwork(proj, { bdStations: metro?.stations || null });
+  const entrancesOf = (s) => (terrain.metro || []).filter((e) => e.kind === 'metro' && e.station === s.bd);
+  terrain.metroAdjust = () => {
+    for (const s of network.stations) adjustStationPits(s, entrancesOf(s), (x, z) => terrain.h(x, z));
+  };
   const world = await assembleStreamWorld({
     base: data, bbox, presetId: PRESET, buildingMats, groundMats, terrain, near: 380, far: 650,
     progress: (t, p) => setLoading(`地図データ: IGN BD TOPO（${data.source}）\n${t}`, 0.2 + p * 0.25),
   });
   scene.add(world.group);
-  // 路線網（駅の高さは地形と出入口から）
-  const { proj } = areaFrame(bbox);
-  const entrancesOf = (s) => (terrain.metro || []).filter((e) => e.kind === 'metro' && e.station === s.bd);
-  const network = buildNetwork(proj, {
-    bdStations: metro?.stations || null,
-    levelOf: (s) => {
-      const lv = stationLevelsFor(s, entrancesOf(s), terrain.h(s.x, s.z));
-      return { ym: lv.ym, yp: lv.yp };
-    },
+  // 駅の高さ（改札階・ホーム）と線路の縦断面
+  relevelNetwork(network, (s) => {
+    const lv = stationLevelsFor(s, entrancesOf(s), terrain.h(s.x, s.z));
+    return { ym: lv.ym, yp: lv.yp };
   });
   const map = new MapRenderer(world.parsed, world.rect);
   base = { world, network, terrain, entrancesOf, map };
@@ -513,8 +515,8 @@ function updateLighting(dt) {
   if (sun.castShadow !== wantShadow) sun.castShadow = wantShadow;
   scene.environment = k > 0.5 ? interiorEnv : surfaceEnv;
   scene.environmentIntensity = k > 0.5 ? 0.3 : surfaceEnvK;
-  // 地上の街は、地下の深い所（ホーム・改札階・電車）では描かない
-  const deep = (kind === 'platform' || kind === 'train' || kind === 'hall' || kind === 'stairs') && !state.freeCam;
+  // 地上の街は、地下の深い所（ホーム・ホームへの階段・電車）では描かない（改札階からは出入口の吹き抜け・通路の先の階段が見える）
+  const deep = (kind === 'platform' || kind === 'train' || kind === 'stairs') && !state.freeCam;
   base.world.group.visible = !deep && !state.hideCity;
   sky.visible = !deep;
   scene.fog = deep ? null : surfaceFog;

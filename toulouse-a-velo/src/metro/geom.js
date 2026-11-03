@@ -1,6 +1,6 @@
 // メッシュを組み立てる道具（材質ごとに MeshWriter を持ち、壁・床・箱・棒・円柱を書く）。駅・車両・トンネルで使う
 import * as THREE from 'three';
-import { MeshWriter } from '../world/meshwriter.js';
+import { MeshWriter, triangulate } from '../world/meshwriter.js';
 
 export class Builder {
   constructor() {
@@ -32,6 +32,17 @@ export class Builder {
     for (let i = 1; i + 1 < P.length; i++) {
       const [a, b, c] = [P[0], P[i], P[i + 1]];
       w.tri(a, b, c, n, [a[0] / uv, -a[2] / uv], [b[0] / uv, -b[2] / uv], [c[0] / uv, -c[2] / uv], color);
+    }
+  }
+
+  // 水平の多角形の床（凸でなくてよい・穴あき）。outer: [[x, z]...]、holes: [[[x, z]...]...]（outer の内側で、重ならない）
+  floorPoly(key, outer, holes, y, { up = true, color = [1, 1, 1], uv = 1.2 } = {}) {
+    const { points, indices } = triangulate(outer, holes);
+    const n = up ? [0, 1, 0] : [0, -1, 0];
+    const w = this.w(key);
+    for (let i = 0; i < indices.length; i += 3) {
+      const [a, b, c] = [points[indices[i]], points[indices[i + 1]], points[indices[i + 2]]];
+      w.tri([a[0], y, a[1]], [b[0], y, b[1]], [c[0], y, c[1]], n, [a[0] / uv, -a[1] / uv], [b[0] / uv, -b[1] / uv], [c[0] / uv, -c[1] / uv], color);
     }
   }
 

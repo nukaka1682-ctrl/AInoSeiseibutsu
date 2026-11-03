@@ -2,9 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { LocalProjection } from '../../src/geo.js';
 import { buildNetwork, LAYOUT } from '../../src/metro/network.js';
-import { buildStationNav, planStation, stationLevels, flightHeight, stairRun, escalatorHeight, escalatorRun } from '../../src/metro/stationplan.js';
+import { adjustStationPits, buildStationNav, hallLevel, planStation, flightHeight, stairRun, escalatorHeight, escalatorRun } from '../../src/metro/stationplan.js';
 import { Nav } from '../../src/metro/nav.js';
-import { entranceDoor } from '../../src/world/metro.js';
+import { entranceDoor, entranceMaxDepth } from '../../src/world/metro.js';
 
 const proj = new LocalProjection(43.5994, 1.4395);
 
@@ -55,19 +55,24 @@ test('メトロの駅: 階段・エスカレーターの高さ（踊り場つき
   assert.ok(Math.abs(escalatorHeight(er / 2, er, 10, 4.5) - 7.25) < 1e-9);
 });
 
-test('メトロの駅: 地上の出入口から通路・改札を通ってホームの両側まで歩ける（単線の駅・2 線の駅）', () => {
+test('メトロの駅: 地上の出入口から改札階・改札を通ってホームの両側まで歩ける（単線の駅・2 線の駅）', () => {
   const net = buildNetwork(proj);
   for (const id of ['capitole', 'jean-jaures', 'carmes']) {
     const s = net.byId.get(id);
-    // 出入口: ホームの先・横・駅の真上（改札階が深くなる）・逆を向いたもの
+    // 出入口: ホームの先・横・駅の真上・逆を向いたもの
     const pits = [pit(s, 45, 14, Math.atan2(s.axis[s.lines[0]][1], s.axis[s.lines[0]][0]), 1), pit(s, -5, 30, 0.3, -1), pit(s, 2, 2, 1.0, 1), pit(s, -40, -20, 2.0, -1)];
+    // 単線の駅: 出入口の階段の深さを改札階にそろえる（地上を組み立てる前に）
+    adjustStationPits(s, pits, () => 0);
     const plan = planStation(s, pits, 0, net);
-    // 通路を通せない出入口は閉める（ほかの通路と交わるより）。4 つのうち 3 つ以上は開いている
-    assert.ok(plan.corridors.length >= pits.length - 1, `${id}: 出入口ごとに通路 ${plan.corridors.length}`);
-    assert.equal(plan.corridors.length + plan.closed.length, pits.length);
-    assert.ok(plan.deep, '出入口が改札階の上にかかるので深くする');
-    const lv = stationLevels(s, pits.map(entranceDoor), 0, { deep: true });
-    assert.ok(Math.abs(plan.ym - lv.ym) < 1e-9);
+    // 通路を通せない出入口は閉める。4 つのうち 3 つ以上は開いている。単線の駅は、近い出入口が改札階に直に下りる
+    assert.ok(plan.corridors.length + plan.direct.length >= pits.length - 1, `${id}: 通路 ${plan.corridors.length}・直に ${plan.direct.length}`);
+    assert.equal(plan.corridors.length + plan.direct.length + plan.closed.length, pits.length);
+    if (s.lines.length < 2) {
+      assert.ok(plan.direct.length >= 1, `${id}: 改札階に直に下りる出入口がある`);
+      // 改札は 1 列（改札の外のホールの数だけ）、改札の中は線路の上
+      assert.equal(plan.gates.length, plan.rects.filter((r) => r.kind === 'unpaid').length);
+      for (const e of plan.direct) assert.ok(Math.abs(entranceDoor(e).yb - plan.ym) < 0.05 || plan.doorSteps.some((d) => d.e === e), '階段の下が改札階の床');
+    }
     for (const L of plan.lines) assert.ok(Math.abs(plan.ym - L.yp - LAYOUT.hallDrop - (L.line === s.lines[0] ? 0 : 7.5)) < 1e-9);
     const nav = new Nav();
     nav.add(buildStationNav(plan));
@@ -82,8 +87,23 @@ test('メトロの駅: 地上の出入口から通路・改札を通ってホー
           assert.ok(ok, `${id}: 出入口 (${e.x.toFixed(0)}, ${e.z.toFixed(0)}) から ${L.line} 線の ${side > 0 ? '+' : '−'} のホームへ`);
         }
       }
-      // ホームから線路には下りられない（ホームドアの扉は閉まっている）
+      // ホームから線路には下りられない（ホームドアの扉は閉まっている）。改札階の吹き抜けから落ちない
       assert.ok(!got.some((p) => !p.region && p.y < plan.ym - 1), '線路に落ちない');
     }
   }
+});
+
+test('メトロの駅: 改札階の床は出入口の縁から 3.6 m 以上、駅のまわりの地面から 4.2 m 以上深い', () => {
+  const net = buildNetwork(proj);
+  const s = net.byId.get('esquirol');
+  const ground = (x, z) => 0.02 * (x - s.x); // 東へ上る坂
+  const pits = [pit(s, 30, 6, 0.5, 1)];
+  pits[0].rim = ground(pits[0].x, pits[0].z);
+  const ym = hallLevel(s, pits, ground);
+  assert.ok(ym <= ground(s.x, s.z) - 5 + 1e-9);
+  assert.ok(ym <= pits[0].rim - 3.6 + 1e-9);
+  adjustStationPits(s, pits, ground);
+  assert.equal(s.hallY, ym);
+  const d = entranceDoor(pits[0]);
+  assert.ok(Math.abs(d.yb - ym + 0.03) < 1e-9 || pits[0].H === entranceMaxDepth(pits[0]));
 });
