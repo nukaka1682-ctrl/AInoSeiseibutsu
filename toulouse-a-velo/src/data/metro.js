@@ -267,9 +267,97 @@ async function scanPits(lon0, lat0, r, label, log) {
   for (const ring of rings) {
     for (let i = 0; i + 1 < ring.length; i++) segs.push([(ring[i][0] - lon0) * mx, (lat0 - ring[i][1]) * mz, (ring[i + 1][0] - lon0) * mx, (lat0 - ring[i + 1][1]) * mz]);
   }
-  return detectEntrances(grid.data || grid, N, N, RES, { maxWid: RAMP_MAX_WID, orient: (x, z, ang) => snapToStreetGrid(ang, x, z, segs) })
+  const pits = detectEntrances(grid.data || grid, N, N, RES, { maxWid: RAMP_MAX_WID, orient: (x, z, ang) => snapToStreetGrid(ang, x, z, segs) })
     .map((e) => ({ ...e, lon: lon0 + e.x / mx, lat: lat0 - e.z / mz }))
     .filter((e) => e.depth >= MIN_DEPTH && !rings.some((ring) => inRing(e.lon, e.lat, ring)));
+  pits.rings = rings.map((ring) => ring.map(([lon, lat]) => [(lon - lon0) * mx, (lat0 - lat) * mz])); // 建物の外形（中心からの m）
+  return pits;
+}
+
+// ---------------------------------------------------------------- 出入口の見つからない駅の出入口（メトロのゲームで使う代わりの出入口）
+// 地形モデルに穴の写らない駅（屋根のある出入口・建物の中の出入口・高架の駅）でも地上に出られるように、駅の近くの歩道・広場に
+// 階段の吹き抜けを 1 つ置く。置く所: 車道の縁から 1 m 以上離れ、建物から 1 m 以上離れ、いちばん近い道から 9 m 以内（歩道か広場）。
+// 長い向きはいちばん近い道に沿わせ、下の端（扉）は駅の中心に近い方。駅の中心に近い所ほどよい。
+// rings: 建物の外形 [[x, z], ...]（駅の中心からの m）、roads: [{ pts: [[x, z], ...], half: 車道の幅の半分 }]
+export function placeEntrance({ rings = [], roads = [], len = 11, wid = 3.6, near = 8, far = 75 } = {}) {
+  const segs = [];
+  for (const r of roads) for (let i = 0; i + 1 < r.pts.length; i++) segs.push([...r.pts[i], ...r.pts[i + 1], r.half]);
+  if (!segs.length) return null;
+  const edges = [];
+  for (const ring of rings) for (let i = 0; i < ring.length; i++) edges.push([...ring[i], ...ring[(i + 1) % ring.length]]);
+  const near2 = (x, z, s) => {
+    const [ax, az, bx, bz] = s, dx = bx - ax, dz = bz - az, l2 = dx * dx + dz * dz || 1;
+    const t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / l2));
+    return Math.hypot(ax + dx * t - x, az + dz * t - z);
+  };
+  const cross = (a, b, c, d) => {
+    const o = (p, q, r) => Math.sign((q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]));
+    return o(a, b, c) !== o(a, b, d) && o(c, d, a) !== o(c, d, b);
+  };
+  let best = null;
+  for (let r = near; r <= far; r += 2.5) {
+    const n = Math.max(12, Math.round((2 * Math.PI * r) / 3));
+    for (let k = 0; k < n; k++) {
+      const a = (2 * Math.PI * k) / n, x = Math.cos(a) * r, z = Math.sin(a) * r;
+      // いちばん近い道
+      let road = null, rd = Infinity;
+      for (const s of segs) {
+        const d = near2(x, z, s) - s[4];
+        if (d < rd) [rd, road] = [d, s];
+      }
+      if (!road || rd < wid / 2 + 1 || rd > 9) continue;
+      const ang = Math.atan2(road[3] - road[1], road[2] - road[0]), ux = Math.cos(ang), uz = Math.sin(ang), vx = -uz, vz = ux;
+      const m = 1; // 建物・車道からの余白
+      const P = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([i, j]) => [x + ux * (len / 2 + m) * i + vx * (wid / 2 + m) * j, z + uz * (len / 2 + m) * i + vz * (wid / 2 + m) * j]);
+      // 車道に入らない（どの道からも、四隅・辺の中点が車道の縁の外）
+      const probes = P.concat(P.map((p, i) => [(p[0] + P[(i + 1) % 4][0]) / 2, (p[1] + P[(i + 1) % 4][1]) / 2]), [[x, z]]);
+      if (probes.some(([px, pz]) => segs.some((s) => near2(px, pz, s) < s[4]))) continue;
+      // 建物と重ならない
+      if (rings.some((ring) => probes.some(([px, pz]) => inRing(px, pz, ring)) || ring.some(([px, pz]) => inRect(px, pz, P)))) continue;
+      if (edges.some(([ax, az, bx, bz]) => P.some((p, i) => cross([ax, az], [bx, bz], p, P[(i + 1) % 4])))) continue;
+      const score = r + 0.4 * Math.max(0, rd - 3);
+      if (!best || score < best.score) {
+        // 長い向きは −π/2〜π/2 に。下の端（下りる向きの先、扉のある端）は駅の中心に近い方
+        let na = ang;
+        while (na > Math.PI / 2) na -= Math.PI;
+        while (na <= -Math.PI / 2) na += Math.PI;
+        const down = x * Math.cos(na) + z * Math.sin(na) > 0 ? -1 : 1;
+        best = { x, z, ang: na, len, wid, down, score };
+      }
+    }
+    if (best && r > best.score + 5) break;
+  }
+  if (!best) return null;
+  delete best.score;
+  return best;
+}
+
+function inRect(x, z, P) {
+  let inside = false;
+  for (let i = 0, j = 3; i < 4; j = i++) {
+    const [xi, zi] = P[i], [xj, zj] = P[j];
+    if (zi > z !== zj > z && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+// 駅のまわりの車道（BD TOPO の troncon_de_route。地上のもの）。中心からの m
+async function stationRoads(lon0, lat0, r) {
+  const mz = 110574, mx = 111320 * Math.cos((lat0 * Math.PI) / 180);
+  const b = { s: lat0 - r / mz, n: lat0 + r / mz, w: lon0 - r / mx, e: lon0 + r / mx };
+  const out = [];
+  for (const f of await fetchWfsLayer('troncon_de_route', b, { propertyNames: ['geometrie', 'nature', 'largeur_de_chaussee', 'nombre_de_voies', 'position_par_rapport_au_sol'] })) {
+    const p = f.properties || {};
+    if (String(p.position_par_rapport_au_sol ?? '0') !== '0') continue;
+    const lines = f.geometry?.type === 'MultiLineString' ? f.geometry.coordinates : f.geometry?.type === 'LineString' ? [f.geometry.coordinates] : [];
+    const foot = /Sentier|Escalier|Chemin|Piste cyclable/.test(p.nature || '');
+    const w = Number(p.largeur_de_chaussee) > 0 ? Number(p.largeur_de_chaussee) : foot ? 0 : Math.max(5, 3 * (Number(p.nombre_de_voies) || 2));
+    for (const l of lines) {
+      const pts = normalizeCoords(l.map((q) => [q[0], q[1]]), b).map(([lon, lat]) => [(lon - lon0) * mx, (lat0 - lat) * mz]);
+      if (pts.length > 1) out.push({ pts, half: w / 2, foot });
+    }
+  }
+  return out;
 }
 
 // bbox の中の駅ごとに地形モデルを取り、出入口を見つける（同じ駅の名前が 2 つあれば両方の範囲を調べ、重なった穴は 1 つに）。
@@ -288,7 +376,8 @@ export async function fetchMetroEntrances(bbox, { log = () => {} } = {}) {
     return true;
   };
   for (const s of stations) {
-    const found = (await scanPits(s.lon, s.lat, R, `メトロ ${s.name}`, log)).filter((e) => Math.hypot(e.x, e.z) <= NEAR);
+    const scanned = await scanPits(s.lon, s.lat, R, `メトロ ${s.name}`, log);
+    const found = scanned.filter((e) => Math.hypot(e.x, e.z) <= NEAR);
     const ramps = found.filter((e) => isParkingRamp(e, nearestParking(e)));
     const metro = found.filter((e) => !ramps.includes(e) && e.wid <= MAX_WID)
       .sort((p, q) => q.depth * Math.min(q.len, 20) - p.depth * Math.min(p.len, 20))
@@ -296,7 +385,20 @@ export async function fetchMetroEntrances(bbox, { log = () => {} } = {}) {
     let n = 0;
     for (const e of metro) n += add(e, 'metro', s.name) ? 1 : 0;
     for (const e of ramps) add(e, 'parking', parkings.reduce((m, p) => (dist(e, p) < dist(e, m) ? p : m)).name);
-    log(`  メトロ ${s.name}: 出入口 ${n}${ramps.length ? `（駐車場の坂 ${ramps.length}）` : ''}`);
+    // 代わりの出入口（どの駅にも 1 つ。メトロのゲームで、本物の出入口が残らない駅に使う。自転車のゲームでは使わない）
+    let alt = null;
+    try {
+      const roads = (await stationRoads(s.lon, s.lat, 90)).filter((r) => !r.foot);
+      const e = placeEntrance({ rings: scanned.rings || [], roads });
+      if (e) {
+        const mz = 110574, mx = 111320 * Math.cos((s.lat * Math.PI) / 180);
+        alt = { kind: 'metro', station: s.name, synthetic: true, lon: r(s.lon + e.x / mx, 7), lat: r(s.lat - e.z / mz, 7), len: e.len, wid: e.wid, ang: r(e.ang, 3), depth: 3.8, down: e.down };
+        out.push(alt);
+      }
+    } catch (err) {
+      log(`  ${s.name}: 代わりの出入口を置けませんでした（${err.message}）`);
+    }
+    log(`  メトロ ${s.name}: 出入口 ${n}${ramps.length ? `（駐車場の坂 ${ramps.length}）` : ''}${alt ? '・代わりの出入口 1' : ''}`);
   }
   for (const p of parkings) {
     const ramps = (await scanPits(p.lon, p.lat, R, `駐車場 ${p.name}`, log))

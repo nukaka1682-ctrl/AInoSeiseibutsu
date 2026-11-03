@@ -1,0 +1,41 @@
+/* メトロのゲーム（metro.html）。style.css の上に重ねる */
+body.metro { --metro: #1d2a55; --line-a: #e2231a; --line-b: #f6b400; }
+body.metro #title-screen { background: linear-gradient(160deg, #2a2f3a, #10131a 70%); }
+body.metro #loading-screen, body.metro #error-screen { background: linear-gradient(180deg, #2b303b, #12151c); }
+body.metro .title-panel h1 em { color: var(--line-a); }
+.line-pick { display: flex; gap: 8px; margin-bottom: 8px; }
+.line-tab { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border: 2px solid #e2d6cc; border-radius: 10px; cursor: pointer; background: #fff; }
+.line-tab:has(input:checked) { border-color: var(--metro); background: #eef1fa; }
+.line-tab input { display: none; }
+.badge { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; font-weight: 800; font-size: 14px; }
+.badge.a { background: var(--line-a); color: #fff; }
+.badge.b { background: var(--line-b); color: #1b1b1b; }
+#station-select { width: 100%; font-size: 15px; border-radius: 10px; border: 2px solid #e2d6cc; padding: 4px; background: #fff; }
+#station-select option { padding: 4px 6px; }
+body.metro #start-btn { background: var(--metro); }
+
+body.metro #hud { color: #fff; }
+#hud-place {
+  left: 12px; top: 12px; max-width: min(460px, 70vw); background: rgba(16, 20, 32, 0.78); border-radius: 12px; padding: 10px 14px;
+  font-size: 14px; line-height: 1.5; box-shadow: 0 3px 10px rgba(0, 0, 0, 0.35);
+}
+#hud-place b { font-size: 18px; }
+#hud-place .badge { width: 20px; height: 20px; font-size: 12px; vertical-align: -3px; margin-right: 4px; }
+#hud-ride {
+  left: 50%; top: 12px; transform: translateX(-50%); background: #0b0d12; color: #ffb43a; border-radius: 8px; padding: 8px 18px;
+  font: 600 18px/1.3 "Courier New", monospace; letter-spacing: 0.04em; text-align: center; box-shadow: 0 0 0 2px #2a2d33, 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+#hud-ride small { display: block; color: #ffd27a; font-size: 13px; }
+#hud-view { left: 12px; bottom: 12px; font-size: 12px; opacity: 0.85; text-shadow: 0 1px 2px #000; }
+#hud-prompt { left: 50%; bottom: 90px; transform: translateX(-50%); background: rgba(16, 20, 32, 0.8); border-radius: 10px; padding: 6px 14px; font-size: 14px; }
+#hud-prompt:empty { display: none; }
+#crosshair { left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%; background: rgba(255, 255, 255, 0.7); box-shadow: 0 0 2px #000; }
+body.metro #hud-buttons { top: 222px; }
+body.metro #touch-controls .touch-left { display: grid; grid-template-columns: repeat(4, 60px); }
+
+.line-map-panel { width: min(1100px, 96vw); max-height: 92vh; overflow: auto; }
+#line-map svg { width: 100%; height: auto; display: block; }
+#line-map .st { cursor: pointer; }
+#line-map .st:hover circle { stroke-width: 5; }
+#line-map text { font: 600 11px Arial, sans-serif; fill: #222; }
+#line-map .here circle { fill: #fff; stroke: #1d2a55; stroke-width: 5; }
