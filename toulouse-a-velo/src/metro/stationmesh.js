@@ -26,8 +26,11 @@ export function stationStyle(station) {
   const style = { accent: ACCENTS[k], vault: false, hallFloor: 'granite', art: 'mural', columns: true };
   if (station.id === 'capitole') Object.assign(style, { accent: '#1d3f8f', vault: true });
   if (station.id === 'esquirol') Object.assign(style, { accent: '#1d3f8f', art: 'cone' });
-  if (station.id === 'jean-jaures') Object.assign(style, { accent: '#4b4f55', hallFloor: 'darkGranite', art: 'columns' });
+  if (station.id === 'jean-jaures') Object.assign(style, { accent: '#4b4f55', hallFloor: 'darkGranite', art: 'columns', ceilingTint: [1.45, 0.5, 0.42] }); // A 線の改札階の赤い天井
   if (station.id === 'marengo') Object.assign(style, { accent: '#222222' });
+  if (station.id === 'palais-de-justice') Object.assign(style, { accent: '#1d3f8f', art: 'devise' }); // 「LIBERTÉ ÉGALITÉ FRATERNITÉ」
+  if (station.id === 'compans-caffarelli') Object.assign(style, { art: 'pink' }); // ばら色の光の柱
+  if (station.id === 'patte-d-oie') Object.assign(style, { art: 'halo' }); // 天井の丸い照明
   return style;
 }
 
@@ -51,6 +54,7 @@ export function stationMaterials() {
     copper: std({ roughness: 0.3, metalness: 0.9 }),
     glass: new THREE.MeshStandardMaterial({ color: '#c9d6d4', roughness: 0.05, metalness: 0.1, transparent: true, opacity: 0.16, depthWrite: false, side: THREE.DoubleSide }),
     light: new THREE.MeshBasicMaterial({ color: '#fffaf0' }),
+    pink: new THREE.MeshBasicMaterial({ color: '#ff8fc4' }),
     green: new THREE.MeshBasicMaterial({ color: '#29d36a' }),
     red: new THREE.MeshBasicMaterial({ color: '#ff3b30' }),
   };
@@ -525,11 +529,11 @@ export function buildStationMesh(plan, { streetAt = () => '', network = null } =
     if (ph.length) {
       // 出入口の吹き抜けの所は床と天井に穴（吹き抜けの囲いの中は出入口の階段）
       B.floorPoly(hallKey, outer, ph.map((p) => p.poly), ym);
-      B.floorPoly('ceiling', outer, ph.map((p) => p.poly), yH, { up: false });
+      B.floorPoly('ceiling', outer, ph.map((p) => p.poly), yH, { up: false, color: style.ceilingTint });
     } else {
       const cuts = plan.wells.map((w) => localBox(r.frame, wellPoly(w)));
       for (const [s0, s1, t0, t1] of rectMinus(r, cuts)) B.floor(hallKey, rect(at, s0, s1, t0, t1), ym);
-      B.floor('ceiling', outer, yH, { up: false });
+      B.floor('ceiling', outer, yH, { up: false, color: style.ceilingTint });
     }
     // 照明の帯（長い向きに 3.6 m おき。出入口の吹き抜けを避ける）
     const nT = Math.max(1, Math.round((r.t1 - r.t0) / 3.6));
@@ -1115,6 +1119,44 @@ function hallFurniture(B, signs, plan, style, pits, streetAt) {
     }
   }
   // 作品
+  const center = (() => {
+    const r = halls.reduce((a, b) => ((b.s1 - b.s0) * (b.t1 - b.t0) > (a.s1 - a.s0) * (a.t1 - a.t0) ? b : a), halls[0]);
+    return { r, at: r.frame.at((r.s0 + r.s1) / 2, (r.t0 + r.t1) / 2) };
+  })();
+  if (style.art === 'devise') {
+    // Palais de Justice: 長い壁に「LIBERTÉ · ÉGALITÉ · FRATERNITÉ」
+    const key = signs.material('devise', 7.2, 0.7, (x, W, H) => {
+      x.fillStyle = '#f4f2ec';
+      x.fillRect(0, 0, W, H);
+      x.fillStyle = '#1b2a5c';
+      x.textAlign = 'center';
+      x.textBaseline = 'middle';
+      fitText(x, 'LIBERTÉ · ÉGALITÉ · FRATERNITÉ', W * 0.94, H * 0.62, '700', 'Georgia, "Times New Roman", serif');
+      x.fillText('LIBERTÉ · ÉGALITÉ · FRATERNITÉ', W / 2, H * 0.54);
+    });
+    const list = [...walls.values()].sort((p, q) => q.length - p.length)[0] || [];
+    const ok = list.filter((sp) => free(sp, 0.4, 0));
+    const sp = ok[Math.floor(ok.length / 2)];
+    if (sp && ok.length >= 8) signs.panel(key, sp.x + sp.n[0] * 0.02, ym + 2.9, sp.z + sp.n[1] * 0.02, sp.n[1], -sp.n[0], 7.2, 0.7, sp.n[0], sp.n[1], 0);
+  } else if (style.art === 'pink') {
+    // Compans-Caffarelli: ばら色に光る柱（改札の外のホールに 4 本）
+    const r = center.r;
+    for (const [a, b] of [[0.3, 0.3], [0.7, 0.3], [0.3, 0.7], [0.7, 0.7]]) {
+      const [x, z] = r.frame.at(r.s0 + (r.s1 - r.s0) * a, r.t0 + (r.t1 - r.t0) * b);
+      if (busy(x, z, 0.6)) continue;
+      B.cyl('pink', x, z, ym, yH, 0.22, { seg: 16 });
+      for (let k = 0; k < 8; k++) {
+        const a0 = (k / 8) * Math.PI * 2, a1 = ((k + 1) / 8) * Math.PI * 2;
+        plan.nav?.addWall(x + Math.cos(a0) * 0.3, z + Math.sin(a0) * 0.3, x + Math.cos(a1) * 0.3, z + Math.sin(a1) * 0.3, ym - 0.2, yH);
+      }
+    }
+  } else if (style.art === 'halo') {
+    // Patte d'Oie: 天井の大きな丸い照明（光の輪）
+    const [x, z] = center.at;
+    B.cyl('light', x, z, yH - 0.12, yH - 0.02, 1.6, { seg: 40 });
+    B.cyl('paint', x, z, yH - 0.16, yH - 0.12, 1.75, { seg: 40, color: C.darkSteel });
+    B.floor('light', Array.from({ length: 40 }, (_, k) => [x + Math.cos((k / 40) * Math.PI * 2) * 1.6, z + Math.sin((k / 40) * Math.PI * 2) * 1.6]), yH - 0.12, { up: false });
+  }
   if (style.art === 'cone') {
     // Esquirol の銅色の円錐の柱（改札の外のホールの真ん中）
     const r = halls[0], [x, z] = r.frame.at((r.s0 + r.s1) / 2, (r.t0 + r.t1) / 2);
