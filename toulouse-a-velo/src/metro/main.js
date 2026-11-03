@@ -25,6 +25,7 @@ import { tunnelBetween, tunnelBeyond } from './tunnel.js';
 import { MetroAudio } from './audio.js';
 import { disposeGroup } from './geom.js';
 import { stationCrowd } from './crowd.js';
+import { StreetLife, makeClouds } from './streetlife.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -58,6 +59,9 @@ groundMats.water.envMap = waterEnv;
 groundMats.water.envMapIntensity = 0.16;
 
 const audio = new MetroAudio();
+const clouds = makeClouds(); // 空の雲（地上で）
+scene.add(clouds);
+let life = null; // 地上の街のにぎわい（歩く人・自転車）
 const walker = new Walker();
 const nav = new Nav();
 
@@ -154,6 +158,9 @@ async function loadAll() {
   });
   const map = new MapRenderer(world.parsed, world.rect);
   base = { world, network, terrain, entrancesOf, map };
+  life = new StreetLife(world, entrancesOf);
+  world.group.add(life.group);
+  window.__metroDebug.life = life;
   setupSurfaceNav(world, terrain);
   return base;
 }
@@ -965,6 +972,8 @@ function update(dt, ctl = null) {
   }
   updateCurrentStation();
   base.world.stream.update(state.station ? state.station.x : walker.x, state.station ? state.station.z : walker.z);
+  if (state.station) life.setStation(state.station);
+  if (base.world.group.visible) life.update(dt, walker);
   // 地上に出たのに街並みがまだなら知らせる
   const onStreet = placeKind() === 'surface' || placeKind() === 'pit';
   if (onStreet && !base.world.stream.readyAt(walker.x, walker.z)) {
@@ -995,6 +1004,9 @@ function frame(now) {
   if (state.phase === 'play') updateHud(dt);
   if (sun.castShadow) fitSunShadow((x, z) => base.terrain.h(x, z));
   sky.position.copy(camera.position);
+  clouds.position.set(camera.position.x, camera.position.y + 1500, camera.position.z);
+  clouds.material.uniforms.uTime.value += dt;
+  clouds.visible = sky.visible;
   renderer.render(scene, camera);
 }
 requestAnimationFrame(frame);
