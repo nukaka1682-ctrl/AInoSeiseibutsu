@@ -963,6 +963,12 @@ function update(dt, ctl = null) {
   }
   updateCurrentStation();
   base.world.stream.update(state.station ? state.station.x : walker.x, state.station ? state.station.z : walker.z);
+  // 地上に出たのに街並みがまだなら知らせる
+  const onStreet = placeKind() === 'surface' || placeKind() === 'pit';
+  if (onStreet && !base.world.stream.readyAt(walker.x, walker.z)) {
+    if (!state.loadingNotice) toast('この先の街並みを読み込み中…', 2, true);
+    state.loadingNotice = true;
+  } else state.loadingNotice = false;
   // 音
   let near = null, nd = Infinity;
   for (const q of state.trains) {
