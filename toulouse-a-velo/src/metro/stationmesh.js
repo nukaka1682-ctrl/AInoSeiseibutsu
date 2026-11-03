@@ -76,9 +76,9 @@ class Signs {
     this.builder = new Builder();
   }
 
-  material(key, w, h, draw) {
+  material(key, w, h, draw, opts = undefined) {
     if (!this.cache.has(key)) {
-      const map = signTexture(w, h, draw);
+      const map = signTexture(w, h, draw, opts);
       this.cache.set(key, new THREE.MeshBasicMaterial({ map, toneMapped: true, side: THREE.DoubleSide }));
     }
     return key;
@@ -226,6 +226,163 @@ function muralDraw(station, accent) {
   };
 }
 
+function hashId(id) {
+  let h = 0;
+  for (const ch of id) h = (h * 31 + ch.charCodeAt(0)) % 9973;
+  return h;
+}
+
+// 広告（いろいろな催し・売り出し）
+function posterDraw(bg, fg, title, sub, dates, shape) {
+  return (x, W, H) => {
+    const g = x.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, bg[0]);
+    g.addColorStop(1, bg[1]);
+    x.fillStyle = g;
+    x.fillRect(0, 0, W, H);
+    x.globalAlpha = 0.85;
+    shape(x, W, H);
+    x.globalAlpha = 1;
+    x.fillStyle = fg;
+    x.textAlign = 'left';
+    x.textBaseline = 'alphabetic';
+    fitText(x, title, W * 0.86, H * 0.11, '800');
+    x.fillText(title, W * 0.07, H * 0.72);
+    fitText(x, sub, W * 0.86, H * 0.045, '500');
+    x.fillText(sub, W * 0.07, H * 0.79);
+    x.font = `700 ${Math.round(H * 0.04)}px Arial`;
+    x.fillText(dates, W * 0.07, H * 0.9);
+  };
+}
+const circles = (cols) => (x, W, H) => {
+  cols.forEach((c, i) => {
+    x.fillStyle = c;
+    x.beginPath();
+    x.arc(W * (0.3 + 0.25 * (i % 2)), H * (0.18 + 0.14 * i), W * (0.32 - 0.06 * i), 0, Math.PI * 2);
+    x.fill();
+  });
+};
+const stripes = (c) => (x, W, H) => {
+  x.fillStyle = c;
+  for (let i = 0; i < 7; i++) {
+    x.save();
+    x.translate(W * 0.5, H * 0.3);
+    x.rotate(-0.5 + i * 0.16);
+    x.fillRect(-W, -H * 0.012, W * 2, H * 0.024);
+    x.restore();
+  }
+};
+const POSTERS = [
+  posterDraw(['#1d2b53', '#7e2553'], '#ffffff', 'EXPOSITION', 'Peintures du Midi, de 1850 à nos jours', 'du 6 au 29 novembre', circles(['#ff77a8', '#ffccaa', '#29adff'])),
+  posterDraw(['#f2c14e', '#f78154'], '#1b1b1b', 'FESTIVAL', 'Musiques du monde · bords de Garonne', '14 · 15 · 16 novembre', stripes('#ffffff')),
+  posterDraw(['#c5161d', '#8f0e13'], '#ffffff', 'SOLDES', 'Jusqu’à -50 % sur toute la collection', 'en magasin et en ligne', circles(['#ff4d4d', '#ffffff'])),
+  posterDraw(['#2b2d42', '#000000'], '#edf2f4', 'CONCERT', 'Orchestre symphonique · saison 2026-2027', 'jeudi 20 novembre · 20 h', stripes('#ef233c')),
+  posterDraw(['#3a7d44', '#1b4332'], '#f1faee', 'THÉÂTRE', 'Une comédie en trois actes', 'du 2 au 13 décembre', circles(['#95d5b2', '#d8f3dc'])),
+  posterDraw(['#5e60ce', '#48bfe3'], '#ffffff', 'CINÉMA', 'Rencontres du film documentaire', '22 → 30 novembre', stripes('#ffffff')),
+];
+
+// 路線図（A 線・B 線と駅。ここの駅に印）
+function networkMapDraw(network, here) {
+  return (x, W, H) => {
+    x.fillStyle = '#ffffff';
+    x.fillRect(0, 0, W, H);
+    x.fillStyle = '#1b1b1b';
+    x.textAlign = 'left';
+    x.textBaseline = 'middle';
+    x.font = `700 ${Math.round(H * 0.055)}px Arial`;
+    x.fillText('Plan du réseau métro', W * 0.03, H * 0.06);
+    const pts = network.stations.map((s) => [s.x, s.z]);
+    const minX = Math.min(...pts.map((p) => p[0])), maxX = Math.max(...pts.map((p) => p[0]));
+    const minZ = Math.min(...pts.map((p) => p[1])), maxZ = Math.max(...pts.map((p) => p[1]));
+    const pad = W * 0.1, top = H * 0.12, k = Math.min((W - 2 * pad) / (maxX - minX), (H - top - pad * 0.5) / (maxZ - minZ));
+    const X = (v) => pad + (v - minX) * k + (W - 2 * pad - (maxX - minX) * k) / 2, Y = (v) => top + (v - minZ) * k;
+    for (const [line, path] of Object.entries(network.lines)) {
+      x.strokeStyle = LINE_COLORS[line];
+      x.lineWidth = H * 0.016;
+      x.lineCap = x.lineJoin = 'round';
+      x.beginPath();
+      path.pts.forEach((p, i) => (i ? x.lineTo(X(p.x), Y(p.z)) : x.moveTo(X(p.x), Y(p.z))));
+      x.stroke();
+    }
+    x.font = `500 ${Math.round(H * 0.022)}px Arial`;
+    for (const s of network.stations) {
+      const r = s.lines.length > 1 ? H * 0.013 : H * 0.009;
+      x.fillStyle = '#ffffff';
+      x.strokeStyle = '#1b1b1b';
+      x.lineWidth = H * 0.004;
+      x.beginPath();
+      x.arc(X(s.x), Y(s.z), r, 0, Math.PI * 2);
+      x.fill();
+      x.stroke();
+      const right = s.x < (minX + maxX) / 2 ? -1 : 1;
+      x.fillStyle = '#1b1b1b';
+      x.textAlign = right > 0 ? 'left' : 'right';
+      x.fillText(s.name.replace(' – ', '-'), X(s.x) + right * r * 1.8, Y(s.z));
+    }
+    // ここ
+    x.strokeStyle = '#e2231a';
+    x.lineWidth = H * 0.008;
+    x.beginPath();
+    x.arc(X(here.x), Y(here.z), H * 0.03, 0, Math.PI * 2);
+    x.stroke();
+    x.fillStyle = '#e2231a';
+    x.font = `700 ${Math.round(H * 0.026)}px Arial`;
+    x.textAlign = 'center';
+    x.fillText('Vous êtes ici', X(here.x), Y(here.z) - H * 0.05);
+  };
+}
+
+// 次の電車の LED 表示（吊り下げ、両面）。update(eta) で書き換える
+function ledDisplay(B, extra, L, side, c, y, along, yCeil, term) {
+  const [x, z] = c, [ux, uz] = along, w = 1.7, h = 0.36;
+  B.box('paint', x, z, y - h / 2 - 0.03, y + h / 2 + 0.03, ux, uz, w + 0.08, 0.12, { color: C.black });
+  for (const k of [-w / 2 + 0.2, w / 2 - 0.2]) B.bar('steel', [x + ux * k, y + h / 2 + 0.03, z + uz * k], [x + ux * k, yCeil, z + uz * k], 0.025);
+  const cv = document.createElement('canvas');
+  cv.width = 512;
+  cv.height = 108;
+  const ctx = cv.getContext('2d');
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  const mat = new THREE.MeshBasicMaterial({ map: tex, toneMapped: false });
+  const geo = new THREE.PlaneGeometry(w, h);
+  for (const sg of [1, -1]) {
+    const m = new THREE.Mesh(geo, mat);
+    const nx = -uz * sg, nz = ux * sg;
+    m.position.set(x + nx * 0.062, y, z + nz * 0.062);
+    m.rotation.y = Math.atan2(nx, nz);
+    extra.add(m);
+  }
+  let last = null;
+  const d = {
+    line: L.line, side,
+    update(eta) {
+      if (eta === last) return;
+      last = eta;
+      ctx.fillStyle = '#0b0b0c';
+      ctx.fillRect(0, 0, 512, 108);
+      ctx.fillStyle = '#ffab1a';
+      ctx.textBaseline = 'middle';
+      ctx.textAlign = 'left';
+      ctx.font = '600 22px "Courier New", monospace';
+      ctx.fillText('Prochain métro', 14, 22);
+      ctx.font = '700 40px "Courier New", monospace';
+      fitText(ctx, term, 330, 40, '700', '"Courier New", monospace');
+      ctx.fillText(term, 14, 70);
+      ctx.textAlign = 'right';
+      ctx.font = '700 40px "Courier New", monospace';
+      ctx.fillText(eta, 498, 70);
+      // 点の目（LED の粒）
+      ctx.fillStyle = 'rgba(0,0,0,0.35)';
+      for (let yy = 0; yy < 108; yy += 4) ctx.fillRect(0, yy, 512, 1);
+      for (let xx = 0; xx < 512; xx += 4) ctx.fillRect(xx, 0, 1, 108);
+      tex.needsUpdate = true;
+    },
+  };
+  d.update('…');
+  return d;
+}
+
 function ticketDraw() {
   return (x, W, H) => {
     x.fillStyle = '#c5161d';
@@ -255,7 +412,7 @@ function ticketDraw() {
 }
 
 // 駅のメッシュ。plan: planStation の結果、opts.network（終点の名前）、opts.streetAt(x, z)（出口の看板の通りの名前）
-export function buildStationMesh(plan, { streetAt = () => '' } = {}) {
+export function buildStationMesh(plan, { streetAt = () => '', network = null } = {}) {
   const mats = stationMaterials();
   const style = stationStyle(plan.station);
   const tileKey = `tile:${style.accent}`;
@@ -265,6 +422,7 @@ export function buildStationMesh(plan, { streetAt = () => '' } = {}) {
   const st = plan.station;
   const nameKey = signs.material('name', 2.4, 0.6, nameDraw(st.name, style.accent));
   const doorsMeshes = [];
+  const displays = [], extra = new THREE.Group(); // 次の電車の表示（テクスチャを書き換える）
 
   // ---------------------------------------------------------------- ホーム階
   for (const L of plan.lines) {
@@ -335,6 +493,23 @@ export function buildStationMesh(plan, { streetAt = () => '' } = {}) {
       const dirKey = signs.material(`dir-${L.line}-${side}`, 3.2, 0.42, directionDraw(L.line, term));
       const sDir = [-14, 14, 0, -24, 24].find((q) => Math.abs(q) < Lb - 3 && (q < ws0 - 4 || q > ws1 + 4)) ?? 0;
       hangSign(B, signs, dirKey, T(sDir, (P + WT) / 2 * side), yc - 0.9, [f.nx, f.nz], 3.2, 0.42, yCeil);
+      // 次の電車の表示（オレンジ色の LED。方面の看板の横）
+      const sLed = sDir + (sDir + 5 < Lb - 2 ? 5 : -5);
+      if (typeof document !== 'undefined') displays.push(ledDisplay(B, extra, L, side, T(sLed, (P + WT) / 2 * side), yc - 0.85, [f.nx, f.nz], yCeil, term));
+      // 奥の壁の広告と路線図（ベンチのあいだ）
+      const wallFree = (s0, s1) => s0 > -Lb + 1 && s1 < Lb - 1 && (s1 < ws0 - 1 || s0 > ws1 + 1);
+      let k = 0;
+      for (let s = -Lb + 4; s < Lb - 3; s += 11) {
+        const sp = s + 8;
+        if (!wallFree(sp - 0.7, sp + 0.7)) continue;
+        const [px, pz] = T(sp, (WT - 0.03) * side);
+        const isMap = k === 1 && network;
+        const w = isMap ? 1.8 : 1.2, h = isMap ? 1.2 : 1.76;
+        const key = isMap ? signs.material(`plan-${plan.station.id}`, w, h, networkMapDraw(network, plan.station), { ppm: 560 }) : signs.material(`poster-${(k + hashId(plan.station.id) + side) % POSTERS.length}`, w, h, POSTERS[(k + hashId(plan.station.id) + side) % POSTERS.length]);
+        B.box('steel', px, pz, yp + 0.55 - 0.04, yp + 0.55 + h + 0.04, f.ax, f.az, w + 0.08, 0.04);
+        signs.panel(key, px + n[0] * 0.025, yp + 0.55 + h / 2, pz + n[1] * 0.025, -f.ax * side, -f.az * side, w, h, n[0], n[1], 0);
+        k++;
+      }
     }
     // 線路（走行路・案内軌条・中央の柱）
     trackZone(B, L, plan, style);
@@ -430,7 +605,8 @@ export function buildStationMesh(plan, { streetAt = () => '' } = {}) {
   const group = B.build(mtl, { light: bakeLight(floorYs), name: `station-${st.id}` });
   group.add(signs.build());
   for (const d of doorsMeshes) group.add(d.group);
-  return { group, doors: doorsMeshes, style };
+  group.add(extra);
+  return { group, doors: doorsMeshes, style, displays };
 }
 
 // 局所座標の外接長方形（frame の s, t）

@@ -230,14 +230,14 @@ function ensureStation(id, preplanned = null) {
   const layer = buildStationNav(plan);
   const streetAt = (x, z) => b.world.roadnet.streetNameAt(x, z)?.name || '';
   const t2 = performance.now();
-  const mesh = buildStationMesh(plan, { streetAt });
+  const mesh = buildStationMesh(plan, { streetAt, network: b.network });
   const t3 = performance.now();
   const crowd = stationCrowd(plan, layer, (s.id.length * 7919 + s.id.charCodeAt(0) * 31 + Math.floor(Math.random() * 1000)) | 0);
   console.info(`  間取り ${(t1 - t0).toFixed(0)} ms・歩ける所 ${(t2 - t1).toFixed(0)} ms・メッシュ ${(t3 - t2).toFixed(0)} ms・人 ${(performance.now() - t3).toFixed(0)} ms`);
   if (crowd) mesh.group.add(crowd);
   scene.add(mesh.group);
   nav.add(layer);
-  const rec = { station: s, plan, group: mesh.group, doors: mesh.doors, layer };
+  const rec = { station: s, plan, group: mesh.group, doors: mesh.doors, displays: mesh.displays || [], layer };
   state.stations.set(id, rec);
   console.info(`駅 ${s.name}: ${(performance.now() - t0).toFixed(0)} ms（通路 ${plan.corridors.length}、閉じた出入口 ${plan.closed.length}）`);
   for (const line of s.lines) {
@@ -698,6 +698,18 @@ function tickToast(dt) {
 
 const badge = (line) => `<span class="badge ${line.toLowerCase()}">${line}</span>`;
 let hudTimer = 0;
+// 次の電車まで（停車中・秒・分）。hud: 画面の表示（日本語つき）
+function etaText(st, line, dir, hud) {
+  const tr = state.trains.find((q) => q.line === line && q.dir === dir && (q.at === st || q.stops[0] === st));
+  if (tr && tr.at === st) return hud ? 'À quai · 停車中' : 'À quai';
+  if (tr) {
+    const d = Math.abs(st.S[line] - tr.S), sec = Math.max(0, Math.round(runTime(d, Math.max(tr.speed, 4))));
+    return hud ? `${sec} s` : sec < 45 ? 'Approche' : '1 min';
+  }
+  const due = state.spawnTimers.get(`${st.id}:${line}:${dir}`);
+  return due && due < 1e8 ? `${Math.max(1, Math.round((due - state.time + 30) / 60))} min` : '…';
+}
+
 function updateHud(dt) {
   hudTimer -= dt;
   tickToast(dt);
@@ -733,19 +745,13 @@ function updateHud(dt) {
     show('hud-ride', true);
   } else if (kind === 'platform' && st) {
     const dir = r.side, line = r.line;
-    const tr = state.trains.find((q) => q.line === line && q.dir === dir && (q.at === st || q.stops[0] === st));
-    let eta = '';
-    if (tr && tr.at === st) eta = 'À quai · 停車中';
-    else if (tr) {
-      const d = Math.abs(st.S[line] - tr.S);
-      eta = `${Math.max(0, Math.round(runTime(d, Math.max(tr.speed, 4))))} s`;
-    } else {
-      const due = state.spawnTimers.get(`${st.id}:${line}:${dir}`);
-      eta = due && due < 1e8 ? `${Math.max(1, Math.round((due - state.time + 30) / 60))} min` : '…';
-    }
+    const eta = etaText(st, line, dir, true);
     ride.innerHTML = `${line} ▸ ${terminusOf(base.network, line, dir).name}  ${eta}<small>次の電車</small>`;
     show('hud-ride', true);
   } else show('hud-ride', false);
+  // ホームの次の電車の表示（いまの駅）
+  const rec = st && state.stations.get(st.id);
+  for (const d of rec?.displays || []) d.update(etaText(st, d.line, d.side, false));
   $('hud-view').textContent = `${state.camMode === 'fps' ? '一人称' : '三人称'}（V で切替）`;
   // ミニマップ
   drawMinimap($('minimap'), base.map, { x: walker.x, z: walker.z, heading: state.viewYaw, zoom: 1.2, landmarks: [] });
