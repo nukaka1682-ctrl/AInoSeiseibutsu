@@ -254,7 +254,7 @@ export function metroTextures() {
     floor: floorTileTexture(),
     granite: graniteTexture(),
     darkGranite: graniteTexture({ base: '#7b7570', joint: 0.6 }),
-    perforated: perforatedTexture(),
+    perforated: perforatedTexture({ base: '#a7aaad' }),
     darkPerforated: perforatedTexture({ base: '#4a4b4e', hole: '#1c1d1f' }),
     brushed: brushedTexture(),
     concrete: concreteTexture(),

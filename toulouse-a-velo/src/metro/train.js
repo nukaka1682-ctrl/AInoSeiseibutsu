@@ -10,6 +10,7 @@ import { Builder } from './geom.js';
 import { NavLayer } from './nav.js';
 import { LAYOUT, LINE_COLORS, trackAt } from './network.js';
 import { metroTextures, signTexture } from './textures.js';
+import { carPassengers } from './crowd.js';
 
 export const CAR = { half: 6.5, width: 2.08, inner: 0.95, floor: 0, ceil: 2.08, roof: 2.4, under: -0.85 };
 const DOOR_W = LAYOUT.doorW, DOOR_H = 1.92;
@@ -294,6 +295,30 @@ function seats(B, doors, xEnd) {
   });
 }
 
+// 座席の位置（車体の局所座標。人を座らせる）: [{ x, z, dir }]
+export function seatSpots() {
+  const I = CAR.inner, xEnd = CAR.half - 0.5;
+  const { doors } = sideOpenings();
+  const bays = [];
+  let x = -CAR.half + 0.12;
+  for (const [a, b] of doors) {
+    bays.push([x, a]);
+    x = b;
+  }
+  bays.push([x, xEnd - 0.05]);
+  const out = [];
+  bays.forEach(([a, b], i) => {
+    if (i === 0 || i === bays.length - 1) {
+      const atEnd = i === 0 ? a : b, dir = i === 0 ? 1 : -1;
+      for (const sg of [1, -1]) for (const dz of [-0.2, 0.2]) out.push({ x: atEnd + dir * 0.32, z: sg * (I - 0.45) + dz, dir });
+      return;
+    }
+    const sgS = i % 2 ? 1 : -1, mid = (a + b) / 2;
+    out.push({ x: mid - 0.5, z: sgS * (I - 0.27), dir: 1 }, { x: mid + 0.5, z: sgS * (I - 0.27), dir: -1 });
+  });
+  return out;
+}
+
 // 黄色の殻の座席（青紫の布の座面と背もたれ）。x, z: 座面の中心、dir: 向き（+1 で +x を向く）、w: 幅（z の向き）
 function shellSeat(B, x, z, dir, w) {
   const d = 0.42;
@@ -398,6 +423,9 @@ export class Train {
         mesh.renderOrder = c.renderOrder;
         body.add(mesh);
       }
+      // 座っている人（編成ごと・車両ごとに違う）
+      const people = carPassengers(seatSpots(), (id.length * 7919 + k * 104729 + Math.round(Math.random() * 1e6)) | 0);
+      if (people) body.add(people);
       if (flip) body.rotation.y = Math.PI;
       car.add(body);
       // 扉（両側に 3 つずつ、2 枚ずつ）
@@ -463,6 +491,9 @@ export class Train {
     for (const c of this.cars) {
       c.frame.dispose();
       c.glass.dispose();
+      c.body.traverse((o) => {
+        if (o.name === 'passengers') o.geometry.dispose();
+      });
     }
   }
 }

@@ -32,6 +32,7 @@ console.log(`読み込み ${((Date.now() - t0) / 1000).toFixed(0)} 秒`);
 const err = await page.evaluate(() => document.getElementById('error-text').textContent);
 if (err) console.log('エラー画面:', err);
 const shot = async (name) => {
+  if (process.env.CLEAN) await page.evaluate(() => document.getElementById('toast').classList.remove('show'));
   await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
   await page.screenshot({ path: join(out, `metro-${station}-${name}.png`) });
   const info = await page.evaluate(() => ({ place: window.__metroApi.placeKind(), y: window.__metro && window.__metroDebug.walker.y.toFixed(2), hud: document.getElementById('hud-place').innerText }));
@@ -148,6 +149,31 @@ if (shots.includes('ride')) {
   await shot('ride-train-tps');
   await sim(12, { fwd: 0, side: 0 });
   await shot('ride-train-leaving');
+}
+// 説明の写真（docs/）: 自由なカメラで
+if (shots.includes('docs')) {
+  const views = await page.evaluate(() => {
+    const st = window.__metro.station, rec = window.__metro.stations.get(st.id), p = rec.plan, L = p.lines[0], f = L.frame;
+    const fP = p.rects[0].frame, g = p.gates.find((q) => q.side === 1 && q.line === L.line);
+    const out = {};
+    out.platform = { pos: [...f.at(-22, 6.6)].flatMap((v, i) => (i === 0 ? [v, L.yp + 1.65] : [v])), look: [...f.at(8, 4.2)].flatMap((v, i) => (i === 0 ? [v, L.yp + 1.9] : [v])) };
+    out.gates = { pos: [...fP.at(-p.hall.Cs + 1.2, -2.5)].flatMap((v, i) => (i === 0 ? [v, p.ym + 1.65] : [v])), look: [...g.frame.at(g.s + 3, 0.5)].flatMap((v, i) => (i === 0 ? [v, p.ym + 1.0] : [v])) };
+    return out;
+  });
+  for (const [name, v] of Object.entries(views)) {
+    await page.evaluate((v) => {
+      window.__metro.freeCam = v;
+      window.__metroDebug.walker.root.visible = false;
+    }, v);
+    await sim(0.1, { fwd: 0, side: 0 });
+    await page.evaluate(() => {
+      window.__metroDebug.walker.root.position.y = -1000;
+    });
+    await shot(`docs-${name}`);
+  }
+  await page.evaluate(() => {
+    window.__metro.freeCam = null;
+  });
 }
 console.log('エラー', errors.slice(0, 10));
 await browser.close();

@@ -24,6 +24,7 @@ import { Train } from './train.js';
 import { tunnelBetween, tunnelBeyond } from './tunnel.js';
 import { MetroAudio } from './audio.js';
 import { disposeGroup } from './geom.js';
+import { stationCrowd } from './crowd.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -101,9 +102,12 @@ function fillStations() {
   sel.value = LINES[line].includes(prev) ? prev : line === 'A' ? 'capitole' : 'jean-jaures';
 }
 for (const r of document.querySelectorAll('input[name=line]')) r.addEventListener('change', fillStations);
-if (params.get('line') === 'B') document.querySelector('input[name=line][value=B]').checked = true;
+// URL で駅を指定したら、その駅の線を選ぶ
+const wantStation = params.get('station');
+const wantLine = params.get('line') || (wantStation && !LINES.A.includes(wantStation) && LINES.B.includes(wantStation) ? 'B' : null);
+if (wantLine === 'B') document.querySelector('input[name=line][value=B]').checked = true;
 fillStations();
-if (params.get('station')) $('station-select').value = params.get('station');
+if (wantStation && [...$('station-select').options].some((o) => o.value === wantStation)) $('station-select').value = wantStation;
 if (params.get('start')) {
   const r = document.querySelector(`input[name=start][value=${params.get('start')}]`);
   if (r) r.checked = true;
@@ -192,6 +196,8 @@ function ensureStation(id) {
   const layer = buildStationNav(plan);
   const streetAt = (x, z) => b.world.roadnet.streetNameAt(x, z)?.name || '';
   const mesh = buildStationMesh(plan, { streetAt });
+  const crowd = stationCrowd(plan, layer, (s.id.length * 7919 + s.id.charCodeAt(0) * 31 + Math.floor(Math.random() * 1000)) | 0);
+  if (crowd) mesh.group.add(crowd);
   scene.add(mesh.group);
   nav.add(layer);
   const rec = { station: s, plan, group: mesh.group, doors: mesh.doors, layer };
@@ -266,7 +272,10 @@ function spawnTrain(line, dir, station, { atStation = false } = {}) {
   const n = TRAIN_CARS[line];
   const t = new Train(line, n, dir, { id: `${line}${dir > 0 ? '+' : '-'}${Math.round(state.time)}` });
   t.path = path;
-  const S0 = atStation ? station.S[line] : Math.max(0, Math.min(path.length, station.S[line] - dir * 520));
+  // 1 つ前の駅とのあいだから（途中の駅に止まらない）
+  const ids = LINES[line], i = ids.indexOf(station.id), prev = base.network.byId.get(ids[i - dir]);
+  const back = prev ? Math.min(520, Math.abs(station.S[line] - prev.S[line]) - 75) : 520;
+  const S0 = atStation ? station.S[line] : Math.max(0, Math.min(path.length, station.S[line] - dir * back));
   t.stops = stopsAfter(line, dir, S0 - dir * 1);
   t.state = 'run';
   t.speed = atStation ? 0 : VMAX;
@@ -302,7 +311,8 @@ function updateTrains(dt) {
   for (const t of [...state.trains]) {
     const tdt = t.player && state.ff && t.state === 'run' ? dt * 5 : dt;
     if (t.state === 'run') {
-      const stop = t.stops[0];
+      // 乗っている人のいない電車は、歩いている駅を出たら次の駅には止まらない（遠ざかって消える）
+      const stop = t.player || !t.departed ? t.stops[0] : null;
       const target = stop ? stop.S[t.line] : t.S + t.dir * 400;
       const d = (target - t.S) * t.dir;
       let vt = Math.min(VMAX, Math.sqrt(2 * DEC * Math.max(0, d)));
@@ -349,7 +359,9 @@ function updateTrains(dt) {
         t.speed = 0;
         const from = t.at;
         t.at = null;
+        t.departed = true;
         onDepart(t, from);
+        releaseStations();
       }
     }
     // 近くの電車の車両は歩ける所に
@@ -438,7 +450,11 @@ function placeKind() {
 function updateCurrentStation() {
   const r = walker.region;
   let st = null;
-  if (r && !r.layer?.pose) {
+  if (r?.layer?.pose) {
+    // 電車の中: 停車中の駅か、次の駅
+    const t = state.playerTrain;
+    st = t ? t.at || t.stops[0] || state.station : state.station;
+  } else if (r) {
     for (const rec of state.stations.values()) if (rec.layer === r.layer) st = rec.station;
   } else if (!r) {
     // 地上: 近い駅（いまの駅から離れすぎていなければそのまま）
@@ -490,6 +506,7 @@ function updateCamera(dt) {
   const fx = Math.sin(yaw) * Math.cos(pitch), fy = Math.sin(pitch), fz = -Math.cos(yaw) * Math.cos(pitch);
   walker.eye(camTmp);
   walker.root.visible = state.camMode === 'tps';
+  $('crosshair').style.display = state.camMode === 'fps' ? '' : 'none';
   if (state.camMode === 'fps') {
     camera.position.copy(camTmp);
     lookTmp.set(camTmp.x + fx, camTmp.y + fy, camTmp.z + fz);
@@ -862,7 +879,7 @@ async function startGame() {
     state.phase = 'play';
     toast(`<b>Bienvenue dans le métro de Toulouse !</b><br>${s.name}（${s.ja}）駅。W A S D で歩く、マウスで見回す（画面をクリック）、V で一人称 ⇄ 三人称`, 7);
   } catch (err) {
-    console.error(err);
+    console.error(err, err?.stack);
     show('loading-screen', false);
     show('error-screen');
     $('error-text').textContent = String(err.message || err);
