@@ -50,7 +50,11 @@ export function headGeometry() {
   const head = ellipsoid(0.1, 0.93, 1.16, 1.02, 0, 1.655, -0.005, 16);
   const nose = ellipsoid(0.018, 0.9, 1.4, 1.2, 0, 1.64, -0.103, 6);
   const ears = [-1, 1].map((s) => ellipsoid(0.022, 0.5, 1.2, 0.9, s * 0.093, 1.655, 0.005, 6));
-  return mergeGeometries([neck, head, nose, ...ears].map((q) => paint(q, [1, 1, 1])));
+  // 顔: 目（暗い）・眉・口（肌の色を掛けても暗い・赤みが残る色）
+  const eyes = [-1, 1].map((s) => paint(ellipsoid(0.011, 1.3, 0.8, 0.5, s * 0.034, 1.668, -0.1, 6), [0.07, 0.06, 0.06]));
+  const brows = [-1, 1].map((s) => paint(ellipsoid(0.012, 1.9, 0.45, 0.5, s * 0.036, 1.69, -0.099, 6), [0.3, 0.22, 0.17]));
+  const mouth = paint(ellipsoid(0.012, 1.9, 0.45, 0.5, 0, 1.615, -0.1, 6), [0.62, 0.38, 0.36]);
+  return mergeGeometries([...[neck, head, nose, ...ears].map((q) => paint(q, [1, 1, 1])), ...eyes, ...brows, mouth]);
 }
 
 // 髪（短い・長い・帽子なし）
