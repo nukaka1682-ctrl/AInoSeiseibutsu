@@ -26,7 +26,7 @@ page.on('console', (m) => {
 });
 page.on('pageerror', (e) => errors.push(String(e)));
 const t0 = Date.now();
-await page.goto(`http://localhost:4181/metro.html?autostart=1&station=${station}&start=${start}${process.env.CAM ? `&cam=${process.env.CAM}` : ''}`);
+await page.goto(`http://localhost:4181/metro.html?autostart=1&station=${station}&start=${start}${process.env.CAM ? `&cam=${process.env.CAM}` : ''}${process.env.PHOTO ? `&photo=${process.env.PHOTO}` : ''}`);
 await page.waitForFunction(() => window.__metro?.phase === 'play' || !document.getElementById('error-screen').classList.contains('hidden'), null, { timeout: 600000 });
 console.log(`読み込み ${((Date.now() - t0) / 1000).toFixed(0)} 秒`);
 const err = await page.evaluate(() => document.getElementById('error-text').textContent);

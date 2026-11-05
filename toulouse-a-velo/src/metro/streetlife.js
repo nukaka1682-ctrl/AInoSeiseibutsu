@@ -1,6 +1,6 @@
 // 地上の街のにぎわい（メトロのゲーム）: 歩道を歩く人、出入口のそばの駐輪の柵（アーチ形の鉄の柵）と自転車・電動キックボード、空の雲。
-// - 歩く人: 道路（車道）の外・建物の外の歩道を、近い通りの向きに沿って歩く（駅のまわり R m の中）。脚を振って歩く。
-//   形は部品ごとに InstancedMesh（脚・胴・頭・髪。描く回数は 4 回）。服・肌・髪の色は人ごと
+// - 歩く人: 道路（車道）の外・建物の外の歩道を、近い通りの向きに沿って歩く（駅のまわり R m の中）。脚と腕を振って歩く。
+//   なめらかな体（people.js）を部品ごとに InstancedMesh で（胴 2 種・頭・髪 2 種・脚・腕・手・リュック）。服・肌・髪の色は人ごと
 // - 自転車: 出入口の吹き抜けの横の歩道に、吹き抜けに沿って並べた柵と、柵につないだ自転車（フレームの色はいろいろ）。
 //   ときどき電動キックボード（スタンドで少し傾いて立つ）
 // - 通りに面した店: カフェのテラス（縞の日よけ・丸いテーブルと籐の椅子）、薬局の緑の十字、たばこ屋の赤い「carotte」
@@ -11,33 +11,42 @@ import { mulberry32 } from '../geo.js';
 import { entranceFrame, inEntrance, rimAt } from '../world/metro.js';
 import { CAR_ROADS } from '../world/parse.js';
 import { CollisionWorld } from '../game/collision.js';
+import { HIP_X, HIP_Y, SHOULDER_X, SHOULDER_Y, armGeometry, bagGeometry, hairGeometry, handGeometry, headGeometry, legGeometry, personLook, skirtGeometry, torsoGeometry } from './people.js';
 
-const TOPS = ['#2a3a5e', '#7a2b23', '#2f5d3a', '#d8d4cc', '#1c1c1e', '#8c6a3f', '#4d6f9c', '#b84c66', '#e3b23c', '#5b5b63', '#f2efe8', '#3f6f6a'];
-const BOTTOMS = ['#2b2f3a', '#3c3f46', '#1e2433', '#6b5a48', '#20232a', '#5d6470', '#c8b896', '#283a5a'];
-const SKINS = ['#e8c4a8', '#d9a888', '#b98563', '#8a5a3c', '#f0d2bc', '#6b4228'];
-const HAIRS = ['#2a1d14', '#4a3222', '#1a1a1a', '#8a6a42', '#c9b38a', '#6e6e6e', '#b0aaa0'];
 const FRAMES = ['#c0392b', '#1d1d1f', '#e8e6e0', '#2e5e8c', '#3c6e47', '#8a8d91', '#d4a017', '#5b3a6e'];
-const HIP = 0.86, TORSO = 0.6;
 
 let personMat = null;
 function material() {
-  return (personMat ||= new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8 }));
+  return (personMat ||= new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.78 }));
 }
 
-// 人の部品（局所: 足もとが原点、-z が前。脚は腰の高さが原点）
-function partGeometries() {
-  const leg = new Builder(), torso = new Builder(), head = new Builder(), hair = new Builder();
-  leg.box('g', 0, 0, -HIP + 0.06, 0, 0, 1, 0.15, 0.14);
-  leg.box('g', 0, -0.05, -HIP, -HIP + 0.07, 0, 1, 0.27, 0.12, { color: [0.09, 0.09, 0.1] }); // 靴
-  const t0 = HIP, t1 = HIP + TORSO;
-  torso.box('g', 0, 0, t0 - 0.04, t1, 1, 0, 0.4, 0.24);
-  for (const x of [-0.25, 0.25]) torso.box('g', x, 0, t1 - 0.6, t1 - 0.02, 1, 0, 0.1, 0.11);
-  head.cyl('g', 0, 0, t1, t1 + 0.08, 0.06, { seg: 8 });
-  head.cyl('g', 0, 0, t1 + 0.08, t1 + 0.26, 0.105, { seg: 10 });
-  hair.box('g', 0, 0, t1 + 0.26, t1 + 0.3, 1, 0, 0.19, 0.2);
-  hair.box('g', 0, 0.03, t1 + 0.14, t1 + 0.28, 1, 0, 0.2, 0.17);
-  const g = (b) => b.writers.get('g').toGeometry();
-  return { leg: g(leg), torso: g(torso), head: g(head), hair: g(hair) };
+// 歩く人の部品: geo（局所の形）、color（人の見た目からの色）、who（その部品を持つ人）、limb（'leg' | 'arm' なら左右 2 つ、関節で回す）
+function partList() {
+  const fill = (g) => {
+    if (!g.attributes.color) {
+      const c = new Float32Array(g.attributes.position.count * 3).fill(1);
+      g.setAttribute('color', new THREE.BufferAttribute(c, 3));
+    }
+    return g;
+  };
+  return [
+    { geo: fill(torsoGeometry({ kind: 'm' })), color: (l) => l.top, who: (l) => l.kind === 'm' && !l.coat },
+    { geo: fill(torsoGeometry({ kind: 'm', coat: true })), color: (l) => l.top, who: (l) => l.kind === 'm' && l.coat },
+    { geo: fill(torsoGeometry({ kind: 'f' })), color: (l) => l.top, who: (l) => l.kind === 'f' && !l.coat },
+    { geo: fill(torsoGeometry({ kind: 'f', coat: true })), color: (l) => l.top, who: (l) => l.kind === 'f' && l.coat },
+    { geo: skirtGeometry(), color: (l) => l.bottom, who: (l) => l.skirt },
+    { geo: headGeometry(), color: (l) => l.skin, who: () => true },
+    { geo: hairGeometry(0), color: (l) => l.hairColor, who: (l) => l.hair === 0 },
+    { geo: hairGeometry(1), color: (l) => l.hairColor, who: (l) => l.hair === 1 },
+    { geo: hairGeometry(2), color: (l) => l.hairColor, who: (l) => l.hair === 2 },
+    { geo: bagGeometry(0), color: (l) => l.bagColor, who: (l) => l.bag === 0 },
+    { geo: bagGeometry(1), color: (l) => l.bagColor, who: (l) => l.bag === 1 },
+    { geo: legGeometry({ knee: 0.08 }), color: (l) => (l.skirt ? l.skin : l.bottom), who: () => true, limb: 'leg' },
+    { geo: armGeometry({ elbow: 0.18 }), color: (l) => l.top, who: (l) => !l.short, limb: 'arm' },
+    { geo: armGeometry({ elbow: 0.18, short: true }), color: (l) => l.top, who: (l) => l.short, limb: 'arm' },
+    { geo: handGeometry({ elbow: 0.18 }), color: (l) => l.skin, who: (l) => !l.short, limb: 'arm' },
+    { geo: handGeometry({ elbow: 0.18, short: true }), color: (l) => l.skin, who: (l) => l.short, limb: 'arm' },
+  ];
 }
 
 export class StreetLife {
@@ -49,20 +58,16 @@ export class StreetLife {
     this.radius = radius;
     this.group = new THREE.Group();
     this.group.name = 'street-life';
-    const parts = partGeometries(), mat = material();
-    const mk = (geo, n) => {
-      const m = new THREE.InstancedMesh(geo, mat, n);
+    const mat = material();
+    this.parts = partList().map((pt) => {
+      const m = new THREE.InstancedMesh(pt.geo, mat, count * (pt.limb ? 2 : 1));
       m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       m.castShadow = true;
       m.frustumCulled = false;
       m.count = 0;
       this.group.add(m);
-      return m;
-    };
-    this.legs = mk(parts.leg, count * 2);
-    this.torsos = mk(parts.torso, count);
-    this.heads = mk(parts.head, count);
-    this.hairs = mk(parts.hair, count);
+      return { ...pt, mesh: m, members: [] };
+    });
     this.people = [];
     this.station = null;
     this.parked = null;
@@ -106,24 +111,23 @@ export class StreetLife {
       const a = rnd() * Math.PI * 2, r = 4 + rnd() ** 1.6 * (this.radius - 8);
       const x = s.x + Math.cos(a) * r, z = s.z + Math.sin(a) * r;
       if (!w.stream.readyAt(x, z) || !this.ok(x, z)) continue;
+      const look = personLook(rnd);
       const p = {
-        x, z, y: w.groundAt(x, z, 999), yaw: rnd() * Math.PI * 2, speed: 1.1 + rnd() * 0.45, tx: x, tz: z, wait: rnd() * 2, phase: rnd() * 10,
-        h: 0.9 + rnd() * 0.18, stand: rnd() < 0.12,
+        x, z, y: w.groundAt(x, z, 999), yaw: rnd() * Math.PI * 2, speed: (look.kind === 'f' ? 1.15 : 1.25) + rnd() * 0.35, tx: x, tz: z, wait: rnd() * 2, phase: rnd() * 10,
+        h: look.h, stand: rnd() < 0.12, look,
       };
-      const pick = (list) => new THREE.Color(list[Math.floor(rnd() * list.length)]);
-      p.colors = { top: pick(TOPS), bottom: pick(BOTTOMS), skin: pick(SKINS), hair: pick(HAIRS) };
       this.people.push(p);
     }
-    this.people.forEach((p, i) => {
-      this.torsos.setColorAt(i, p.colors.top);
-      this.heads.setColorAt(i, p.colors.skin);
-      this.hairs.setColorAt(i, p.colors.hair);
-      this.legs.setColorAt(i * 2, p.colors.bottom);
-      this.legs.setColorAt(i * 2 + 1, p.colors.bottom);
-    });
-    for (const m of [this.torsos, this.heads, this.hairs, this.legs]) if (m.instanceColor) m.instanceColor.needsUpdate = true;
-    this.torsos.count = this.heads.count = this.hairs.count = this.people.length;
-    this.legs.count = this.people.length * 2;
+    const c = new THREE.Color();
+    for (const pt of this.parts) {
+      pt.members = this.people.filter((p) => pt.who(p.look));
+      pt.members.forEach((p, i) => {
+        c.set(pt.color(p.look));
+        for (let k = 0; k < (pt.limb ? 2 : 1); k++) pt.mesh.setColorAt(pt.limb ? i * 2 + k : i, c);
+      });
+      if (pt.mesh.instanceColor) pt.mesh.instanceColor.needsUpdate = true;
+      pt.mesh.count = pt.members.length * (pt.limb ? 2 : 1);
+    }
     this.parked = parkedVehicles(this, s, this.pits, rnd);
     if (this.parked) this.group.add(this.parked);
     const shops = shopFronts(this, s, rnd);
@@ -173,8 +177,8 @@ export class StreetLife {
       return;
     }
     const w = this.world, M = new THREE.Matrix4(), L = new THREE.Matrix4(), Q = new THREE.Quaternion(), S = new THREE.Vector3(), V = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
-    const R = new THREE.Matrix4();
-    this.people.forEach((p, i) => {
+    const R = new THREE.Matrix4(), R2 = new THREE.Matrix4();
+    this.people.forEach((p) => {
       let moving = false;
       if (!p.stand) {
         if (p.wait > 0) p.wait -= dt;
@@ -201,21 +205,28 @@ export class StreetLife {
           }
         }
       }
-      // 脚を振る（歩いていなければ止める）
-      const swing = moving ? Math.sin(p.phase * Math.PI) * 0.42 : (p.swing || 0) * 0.8;
+      // 脚と腕を振る（歩いていなければ止める）
+      const swing = moving ? Math.sin(p.phase * Math.PI) * 0.4 : (p.swing || 0) * 0.8;
       p.swing = swing;
-      const bob = moving ? Math.abs(Math.cos(p.phase * Math.PI)) * 0.025 : 0;
+      const bob = moving ? Math.abs(Math.cos(p.phase * Math.PI)) * 0.022 : 0;
       Q.setFromAxisAngle(up, p.yaw);
-      M.compose(V.set(p.x, p.y + bob, p.z), Q, S.setScalar(p.h));
-      this.torsos.setMatrixAt(i, M);
-      this.heads.setMatrixAt(i, M);
-      this.hairs.setMatrixAt(i, M);
-      for (const [k, sx, sg] of [[0, -0.1, 1], [1, 0.1, -1]]) {
-        L.makeTranslation(sx, HIP, 0).multiply(R.makeRotationX(swing * sg));
-        this.legs.setMatrixAt(i * 2 + k, L.premultiply(M));
-      }
+      p.M ||= new THREE.Matrix4();
+      p.M.compose(V.set(p.x, p.y + bob, p.z), Q, S.setScalar(p.h));
     });
-    for (const m of [this.torsos, this.heads, this.hairs, this.legs]) m.instanceMatrix.needsUpdate = true;
+    for (const pt of this.parts) {
+      pt.members.forEach((p, i) => {
+        if (!pt.limb) {
+          pt.mesh.setMatrixAt(i, p.M);
+          return;
+        }
+        for (const [k, sg] of [[0, -1], [1, 1]]) {
+          if (pt.limb === 'leg') L.makeTranslation(sg * HIP_X, HIP_Y, 0).multiply(R.makeRotationX(p.swing * sg));
+          else L.makeTranslation(sg * SHOULDER_X, SHOULDER_Y, 0).multiply(R.makeRotationZ(sg * 0.07)).multiply(R2.makeRotationX(-p.swing * sg * 0.75));
+          pt.mesh.setMatrixAt(i * 2 + k, L.premultiply(p.M));
+        }
+      });
+      pt.mesh.instanceMatrix.needsUpdate = true;
+    }
   }
 }
 

@@ -261,9 +261,14 @@ function leafShading(material) {
         }`)
       .replace('#include <color_fragment>', `#include <color_fragment>
         float leaf = leafNoise(vLeafPos * 5.0) * 0.55 + leafNoise(vLeafPos * 13.0) * 0.45;
-        diffuseColor.rgb *= (0.72 + leaf * 0.56) * (0.74 + 0.26 * smoothstep(-0.9, 0.6, vLeafPos.y));`);
+        diffuseColor.rgb *= (0.72 + leaf * 0.56) * (0.74 + 0.26 * smoothstep(-0.9, 0.6, vLeafPos.y));`)
+      // 樹冠の縁（面が視線と平行に近い所）は葉の塊のすき間から向こうが見える: 3D ノイズで穴をあけ、輪郭をぎざぎざに
+      .replace('#include <normal_fragment_begin>', `#include <normal_fragment_begin>
+        float facing = abs(dot(normal, normalize(vViewPosition)));
+        float gaps = leafNoise(vLeafPos * 8.0) * 0.6 + leafNoise(vLeafPos * 19.0) * 0.4;
+        if (facing < 0.45 && gaps < (0.45 - facing) * 2.3) discard;`);
   };
-  material.customProgramCacheKey = () => 'leaf-shading';
+  material.customProgramCacheKey = () => 'leaf-shading-v2';
 }
 
 // 樹冠の影の形もこぶに合わせる

@@ -26,6 +26,7 @@ import { MetroAudio } from './audio.js';
 import { disposeGroup } from './geom.js';
 import { stationCrowd } from './crowd.js';
 import { StreetLife, makeClouds } from './streetlife.js';
+import { createPipeline } from './render.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -52,6 +53,45 @@ const LIGHTS = {
   interior: { hemiSky: new THREE.Color('#fff8ec'), hemiGround: new THREE.Color('#c4bcae'), hemi: 1.45, sun: 0 },
 };
 
+// 駅の映り込み: 駅ごとに、ホームの線路の上と改札階の真ん中から駅の中を写したキューブマップ（HDR）を 1 回だけ作り、
+// 地下にいるあいだの環境マップにする（磨いた床・タイル・ガラス・ステンレスに蛍光灯と駅の中が映る）
+const probeRT = new THREE.WebGLCubeRenderTarget(192, { type: THREE.HalfFloatType });
+const probeCam = new THREE.CubeCamera(0.1, 400, probeRT);
+const probePmrem = new THREE.PMREMGenerator(renderer);
+function bakeProbe(rec, x, y, z) {
+  const vis = scene.children.map((o) => [o, o.visible]);
+  for (const o of scene.children) o.visible = o === rec.group || o.isLight;
+  const saved = { env: scene.environment, k: scene.environmentIntensity, fog: scene.fog, sky: hemi.color.clone(), ground: hemi.groundColor.clone(), hi: hemi.intensity, sun: sun.intensity };
+  const I = LIGHTS.interior;
+  hemi.color.copy(I.hemiSky);
+  hemi.groundColor.copy(I.hemiGround);
+  hemi.intensity = I.hemi;
+  sun.intensity = 0;
+  scene.environment = interiorEnv;
+  scene.environmentIntensity = 0.3;
+  scene.fog = null;
+  probeCam.position.set(x, y, z);
+  probeCam.update(renderer, scene);
+  const env = probePmrem.fromCubemap(probeRT.texture).texture;
+  for (const [o, v] of vis) o.visible = v;
+  Object.assign(scene, { environment: saved.env, environmentIntensity: saved.k, fog: saved.fog });
+  hemi.color.copy(saved.sky);
+  hemi.groundColor.copy(saved.ground);
+  hemi.intensity = saved.hi;
+  sun.intensity = saved.sun;
+  return env;
+}
+function bakeStationProbes(rec) {
+  const p = rec.plan, L = p.lines[0], [px, pz] = L.frame.at(0, 0);
+  rec.envPlatform = bakeProbe(rec, px, L.yp + 2.0, pz);
+  const halls = p.rects.filter((r) => r.kind === 'paid' || r.kind === 'unpaid');
+  const r = halls.reduce((a, b) => ((b.s1 - b.s0) * (b.t1 - b.t0) > (a.s1 - a.s0) * (a.t1 - a.t0) ? b : a), halls[0]);
+  const [hx, hz] = r.frame.at((r.s0 + r.s1) / 2, (r.t0 + r.t1) / 2);
+  rec.envHall = bakeProbe(rec, hx, p.ym + 1.8, hz);
+}
+
+const pipe = createPipeline(renderer, scene, camera); // フォトリアルの後処理（設定で切る）
+if (params.get('photo') === '0') $('opt-photo').checked = false;
 const textures = makeTextures();
 const buildingMats = createBuildingMaterials(textures);
 const groundMats = createGroundMaterials(textures);
@@ -238,6 +278,7 @@ function ensureStation(id, preplanned = null) {
   scene.add(mesh.group);
   nav.add(layer);
   const rec = { station: s, plan, group: mesh.group, doors: mesh.doors, displays: mesh.displays || [], layer };
+  bakeStationProbes(rec);
   state.stations.set(id, rec);
   console.info(`駅 ${s.name}: ${(performance.now() - t0).toFixed(0)} ms（通路 ${plan.corridors.length}、閉じた出入口 ${plan.closed.length}）`);
   for (const line of s.lines) {
@@ -278,6 +319,8 @@ function releaseStations() {
     if (keep.has(id)) continue;
     scene.remove(rec.group);
     disposeGroup(rec.group);
+    rec.envPlatform?.dispose();
+    rec.envHall?.dispose();
     nav.remove(rec.layer);
     state.stations.delete(id);
   }
@@ -520,8 +563,11 @@ function updateLighting(dt) {
   sun.intensity = S.sun * (1 - k);
   const wantShadow = $('opt-shadows').checked && k < 0.5;
   if (sun.castShadow !== wantShadow) sun.castShadow = wantShadow;
-  scene.environment = k > 0.5 ? interiorEnv : surfaceEnv;
-  scene.environmentIntensity = k > 0.5 ? 0.3 : surfaceEnvK;
+  // 地下: いる駅の映り込み（ホーム・ホームへの階段・電車はホームの、改札階・通路・出入口は改札階の）
+  const srec = state.station && state.stations.get(state.station.id);
+  const probe = srec && (kind === 'hall' || kind === 'corridor' || kind === 'pit' ? srec.envHall : srec.envPlatform);
+  scene.environment = k > 0.5 ? probe || interiorEnv : surfaceEnv;
+  scene.environmentIntensity = k > 0.5 ? (probe ? 0.85 : 0.3) : surfaceEnvK;
   // 地上の街は、地下の深い所（ホーム・ホームへの階段・電車）では描かない（改札階からは出入口の吹き抜け・通路の先の階段が見える）
   const deep = (kind === 'platform' || kind === 'train' || kind === 'stairs') && !state.freeCam;
   base.world.group.visible = !deep && !state.hideCity;
@@ -863,6 +909,8 @@ async function startGame() {
   const id = $('station-select').value;
   const start = document.querySelector('input[name=start]:checked').value;
   renderer.setPixelRatio(Math.min(devicePixelRatio, $('opt-hires').checked ? 2 : 1.25));
+  pipe.enabled = $('opt-photo').checked;
+  pipe.setSize(innerWidth, innerHeight);
   show('title-screen', false);
   show('error-screen', false);
   show('loading-screen');
@@ -959,6 +1007,7 @@ addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
+  pipe.setSize(innerWidth, innerHeight);
 });
 
 // ---------------------------------------------------------------- 毎フレーム
@@ -1013,7 +1062,7 @@ function frame(now) {
   clouds.position.set(camera.position.x, camera.position.y + 1500, camera.position.z);
   clouds.material.uniforms.uTime.value += dt;
   clouds.visible = sky.visible;
-  renderer.render(scene, camera);
+  pipe.render(dt, { under: state.lightK });
 }
 requestAnimationFrame(frame);
 

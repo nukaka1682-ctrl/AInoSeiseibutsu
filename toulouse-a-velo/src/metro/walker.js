@@ -2,6 +2,7 @@
 // 動き: 歩く 1.4 m/s・走る 3.2 m/s。床は Nav（nav.js）で決める（段差 0.6 m まで上り下り、床のない所へは進めない）。
 // 動く床（電車・エスカレーター）に乗っていれば一緒に運ばれる
 import * as THREE from 'three';
+import { HIP_X, HIP_Y, SHOULDER_X, SHOULDER_Y, armGeometry, bagGeometry, hairGeometry, handGeometry, headGeometry, legGeometry, torsoGeometry } from './people.js';
 import { STEP_DOWN, STEP_UP } from './nav.js';
 
 export const EYE = 1.62;
@@ -159,44 +160,50 @@ export class Walker {
   }
 }
 
-// 人形（高さ 1.75 m）。紺のジャケット・灰色のズボン・リュック
+// 人形（高さ 1.75 m。people.js のなめらかな体）。紺のジャケット・灰色のズボン・リュック
 function makeFigure() {
   const root = new THREE.Group();
   root.name = 'walker';
-  const mat = (c, r = 0.8) => new THREE.MeshStandardMaterial({ color: c, roughness: r });
-  const skin = mat('#d9a888', 0.6), jacket = mat('#2a3a5e'), trousers = mat('#4b4f57'), shoe = mat('#1d1d1f', 0.5), bag = mat('#7a2b23'), hair = mat('#3a2a20', 0.9);
+  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.75 });
+  const tint = (g, hex) => {
+    const c = new THREE.Color(hex), a = g.attributes.color.array;
+    for (let i = 0; i < a.length; i += 3) {
+      a[i] *= c.r;
+      a[i + 1] *= c.g;
+      a[i + 2] *= c.b;
+    }
+    return g;
+  };
   const body = new THREE.Group();
   root.add(body);
-  const add = (geo, m, x, y, z, parent = body) => {
-    const o = new THREE.Mesh(geo, m);
-    o.position.set(x, y, z);
+  const add = (geo, parent = body) => {
+    const o = new THREE.Mesh(geo, mat);
     o.castShadow = true;
     parent.add(o);
     return o;
   };
-  // 胴（局所: -z が前）
-  add(new THREE.BoxGeometry(0.4, 0.58, 0.24), jacket, 0, 1.2, 0);
-  add(new THREE.BoxGeometry(0.34, 0.12, 0.22), trousers, 0, 0.88, 0);
-  add(new THREE.BoxGeometry(0.3, 0.38, 0.14), bag, 0, 1.2, 0.18);
-  add(new THREE.CylinderGeometry(0.06, 0.07, 0.1, 10), skin, 0, 1.53, 0);
-  const head = add(new THREE.SphereGeometry(0.115, 18, 14), skin, 0, 1.66, 0);
-  head.scale.set(0.92, 1.06, 1);
-  add(new THREE.SphereGeometry(0.118, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2), hair, 0, 1.68, 0.01);
-  const limb = (x, y, len, w, m, footM) => {
+  const torso = torsoGeometry({ kind: 'm' });
+  torso.setAttribute('color', new THREE.BufferAttribute(new Float32Array(torso.attributes.position.count * 3).fill(1), 3));
+  add(tint(torso, '#2a3a5e'));
+  add(tint(headGeometry(), '#d9a888'));
+  add(tint(hairGeometry(0), '#3a2a20'));
+  add(tint(bagGeometry(0), '#7a2b23'));
+  const limb = (x, y, geos, z = 0) => {
     const g = new THREE.Group();
     g.position.set(x, y, 0);
+    if (z) g.rotation.z = z;
     body.add(g);
-    add(new THREE.BoxGeometry(w, len, w), m, 0, -len / 2, 0, g);
-    if (footM) add(new THREE.BoxGeometry(w + 0.02, 0.07, 0.26), footM, 0, -len - 0.01, -0.05, g);
-    else add(new THREE.SphereGeometry(w * 0.55, 10, 8), skin, 0, -len - 0.03, 0, g);
+    for (const geo of geos) add(geo, g);
     return g;
   };
+  const leg = () => [tint(legGeometry({ knee: 0.06 }), '#4b4f57')];
+  const arm = () => [tint(armGeometry({ elbow: 0.18 }), '#2a3a5e'), tint(handGeometry({ elbow: 0.18 }), '#d9a888')];
   root.userData = {
     body,
-    legL: limb(-0.1, 0.84, 0.8, 0.14, trousers, shoe),
-    legR: limb(0.1, 0.84, 0.8, 0.14, trousers, shoe),
-    armL: limb(-0.26, 1.46, 0.62, 0.11, jacket, null),
-    armR: limb(0.26, 1.46, 0.62, 0.11, jacket, null),
+    legL: limb(-HIP_X, HIP_Y, leg()),
+    legR: limb(HIP_X, HIP_Y, leg()),
+    armL: limb(-SHOULDER_X, SHOULDER_Y, arm(), -0.07),
+    armR: limb(SHOULDER_X, SHOULDER_Y, arm(), 0.07),
   };
   return root;
 }

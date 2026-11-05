@@ -9,7 +9,7 @@ import * as THREE from 'three';
 import { Builder } from './geom.js';
 import { LAYOUT, LINE_COLORS, wallT } from './network.js';
 import { CORR_H, ESC_FLAT, HALL_H, PLAT_H, RISE, TREAD, MID_LANDING, corridorPieces, corridorProfile, escalatorHeight, flightHeight, gateLanes, hallBoundary, inRect, offsetPolyline, pitInfo, wellPoly } from './stationplan.js';
-import { drawLineBadge, drawMetroLogo, fitText, metroTextures, signTexture, stripedTileTexture } from './textures.js';
+import { drawLineBadge, drawMetroLogo, fitText, floorNormalTexture, metroTextures, signTexture, stripedTileTexture, tileNormalTexture } from './textures.js';
 import { entranceDoor, entranceFrame } from '../world/metro.js';
 import { hash01, mulberry32 } from '../geo.js';
 
@@ -40,10 +40,11 @@ export function stationMaterials() {
   const t = metroTextures();
   const std = (o) => new THREE.MeshStandardMaterial({ vertexColors: true, ...o });
   shared = {
-    floor: std({ map: t.floor, roughness: 0.42 }),
-    granite: std({ map: t.granite, roughness: 0.38 }),
-    darkGranite: std({ map: t.darkGranite, roughness: 0.38 }),
-    tile: std({ map: t.tile, roughness: 0.28 }),
+    // 磨いた床のタイル・花崗岩と、釉薬のかかった壁のタイル（映り込みが見える粗さ。目地は法線マップでくぼむ）
+    floor: std({ map: t.floor, roughness: 0.24, normalMap: floorNormalTexture(), normalScale: new THREE.Vector2(0.8, 0.8) }),
+    granite: std({ map: t.granite, roughness: 0.22 }),
+    darkGranite: std({ map: t.darkGranite, roughness: 0.26 }),
+    tile: std({ map: t.tile, roughness: 0.14, normalMap: tileNormalTexture(), normalScale: new THREE.Vector2(1, 1) }),
     ceiling: std({ map: t.perforated, roughness: 0.55, metalness: 0.4 }),
     darkCeiling: std({ map: t.darkPerforated, roughness: 0.7, metalness: 0.3 }),
     steel: std({ map: t.brushed, roughness: 0.32, metalness: 0.85 }),
@@ -53,7 +54,7 @@ export function stationMaterials() {
     dark: std({ roughness: 0.9, color: '#ffffff' }),
     copper: std({ roughness: 0.3, metalness: 0.9 }),
     glass: new THREE.MeshStandardMaterial({ color: '#c9d6d4', roughness: 0.05, metalness: 0.1, transparent: true, opacity: 0.16, depthWrite: false, side: THREE.DoubleSide }),
-    light: new THREE.MeshBasicMaterial({ color: '#fffaf0' }),
+    light: new THREE.MeshBasicMaterial({ color: new THREE.Color('#fffaf0').multiplyScalar(6) }), // 蛍光灯（HDR。映り込みとにじみで光って見える）
     pink: new THREE.MeshBasicMaterial({ color: '#ff8fc4' }),
     green: new THREE.MeshBasicMaterial({ color: '#29d36a' }),
     red: new THREE.MeshBasicMaterial({ color: '#ff3b30' }),
@@ -61,15 +62,58 @@ export function stationMaterials() {
   return shared;
 }
 
-// 照明の焼き込み: 天井は暗め、床は明るめ、壁は下ほど少し暗い（床との隅）
-function bakeLight(floorYs) {
-  return (x, y, z, nx, ny) => {
-    if (ny < -0.5) return 0.95;
-    if (ny > 0.5) return 1.0;
-    let near = Infinity;
-    for (const fy of floorYs) if (y >= fy - 0.3) near = Math.min(near, y - fy);
-    const ao = near < 0.5 ? 0.82 + 0.36 * Math.max(0, near) : 1;
-    return 0.95 * ao;
+// 照明の焼き込み（頂点の明るさ）: 天井の照明の帯（Builder の lights）を 0.5 m ごとの光の点にして、各頂点の照度を足す
+// （光の点は下向き、横にも少し。受ける面の向きと距離の 2 乗で弱まる）。光より下 4.6 m までの面だけ照らす（上の階・下の階の
+// 照明が床を通して漏れない）。照明から遠い所・照明の帯のあいだは暗くなり、帯の真下の床と、帯に近い壁の上の方が明るい。
+// 床との隅は少し暗く（環境光の遮り）
+export function bakeStationLight(lights, floorYs, { ambient = 0.52, gain = 1.35, reach = 7.5 } = {}) {
+  const pts = [], cell = 3, grid = new Map();
+  for (const L of lights) {
+    const n = Math.max(1, Math.round(L.len / 0.5));
+    for (let k = 0; k < n; k++) {
+      const u = -L.len / 2 + ((k + 0.5) * L.len) / n;
+      pts.push({ x: L.x + L.ux * u, z: L.z + L.uz * u, y: L.y - 0.02, p: (L.len / n) * Math.min(1.6, L.wid / 0.14) });
+    }
+  }
+  pts.forEach((q, i) => {
+    const key = `${Math.floor(q.x / cell)},${Math.floor(q.z / cell)}`;
+    (grid.get(key) || grid.set(key, []).get(key)).push(i);
+  });
+  const R = Math.ceil(reach / cell);
+  const memo = new Map(); // 同じ頂点（三角形どうしで共有する角）は 1 回だけ
+  return (x, y, z, nx, ny, nz) => {
+    const key = `${Math.round(x * 50)},${Math.round(y * 50)},${Math.round(z * 50)},${Math.round(nx * 10)},${Math.round(ny * 10)},${Math.round(nz * 10)}`;
+    const hit = memo.get(key);
+    if (hit !== undefined) return hit;
+    let E = 0;
+    const cx = Math.floor(x / cell), cz = Math.floor(z / cell);
+    for (let i = cx - R; i <= cx + R; i++) {
+      for (let j = cz - R; j <= cz + R; j++) {
+        const list = grid.get(`${i},${j}`);
+        if (!list) continue;
+        for (const k of list) {
+          const q = pts[k], dy = q.y - y;
+          if (dy < -0.05 || dy > 4.6) continue;
+          const dx = q.x - x, dz = q.z - z, d2 = dx * dx + dy * dy + dz * dz;
+          if (d2 > reach * reach) continue;
+          const d = Math.sqrt(d2) || 1e-3;
+          const cr = (nx * dx + ny * dy + nz * dz) / d;
+          if (cr <= 0) continue;
+          const ce = 0.25 + 0.75 * Math.max(0, dy / d);
+          E += (q.p * cr * ce) / (d2 + 0.35);
+        }
+      }
+    }
+    let k = ambient + gain * E;
+    // 床との隅
+    if (ny < 0.5) {
+      let near = Infinity;
+      for (const fy of floorYs) if (y >= fy - 0.3) near = Math.min(near, y - fy);
+      if (near < 0.6) k *= 0.8 + 0.33 * Math.max(0, near);
+    }
+    k = Math.min(1.7, k);
+    memo.set(key, k);
+    return k;
   };
 }
 
@@ -420,8 +464,9 @@ export function buildStationMesh(plan, { streetAt = () => '', network = null } =
   const mats = stationMaterials();
   const style = stationStyle(plan.station);
   const tileKey = `tile:${style.accent}`;
-  const mtl = { ...mats, [tileKey]: Object.assign(mats.tile.clone(), { map: stripedTileTexture(style.accent) }) };
-  const B = new Builder(), signs = new Signs();
+  const striped = stripedTileTexture(style.accent);
+  const mtl = { ...mats, [tileKey]: Object.assign(mats.tile.clone(), { map: striped }) };
+  const B = new Builder({ tess: 1.6 }), signs = new Signs();
   const { ym } = plan, WT = wallT(), P = LAYOUT.psd;
   const st = plan.station;
   const nameKey = signs.material('name', 2.4, 0.6, nameDraw(st.name, style.accent));
@@ -606,7 +651,7 @@ export function buildStationMesh(plan, { streetAt = () => '', network = null } =
   }
 
   const floorYs = [ym, ...plan.lines.map((L) => L.yp), ...plan.corridors.flatMap((c) => [c.yTop, c.yBot])];
-  const group = B.build(mtl, { light: bakeLight(floorYs), name: `station-${st.id}` });
+  const group = B.build(mtl, { light: bakeStationLight(B.lights, floorYs), name: `station-${st.id}` });
   group.add(signs.build());
   for (const d of doorsMeshes) group.add(d.group);
   group.add(extra);
