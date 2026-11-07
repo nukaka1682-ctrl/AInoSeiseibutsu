@@ -44,7 +44,7 @@ export class NavLayer {
     this.prev = null;
   }
 
-  // poly: 凸多角形 [[x, z], ...]、y(x, z): 床の高さ（動く層は局所の高さ）。opts: { kind, conveyor: [vx, vz]（動く歩道）, tag }
+  // poly: 凸多角形 [[x, z], ...]、y(x, z): 床の高さ（動く層は局所の高さ）。opts: { kind, conveyor: [vx, vz]（動く歩道）, holes: [凸多角形]（床の穴） }
   addRegion(poly, y, opts = {}) {
     const r = { poly, y: typeof y === 'number' ? () => y : y, layer: this, ...opts };
     const b = bounds(poly);
@@ -88,7 +88,9 @@ export class NavLayer {
       if (r.disabled) return;
       const b = r.bounds;
       if (lx < b.minX - 1e-6 || lx > b.maxX + 1e-6 || lz < b.minZ - 1e-6 || lz > b.maxZ + 1e-6) return;
-      if (convexContains(r.poly, lx, lz)) fn(r.y(lx, lz) + oy + (this.pose?.slope || 0) * lx, r);
+      if (!convexContains(r.poly, lx, lz)) return;
+      if (r.holes && r.holes.some((h) => convexContains(h, lx, lz))) return; // 床の穴（吹き抜け・出入口の階段）
+      fn(r.y(lx, lz) + oy + (this.pose?.slope || 0) * lx, r);
     });
   }
 

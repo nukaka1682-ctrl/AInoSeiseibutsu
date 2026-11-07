@@ -264,6 +264,48 @@ export function metroTextures() {
   return shared;
 }
 
+// 目地の格子の法線マップ（キャンバスを読み戻さず、目地の位置から計算する）。cellsX(i, j): 行 j の目地の位置を返す
+// tw, th: タイルの大きさ（ピクセル）、g: 目地の幅、bevel: タイルの縁の丸み（ピクセル）、offsetRows: 1 行おきに半分ずらす
+function groutNormalTexture({ S = 512, tw, th, g, bevel = 3, offsetRows = false, depth = 1.0 }) {
+  const [c, x] = canvas(S, S);
+  const img = x.createImageData(S, S), d = img.data;
+  // 高さ: タイルの面 1、目地 0、縁は bevel ピクセルで丸く下がる
+  const h = new Float32Array(S * S);
+  for (let j = 0; j < S; j++) {
+    const r = Math.floor(j / th), yIn = j - r * th;
+    const off = offsetRows && r % 2 ? tw / 2 : 0;
+    for (let i = 0; i < S; i++) {
+      const xIn = (((i - off) % tw) + tw) % tw;
+      const e = Math.min(xIn - g / 2, tw - g / 2 - xIn, yIn - g / 2, th - g / 2 - yIn);
+      h[j * S + i] = e <= 0 ? 0 : Math.min(1, e / bevel);
+    }
+  }
+  const at = (i, j) => h[((j + S) % S) * S + ((i + S) % S)];
+  for (let j = 0; j < S; j++) {
+    for (let i = 0; i < S; i++) {
+      const dx = (at(i + 1, j) - at(i - 1, j)) * depth, dy = (at(i, j + 1) - at(i, j - 1)) * depth;
+      const l = Math.hypot(dx, dy, 1), k = (j * S + i) * 4;
+      d[k] = (-dx / l * 0.5 + 0.5) * 255;
+      d[k + 1] = (dy / l * 0.5 + 0.5) * 255;
+      d[k + 2] = (1 / l * 0.5 + 0.5) * 255;
+      d[k + 3] = 255;
+    }
+  }
+  x.putImageData(img, 0, 0);
+  return tex(c, { srgb: false });
+}
+
+let tileNormal = null, floorNormal = null;
+// 壁のタイル（tileWallTexture と同じ並び）と床のタイル（floorTileTexture と同じ並び）の法線マップ
+export function tileNormalTexture() {
+  const ppm = 512 / 1.2;
+  return (tileNormal ||= groutNormalTexture({ tw: 0.2 * ppm, th: 0.1 * ppm, g: Math.max(1, 0.006 * ppm), bevel: 3, offsetRows: true, depth: 0.9 }));
+}
+export function floorNormalTexture() {
+  const ppm = 512 / 1.2;
+  return (floorNormal ||= groutNormalTexture({ tw: 0.3 * ppm, th: 0.3 * ppm, g: Math.max(1, 0.004 * ppm), bevel: 2, depth: 0.7 }));
+}
+
 // 駅ごとの壁のタイル（色の帯）
 const stripeCache = new Map();
 export function stripedTileTexture(color) {

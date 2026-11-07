@@ -125,8 +125,14 @@ export function buildNetwork(proj, { bdStations = null, levelOf = null } = {}) {
     const r = [-az, ax], side = r[0] * bx + r[1] * bz >= 0 ? 1 : -1;
     s.axis[s.lines[1]] = [r[0] * side, r[1] * side];
   }
-  // 高さ
-  for (const s of stations) {
+  const network = { stations, byId, lines: {} };
+  relevelNetwork(network, levelOf);
+  return network;
+}
+
+// 駅の高さを決め直して、線路の縦断面を作り直す（地形と出入口が分かってから。駅のオブジェクトはそのまま）
+export function relevelNetwork(network, levelOf = null) {
+  for (const s of network.stations) {
     const lv = levelOf ? levelOf(s) : null;
     s.ym = lv?.ym ?? -6;
     s.yp = {};
@@ -134,9 +140,8 @@ export function buildNetwork(proj, { bdStations = null, levelOf = null } = {}) {
       s.yp[l] = lv?.yp?.[l] ?? s.ym - LAYOUT.hallDrop - k * 7.5;
     });
   }
-  const lines = {};
-  for (const [line, ids] of Object.entries(LINES)) lines[line] = buildLinePath(line, ids.map((id) => byId.get(id)));
-  return { stations, byId, lines };
+  for (const [line, ids] of Object.entries(LINES)) network.lines[line] = buildLinePath(line, ids.map((id) => network.byId.get(id)));
+  return network;
 }
 
 // 線路の線形: 駅のホームは直線、駅のあいだは 3 次のエルミート曲線。2 m ごとの点 { S, x, z, y, hx, hz }

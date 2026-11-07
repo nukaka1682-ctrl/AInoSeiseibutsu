@@ -189,10 +189,16 @@ export function entranceDoor(e) {
   return { dw: Math.min(e.wid - 0.6, 3.6) / 2, dh: Math.min(2.4, H - 0.3), yb, x, z, dx: f.dx, dz: f.dz, sx: f.sx, sz: f.sz, H };
 }
 
-// 吹き抜けの深さ（段の数は STEP_H ごと）
+// 吹き抜けの深さ（段の数は STEP_H ごと）。e.H があればその深さ（メトロのゲームで、階段の下を駅の改札階の床にそろえる）
 export function entranceDepth(e) {
   if (e.kind === 'parking') return Math.min(5.5, Math.max(RAMP_PORTAL_H + 0.6, (e.depth || 3) + 0.8));
+  if (e.H != null) return e.H;
   return Math.min(6.5, Math.max(3.5, (e.depth || 3) + 1.2));
+}
+
+// 階段で下りられる深さの上限（踏み面 0.3 m・蹴上げ 0.18 m まで。下の踊り場 LANDING を除いた長さで）
+export function entranceMaxDepth(e) {
+  return Math.max(2.8, (e.len - LANDING) * 0.6);
 }
 
 // 看板の絵（左半分: 黄色地に紺の丸と M。右半分: 駐車場の青地に白い P）
@@ -461,16 +467,23 @@ export function buildMetroEntrances(list, mats, { open = false } = {}) {
   return group;
 }
 
-// 吹き抜けの穴の形（ステンシル。地面と同じ高さの長方形）
-export function writeEntranceMasks(w, list) {
+// 吹き抜けの穴の形（ステンシル。地面と同じ高さの長方形）。groundAt(x, z): 地形の高さ（あれば、1 m ごとの格子で地形より
+// 少し上にする。地形モデルに穴の写っていない出入口〔data/metro.js の代わりの出入口〕では、地形が縁の平面より高い所がある）
+export function writeEntranceMasks(w, list, groundAt = null) {
   for (const e of list) {
     if (e.rim == null) continue;
-    const L = e.len / 2, W = e.wid / 2, Y = [rimAt(e, -L, -W), rimAt(e, L, -W), rimAt(e, L, W), rimAt(e, -L, W)];
-    const P = entranceCorners(e, 0).map(([x, z], i) => [x, Y[i] + 0.03, z]);
-    // 上向きの面（反時計回り）
-    const [a, b, , d] = P;
-    const up = (d[0] - a[0]) * (b[2] - a[2]) - (d[2] - a[2]) * (b[0] - a[0]) > 0;
-    const Q = up ? P : [P[0], P[3], P[2], P[1]];
-    w.quad(...Q, [0, 1, 0], [0, 0], [1, 0], [1, 1], [0, 1], [1, 1, 1]);
+    const f = entranceFrame(e), L = e.len / 2, W = e.wid / 2;
+    const nu = groundAt ? Math.max(1, Math.ceil(e.len)) : 1, nv = groundAt ? Math.max(1, Math.ceil(e.wid)) : 1;
+    const P = (i, j) => {
+      const u = -L + (2 * L * i) / nu, v = -W + (2 * W * j) / nv, [x, z] = f.at(u, v);
+      const y = Math.max(rimAt(e, u, v), groundAt ? groundAt(x, z) : -Infinity) + 0.04;
+      return [x, y, z];
+    };
+    for (let i = 0; i < nu; i++) {
+      for (let j = 0; j < nv; j++) {
+        const a = P(i, j), b = P(i + 1, j), c = P(i + 1, j + 1), d = P(i, j + 1);
+        w.quad(a, b, c, d, [0, 1, 0], [0, 0], [1, 0], [1, 1], [0, 1], [1, 1, 1]); // 巻き順は法線で上向きにそろう
+      }
+    }
   }
 }
