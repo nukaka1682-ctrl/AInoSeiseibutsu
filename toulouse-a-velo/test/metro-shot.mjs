@@ -73,15 +73,24 @@ if (shots.includes('all') || shots.includes('walk')) {
     const e = osm ? open[0] : p.direct[0] || open[0];
     const fx = Math.cos(e.ang) * e.down, fz = Math.sin(e.ang) * e.down;
     const goal = [e.x - fx * (e.len / 2 + 2.5), e.z - fz * (e.len / 2 + 2.5)];
-    // 幅優先（0.25 m の格子、高さは 1.2 m ごとに分ける）。壁から 0.2 m 離れた所だけ（体が通れる）
+    const outside = (x, z) => p.pits.every((q) => {
+      const dx = Math.cos(q.ang) * q.down, dz = Math.sin(q.ang) * q.down, u = (x - q.x) * dx + (z - q.z) * dz, v = -(x - q.x) * dz + (z - q.z) * dx;
+      return Math.abs(u) > q.len / 2 + 1.5 || Math.abs(v) > q.wid / 2 + 1.5;
+    });
+    // 幅優先（0.25 m の格子、高さは 1.2 m ごとに分ける）。壁から 0.26 m 離れた所だけ（体が通れる）
     const step = 0.25, key = (x, z, y) => `${Math.round(x / step)},${Math.round(z / step)},${Math.round(y / 1.2)}`;
+    // 改札の通路（0.8 m）は格子では通りにくいので、道を探すあいだだけ改札の壁をなくす（あとで通路の真ん中を通る点を足す）
+    const gateWalls = [];
+    for (const L of nav.layers) for (const w of L.walls) if (w.gate && w.active) gateWalls.push(w);
+    for (const w of gateWalls) w.active = false;
     const f0 = nav.floorAt(start[0], start[1], yStart);
     const q = [[start[0], start[1], f0.y, null, f0.region?.kind || 'surface']];
     const seen = new Map([[key(start[0], start[1], f0.y), 0]]);
     let found = -1;
     for (let i = 0; i < q.length && i < 400000; i++) {
       const [x, z, y, , kind] = q[i];
-      if (kind === 'surface' && Math.hypot(x - goal[0], z - goal[1]) < 0.8) {
+      // 地上に出て、どの出入口の吹き抜けからも 1.5 m 離れた所（いちばん近い出口）
+      if (kind === 'surface' && (osm ? outside(x, z) : Math.hypot(x - goal[0], z - goal[1]) < 0.8)) {
         found = i;
         break;
       }
@@ -91,11 +100,14 @@ if (shots.includes('all') || shots.includes('walk')) {
         const k = key(x + dx, z + dz, r.y);
         if (seen.has(k)) continue;
         seen.set(k, q.length);
-        if (nav.resolve(x + dx, z + dz, 0.2, r.y).hit) continue;
+        if (nav.resolve(x + dx, z + dz, 0.26, r.y).hit) continue; // 歩く人の半径 0.24 m より少し広く
         q.push([x + dx, z + dz, r.y, i, r.region?.kind || 'surface']);
       }
     }
-    if (found < 0) return { error: `道が見つからない（${q.length} 点）` };
+    if (found < 0) {
+      for (const w of gateWalls) w.active = true;
+      return { error: `道が見つからない（${q.length} 点）` };
+    }
     const nearGate = (x, z) => p.gates.some((g) => {
       const [s, t] = g.frame.local(x, z);
       return Math.abs(s - g.s) < 1.4 && t > g.t0 - 0.3 && t < g.t1 + 0.3;
@@ -109,7 +121,30 @@ if (shots.includes('all') || shots.includes('walk')) {
     const path = [];
     for (let i = found; i != null; i = q[i][3]) path.push(q[i]);
     path.reverse();
-    // 2 m ごとの点と、場所の種類が変わる所（撮影）。改札を通る所は通路の真ん中を
+    // 点 a から b へまっすぐ歩けるか（0.2 m ごとに、段差と壁と体の幅を調べる。改札の壁はまだない）
+    const clear = (a, b) => {
+      let [x, z, y] = a;
+      const n = Math.max(1, Math.ceil(Math.hypot(b[0] - x, b[1] - z) / 0.2));
+      for (let k = 1; k <= n; k++) {
+        const nx = a[0] + ((b[0] - a[0]) * k) / n, nz = a[1] + ((b[1] - a[1]) * k) / n;
+        const r = nav.step(x, z, y, nx, nz);
+        if (!r || nav.resolve(nx, nz, 0.26, r.y).hit) return false;
+        [x, z, y] = [nx, nz, r.y];
+      }
+      return true;
+    };
+    // 歩く点: まっすぐ行けなくなる手前の点（曲がり角でも壁の端を切らない）と、場所の種類が変わる所（撮影）。3 m より離さない。
+    // 改札を通る所は通路の真ん中を
+    const keep = new Set();
+    let anchor = 0;
+    for (let i = 1; i < path.length; i++) {
+      const change = path[i][4] !== path[i - 1][4];
+      if (change || i === path.length - 1 || i - anchor >= 12 || (i + 1 < path.length && !clear(path[anchor], path[i + 1]))) {
+        keep.add(i);
+        anchor = i;
+      }
+    }
+    for (const w of gateWalls) w.active = true;
     const pts = [];
     let last = null;
     path.forEach(([x, z, y, , kind], i) => {
@@ -124,7 +159,7 @@ if (shots.includes('all') || shots.includes('walk')) {
           pts.push([...g.frame.at(g.s - dir * 1.2, tc), null], [...g.frame.at(g.s + dir * 1.2, tc), 'gate']);
         }
       }
-      if ((change || i % 8 === 0 || i === path.length - 1) && !nearGate(x, z)) pts.push([x, z, change ? `${kind}-${i}` : null]);
+      if (keep.has(i) && !nearGate(x, z)) pts.push([x, z, change ? `${kind}-${i}` : null]);
       last = kind;
     });
     return { start, y: f0.y, pts };

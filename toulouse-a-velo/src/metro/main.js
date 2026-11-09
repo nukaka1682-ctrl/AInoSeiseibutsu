@@ -14,6 +14,7 @@ import { assembleStreamWorld } from '../world/stream.js';
 import { areaFrame } from '../world/assemble.js';
 import { setupScene } from '../world/scene.js';
 import { entranceFrame, inEntrance } from '../world/metro.js';
+import { MONUMENTS } from '../world/monuments.js';
 import { MapRenderer, drawMinimap } from '../ui/minimap.js';
 import { LINES, LINE_COLORS, TRAIN_CARS, buildNetwork, doorSideAt, relevelNetwork, runTime, stationFrame, stationList, terminusOf } from './network.js';
 import { adjustStationPits, buildStationNav, planStation, stationLevelsFor } from './stationplan.js';
@@ -200,6 +201,14 @@ async function loadAll() {
     const withOsm = new Set(Object.values(osmStations).filter((o) => o.bouches?.some((b) => b.kind === 'metro')).map((o) => o.bd));
     terrain.metroRaw = (terrain.metroRaw || []).filter((e) => e.kind !== 'metro' || !withOsm.has(e.station))
       .concat(Object.values(osmStations).flatMap((o) => (o.bouches || []).filter((b) => b.kind === 'metro')));
+    // エレベーターだけの出入口（OSM の subway_entrance の elevator）: 地上のガラスの小屋（monuments.js の lift。Jean Jaurès と同じ形）
+    const lifts = MONUMENTS.filter((m) => m.kind === 'lift').flatMap((m) => m.at);
+    for (const o of Object.values(osmStations)) {
+      for (const [i, b] of (o.bouches || []).entries()) {
+        if (b.kind !== 'elevator' || lifts.some(([la, lo]) => Math.hypot((la - b.lat) * 111200, (lo - b.lon) * 80500) < 6)) continue;
+        MONUMENTS.push({ id: `ascenseur-${o.bd}-${i}`, kind: 'lift', at: [[b.lat, b.lon]], face: o.c, size: [2.0, 2.0], h: 2.8 });
+      }
+    }
     // ホームが地下 1 階の駅: 吹き抜けをホームまで届く長さに、片側にしかなければ反対側にも
     terrain.metroPrepare = (list) => {
       for (const s of network.stations) {
