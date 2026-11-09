@@ -221,7 +221,7 @@ if (shots.includes('ride')) {
   }
   await look(await page.evaluate(() => { const t = window.__metro.playerTrain; const p = t.cars[0].pose; return Math.atan2(-p.fz, p.fx) + 0; }), 0);
   await shot('ride-doors-open');
-  // 扉から降りる（進む向きの右）
+  // 扉から降りる（扉の開いた側）
   const yaw = await page.evaluate(() => { const t = window.__metro.playerTrain, p = t.cars[0].pose; return Math.atan2(-p.fz, -p.fx); });
   const door = await page.evaluate(() => {
     const t = window.__metro.playerTrain, w = window.__metroDebug.walker;
@@ -229,7 +229,8 @@ if (shots.includes('ride')) {
     // いちばん近い扉（局所 x）
     const lx = (w.x - p.x) * p.fx + (w.z - p.z) * p.fz;
     const dx = [-4.1, 0, 4.1].reduce((a, b) => (Math.abs(b - lx) < Math.abs(a - lx) ? b : a));
-    const rx = -p.fz, rz = p.fx;
+    const sd = t.doorSide ?? 1; // 扉の開く側（島式のホームの駅は左）
+    const rx = -p.fz * sd, rz = p.fx * sd;
     return [[p.x + p.fx * dx, p.z + p.fz * dx], [p.x + p.fx * dx + rx * 2.2, p.z + p.fz * dx + rz * 2.2]];
   });
   void yaw;
