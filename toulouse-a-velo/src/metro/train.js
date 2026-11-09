@@ -462,14 +462,15 @@ export class Train {
     }
   }
 
-  // 扉を開ける割合 open（0..1）。開くのは進む向きの右側（ホームの側）
-  setDoors(open) {
+  // 扉を開ける割合 open（0..1）。開くのは進む向きの右側（side が +1。島式のホームの駅では左側 -1）
+  setDoors(open, side = this.doorSide ?? 1) {
     this.doorOpen = open;
+    this.doorSide = side;
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), one = new THREE.Vector3(1, 1, 1), v = new THREE.Vector3();
     for (const c of this.cars) {
       let i = 0;
       for (const sg of [1, -1]) {
-        const o = sg > 0 ? open : 0;
+        const o = sg === side ? open : 0;
         for (const dx of LAYOUT.doorX) {
           for (const k of [-1, 1]) {
             v.set(dx + k * (DOOR_W / 4 + o * (DOOR_W / 2 - 0.05)), 0, (CAR.width / 2 - 0.05) * sg);
@@ -482,8 +483,8 @@ export class Train {
       }
       c.frame.instanceMatrix.needsUpdate = c.glass.instanceMatrix.needsUpdate = true;
       const passable = open > 0.85;
-      for (const r of c.doorRegions) r.disabled = !(passable && r.sg > 0);
-      for (const w of c.doorWalls) w.active = !(passable && w.sg > 0);
+      for (const r of c.doorRegions) r.disabled = !(passable && r.sg === side);
+      for (const w of c.doorWalls) w.active = !(passable && w.sg === side);
     }
   }
 

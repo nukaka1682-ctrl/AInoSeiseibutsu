@@ -844,7 +844,7 @@ export function addPitNav(nav, e, closed = false) {
   const f = entranceFrame(e), L = e.len / 2, W = e.wid / 2;
   const y0 = rimAt(e, -L, 0), yb = d.yb;
   const run = Math.max(2, e.len - PIT_LANDING), drop = y0 - yb, n = Math.max(4, Math.round(drop / 0.16));
-  const esc = e.wid >= 4.2;
+  const esc = (e.esc ?? e.wid >= 4.2) && e.wid >= 3.4;
   const seed = Math.round(e.x * 3 + e.z * 7);
   const vs = esc ? (hash01(seed, 1) < 0.5 ? 1 : -1) : 0;
   const sv0 = esc && vs < 0 ? -W + PIT_ESC_W + 0.15 : -W, sv1 = esc && vs > 0 ? W - PIT_ESC_W - 0.15 : W;

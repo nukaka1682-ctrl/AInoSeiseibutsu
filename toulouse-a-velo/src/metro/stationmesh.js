@@ -729,9 +729,10 @@ function hangSign(B, signs, key, c, y, along, w, h, yCeil, oneSided = false) {
 
 // ホームドア: 扉の位置に開け閉めする扉（InstancedMesh）、そのあいだにガラスの板、上に「DIRECTION 〜」の帯
 function buildPSD(B, signs, L, side, term, mats) {
-  const f = L.frame, at = f.at, yp = L.yp, P = LAYOUT.psd * side, yc = yp + PLAT_H;
+  const f = L.frame, at = f.at, yp = L.yp, P = (L.P ?? LAYOUT.psd) * side, yc = yp + PLAT_H;
   const half = L.psdHalf, Lb = L.Lb;
-  const n = [f.nx * side, f.nz * side]; // ホームの側を向く
+  const inward = L.island ? -side : side; // ホームドアの線からホームの側への向き（島式のホームは軸の側）
+  const n = [f.nx * inward, f.nz * inward]; // ホームの側を向く
   const gaps = L.doorsS.map((s) => [s - 0.8, s + 0.8]);
   // ガラスの板と柱（扉と扉のあいだ）
   const fixed = [];
@@ -771,7 +772,7 @@ function buildPSD(B, signs, L, side, term, mats) {
     const key = signs.material(`psd-${L.line}-${side}`, 3.2, 0.26, psdHeaderDraw(term));
     for (let k = 0; k < L.doorsS.length; k += 2) {
       const [hx, hz] = at(L.doorsS[k], P + n[0] * 0 * side);
-      signs.panel(key, hx + n[0] * 0.081, yp + 2.62, hz + n[1] * 0.081, f.ax * side, f.az * side, 3.0, 0.26, n[0], n[1], 0);
+      signs.panel(key, hx + n[0] * 0.081, yp + 2.62, hz + n[1] * 0.081, f.ax * inward, f.az * inward, 3.0, 0.26, n[0], n[1], 0);
     }
   }
   // 扉（2 枚ずつ）。開くと横へ 0.78 m ずれる
@@ -786,7 +787,7 @@ function buildPSD(B, signs, L, side, term, mats) {
   const leaves = [];
   for (const sd of L.doorsS) for (const k of [-1, 1]) leaves.push({ s: sd, k });
   const m = new THREE.Matrix4(), q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), f.rotY), one = new THREE.Vector3(1, 1, 1), v = new THREE.Vector3();
-  const tLeaf = P - 0.06 * side; // 線路の側にずらして、開くと板の裏へ
+  const tLeaf = P - 0.06 * inward; // 線路の側にずらして、開くと板の裏へ
   const door = {
     line: L.line, side, open: 0, group,
     set(open) {
@@ -1313,3 +1314,5 @@ function corridorMesh(B, signs, c, tileKey, streetAt) {
 }
 
 export { LINE_COLORS, drawMetroLogo, ESC_FLAT, RISE };
+// OSM の間取りの駅（osmmesh.js）で使う部品
+export { C as STATION_COLORS, Signs, nameDraw, directionDraw, exitDraw, gateSignDraw, muralDraw, hashId, POSTERS, networkMapDraw, ledDisplay, ticketDraw, buildPSD, bench, hangSign };

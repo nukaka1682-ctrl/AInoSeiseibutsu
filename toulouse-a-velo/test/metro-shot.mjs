@@ -58,16 +58,24 @@ if (shots.includes('all') || shots.includes('tps')) {
 if (shots.includes('all') || shots.includes('walk')) {
   const plan = await page.evaluate(() => {
     const st = window.__metro.station, rec = window.__metro.stations.get(st.id), p = rec.plan, nav = window.__metroDebug.nav;
-    const stair = p.stairs.find((s) => s.kind === 'stairs' && s.side === 1 && s.line === st.lines[0]);
-    const f = stair.frame;
-    const start = f.at(stair.s0 + (stair.len + 1.2) * stair.dirS, (stair.t0 + stair.t1) / 2);
+    const osm = p.layout === 'osm'; // OpenStreetMap の間取り（osmplan.js）
+    let start, yStart;
+    if (osm) {
+      const b = p.blocks.find((q) => q.toPlatform && q.lanes.some((l) => l.kind === 'stairs')) || p.blocks.find((q) => q.toPlatform);
+      start = b ? b.frame.at(b.len + 1.2, 0) : p.lines[0].frame.at(0, p.lines[0].island ? 0 : 5);
+      yStart = b ? b.y1 : p.lines[0].yp;
+    } else {
+      const stair = p.stairs.find((s) => s.kind === 'stairs' && s.side === 1 && s.line === st.lines[0]);
+      start = stair.frame.at(stair.s0 + (stair.len + 1.2) * stair.dirS, (stair.t0 + stair.t1) / 2);
+      yStart = stair.y1;
+    }
     const open = p.pits.filter((e) => !p.closed.includes(e));
-    const e = p.direct[0] || open[0];
+    const e = osm ? open[0] : p.direct[0] || open[0];
     const fx = Math.cos(e.ang) * e.down, fz = Math.sin(e.ang) * e.down;
     const goal = [e.x - fx * (e.len / 2 + 2.5), e.z - fz * (e.len / 2 + 2.5)];
     // 幅優先（0.25 m の格子、高さは 1.2 m ごとに分ける）。壁から 0.2 m 離れた所だけ（体が通れる）
     const step = 0.25, key = (x, z, y) => `${Math.round(x / step)},${Math.round(z / step)},${Math.round(y / 1.2)}`;
-    const f0 = nav.floorAt(start[0], start[1], stair.y1);
+    const f0 = nav.floorAt(start[0], start[1], yStart);
     const q = [[start[0], start[1], f0.y, null, f0.region?.kind || 'surface']];
     const seen = new Map([[key(start[0], start[1], f0.y), 0]]);
     let found = -1;
@@ -92,21 +100,26 @@ if (shots.includes('all') || shots.includes('walk')) {
       const [s, t] = g.frame.local(x, z);
       return Math.abs(s - g.s) < 1.4 && t > g.t0 - 0.3 && t < g.t1 + 0.3;
     });
+    // 改札の通路の真ん中（OSM の間取りは osmplan.js の osmGateLanes と同じ並び）
+    const laneCenters = (g) => {
+      if (!osm) return Array.from({ length: 6 }, (_, k) => -3.025 + 0.4 + k * 1.05);
+      const n = g.lanes, s0 = (g.t0 + g.t1) / 2 - (n * 1.05 + 0.25) / 2 + 0.25;
+      return Array.from({ length: n }, (_, k) => s0 + k * 1.05 + 0.4);
+    };
     const path = [];
     for (let i = found; i != null; i = q[i][3]) path.push(q[i]);
     path.reverse();
     // 2 m ごとの点と、場所の種類が変わる所（撮影）。改札を通る所は通路の真ん中を
     const pts = [];
     let last = null;
-    const lanes = (g) => Array.from({ length: 6 }, (_, k) => -3.025 + 0.4 + k * 1.05);
     path.forEach(([x, z, y, , kind], i) => {
       const change = last && kind !== last;
       if (i > 0) {
         const [px, pz] = path[i - 1];
         for (const g of p.gates) {
           const [s0, t0] = g.frame.local(px, pz), [s1, t1] = g.frame.local(x, z);
-          if ((s0 - g.s) * (s1 - g.s) > 0 || Math.abs(t1) > 8.2) continue;
-          const tc = lanes(g).reduce((a, b) => (Math.abs(b - t1) < Math.abs(a - t1) ? b : a));
+          if ((s0 - g.s) * (s1 - g.s) > 0 || t1 < g.t0 - 0.3 || t1 > g.t1 + 0.3 || (!osm && Math.abs(t1) > 8.2)) continue;
+          const tc = laneCenters(g).reduce((a, b) => (Math.abs(b - t1) < Math.abs(a - t1) ? b : a));
           const dir = Math.sign(s1 - s0);
           pts.push([...g.frame.at(g.s - dir * 1.2, tc), null], [...g.frame.at(g.s + dir * 1.2, tc), 'gate']);
         }

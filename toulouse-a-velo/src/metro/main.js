@@ -15,9 +15,11 @@ import { areaFrame } from '../world/assemble.js';
 import { setupScene } from '../world/scene.js';
 import { entranceFrame, inEntrance } from '../world/metro.js';
 import { MapRenderer, drawMinimap } from '../ui/minimap.js';
-import { LINES, LINE_COLORS, TRAIN_CARS, buildNetwork, relevelNetwork, runTime, stationFrame, stationList, terminusOf } from './network.js';
+import { LINES, LINE_COLORS, TRAIN_CARS, buildNetwork, doorSideAt, relevelNetwork, runTime, stationFrame, stationList, terminusOf } from './network.js';
 import { adjustStationPits, buildStationNav, planStation, stationLevelsFor } from './stationplan.js';
 import { buildStationMesh } from './stationmesh.js';
+import { alignShallowPits, buildOsmStationNav, completeShallowPits, osmCapable, osmConnected, osmStationDepth, planOsmStation, projectStationOsm } from './osmplan.js';
+import { buildOsmStationMesh } from './osmmesh.js';
 import { Nav } from './nav.js';
 import { Walker } from './walker.js';
 import { Train } from './train.js';
@@ -82,8 +84,15 @@ function bakeProbe(rec, x, y, z) {
   return env;
 }
 function bakeStationProbes(rec) {
-  const p = rec.plan, L = p.lines[0], [px, pz] = L.frame.at(0, 0);
+  const p = rec.plan, L = p.lines[0], [px, pz] = L.frame.at(0, L.island ? 0 : (L.P + L.WT) / 2 || 4.8);
   rec.envPlatform = bakeProbe(rec, px, L.yp + 2.0, pz);
+  if (p.layout === 'osm') {
+    // 改札の階: 改札の外の少し手前か、出入口の扉の前
+    const g = p.gates[0], d = p.pitInfo[0]?.d;
+    const [hx, hz] = g ? g.frame.at(-2.5, (g.t0 + g.t1) / 2) : d ? [d.x + d.dx * 2.5, d.z + d.dz * 2.5] : [px, pz];
+    rec.envHall = bakeProbe(rec, hx, p.ym + 1.8, hz);
+    return;
+  }
   const halls = p.rects.filter((r) => r.kind === 'paid' || r.kind === 'unpaid');
   const r = halls.reduce((a, b) => ((b.s1 - b.s0) * (b.t1 - b.t0) > (a.s1 - a.s0) * (a.t1 - a.t0) ? b : a), halls[0]);
   const [hx, hz] = r.frame.at((r.s0 + r.s1) / 2, (r.t0 + r.t1) / 2);
@@ -175,16 +184,60 @@ async function loadAll() {
   const bbox = bboxAround(preset.lat, preset.lon, preset.radius);
   const terrainFile = fetchTerrainFile(PRESET);
   const metroFile = fetch(`${import.meta.env.BASE_URL}data/${PRESET}-metro.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  // 駅の中と出入口（OpenStreetMap の屋内の地図。scripts/metro-osm.mjs）
+  const osmFile = fetch(`${import.meta.env.BASE_URL}data/${PRESET}-metro-osm.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
   const data = await loadBaseData({ bbox, presetId: PRESET, onStatus: (t) => setLoading(t, 0.08) });
   const { terrain } = await loadTerrain({ filePromise: terrainFile, bbox, osm: data.osm, onStatus: (t) => setLoading(t, 0.15) });
   terrain.metroWalk = true; // 出入口の吹き抜けの下の扉を開け、階段を下りられるように（world/ground.js・stream.js）
   const metro = await metroFile;
-  // 路線網（駅の向き）。出入口の階段の深さは、駅の改札階の床にそろえる（地上の出入口を組み立てる前に。world/ground.js）
+  const osmStations = (await osmFile)?.stations || null;
+  // 路線網（駅の位置と向き: OSM のホーム）。出入口の階段の深さは、駅の階の床にそろえる（地上の出入口を組み立てる前に。world/ground.js）
   const { proj } = areaFrame(bbox);
-  const network = buildNetwork(proj, { bdStations: metro?.stations || null });
+  const network = buildNetwork(proj, { bdStations: metro?.stations || null, osm: osmStations });
   const entrancesOf = (s) => (terrain.metro || []).filter((e) => e.kind === 'metro' && e.station === s.bd);
+  if (osmStations) {
+    // 出入口: OSM の階段から作った吹き抜け（LiDAR の吹き抜けと合う所はその形）。OSM に出入口のない駅（高架の駅）は LiDAR のまま
+    const withOsm = new Set(Object.values(osmStations).filter((o) => o.bouches?.some((b) => b.kind === 'metro')).map((o) => o.bd));
+    terrain.metroRaw = (terrain.metroRaw || []).filter((e) => e.kind !== 'metro' || !withOsm.has(e.station))
+      .concat(Object.values(osmStations).flatMap((o) => (o.bouches || []).filter((b) => b.kind === 'metro')));
+    // ホームが地下 1 階の駅: 吹き抜けをホームまで届く長さに、片側にしかなければ反対側にも
+    terrain.metroPrepare = (list) => {
+      for (const s of network.stations) {
+        const own = list.filter((e) => e.kind === 'metro' && e.station === s.bd);
+        alignShallowPits(s, own);
+        list.push(...completeShallowPits(s, own));
+      }
+    };
+  }
+  const osmLocal = new Map();
+  const osmOf = (s) => {
+    if (!osmStations?.[s.id]) return null;
+    if (!osmLocal.has(s.id)) osmLocal.set(s.id, projectStationOsm(osmStations[s.id], proj));
+    return osmLocal.get(s.id);
+  };
   terrain.metroAdjust = () => {
-    for (const s of network.stations) adjustStationPits(s, entrancesOf(s), (x, z) => terrain.h(x, z));
+    const groundAt = (x, z) => terrain.h(x, z);
+    for (const s of network.stations) {
+      s.layout = 'synth';
+      s.osmPlan = null;
+      const own = entrancesOf(s), o = osmOf(s);
+      if (o && osmCapable(s)) {
+        // OSM の間取り（出入口からどのホームへも歩けるときだけ。歩けなければ今までの間取り）
+        try {
+          osmStationDepth(s, own, groundAt);
+          const plan = planOsmStation(s, o, own.filter((e) => e.rim != null), { ground: groundAt(s.x, s.z), network });
+          if (plan && osmConnected(plan)) {
+            s.layout = 'osm';
+            s.osmPlan = plan;
+            continue;
+          }
+          console.info(`駅 ${s.name}: OSM の間取りがつながらないので、今までの間取り`);
+        } catch (err) {
+          console.warn(`駅 ${s.name}: OSM の間取りを組み立てられない`, err);
+        }
+      }
+      adjustStationPits(s, own, groundAt);
+    }
   };
   const world = await assembleStreamWorld({
     base: data, bbox, presetId: PRESET, buildingMats, groundMats, terrain, near: 380, far: 650,
@@ -193,6 +246,7 @@ async function loadAll() {
   scene.add(world.group);
   // 駅の高さ（改札階・ホーム）と線路の縦断面
   relevelNetwork(network, (s) => {
+    if (s.layout === 'osm') return { ym: s.osmPlan.ym, yp: Object.fromEntries(s.osmPlan.lines.map((L) => [L.line, L.yp])) };
     const lv = stationLevelsFor(s, entrancesOf(s), terrain.h(s.x, s.z));
     return { ym: lv.ym, yp: lv.yp };
   });
@@ -238,6 +292,7 @@ function setupSurfaceNav(world, terrain) {
 // ---------------------------------------------------------------- 駅・トンネルを組み立てる・捨てる
 function planFor(id) {
   const b = base, s = b.network.byId.get(id);
+  if (s.layout === 'osm' && s.osmPlan) return s.osmPlan;
   return planStation(s, b.entrancesOf(s), b.terrain.h(s.x, s.z), b.network);
 }
 
@@ -267,10 +322,11 @@ function ensureStation(id, preplanned = null) {
   const t0 = performance.now();
   const plan = preplanned || planFor(id);
   const t1 = performance.now();
-  const layer = buildStationNav(plan);
+  const osmLayout = plan.layout === 'osm';
+  const layer = osmLayout ? buildOsmStationNav(plan) : buildStationNav(plan);
   const streetAt = (x, z) => b.world.roadnet.streetNameAt(x, z)?.name || '';
   const t2 = performance.now();
-  const mesh = buildStationMesh(plan, { streetAt, network: b.network });
+  const mesh = osmLayout ? buildOsmStationMesh(plan, { streetAt, network: b.network }) : buildStationMesh(plan, { streetAt, network: b.network });
   const t3 = performance.now();
   const crowd = stationCrowd(plan, layer, (s.id.length * 7919 + s.id.charCodeAt(0) * 31 + Math.floor(Math.random() * 1000)) | 0);
   console.info(`  間取り ${(t1 - t0).toFixed(0)} ms・歩ける所 ${(t2 - t1).toFixed(0)} ms・メッシュ ${(t3 - t2).toFixed(0)} ms・人 ${(performance.now() - t3).toFixed(0)} ms`);
@@ -280,7 +336,7 @@ function ensureStation(id, preplanned = null) {
   const rec = { station: s, plan, group: mesh.group, doors: mesh.doors, displays: mesh.displays || [], layer };
   bakeStationProbes(rec);
   state.stations.set(id, rec);
-  console.info(`駅 ${s.name}: ${(performance.now() - t0).toFixed(0)} ms（通路 ${plan.corridors.length}、閉じた出入口 ${plan.closed.length}）`);
+  console.info(`駅 ${s.name}: ${(performance.now() - t0).toFixed(0)} ms（${osmLayout ? `OSM の間取り: 階 ${plan.levels.size}、階段 ${plan.blocks.length}、出入口 ${plan.pits.length}` : `通路 ${plan.corridors.length}、閉じた出入口 ${plan.closed.length}`}）`);
   for (const line of s.lines) {
     const i = LINES[line].indexOf(id);
     for (const j of [i - 1, i]) {
@@ -431,7 +487,7 @@ function updateTrains(dt) {
       if (open !== t.doorOpen) {
         if (t.doorOpen === 0 && open > 0) near(t) && audio.doors();
         if (t.doorOpen === 1 && open < 1) near(t) && audio.doors();
-        t.setDoors(open);
+        t.setDoors(open, doorSideAt(t.at, t.line));
         setPSD(t.at, t.line, side, open);
       }
       if (T >= DWELL.chime && T - dt < DWELL.chime && near(t)) audio.chime();
@@ -891,11 +947,12 @@ function teleportToPlatform(s, line, side) {
   state.station = s;
   releaseStations();
   const L = rec.plan.lines.find((q) => q.line === line);
-  const f = L.frame, [x, z] = f.at(-6 * side, 4.8 * side);
+  const inward = L.island ? -side : side; // ホームドアからホームの側（島式のホームは軸の側）
+  const f = L.frame, [x, z] = f.at(-6 * side, L.island ? (L.P - 1.7) * side : 4.8 * side);
   walker.place(x, L.yp, z);
   walker.region = nav.floorAt(x, z, L.yp)?.region || null;
   // ホームドアの方を向く
-  state.viewYaw = Math.atan2(-f.nx * side, f.nz * side);
+  state.viewYaw = Math.atan2(-f.nx * inward, f.nz * inward);
   state.viewPitch = 0;
   state.camInit = false;
   base.world.stream.update(s.x, s.z);
@@ -958,8 +1015,8 @@ async function startGame() {
       const p = car.pose;
       walker.place(p.x + p.fx * 1.6, p.y, p.z + p.fz * 1.6);
       walker.region = nav.floorAt(walker.x, walker.z, walker.y)?.region || null;
-      // 進む向きの右（ホームの側）の窓を向く
-      state.viewYaw = Math.atan2(p.fx, -p.fz) + Math.PI / 2 * 0.6;
+      // ホームの側（進む向きの右。島式のホームの駅では左）の窓を向く
+      state.viewYaw = Math.atan2(p.fx, -p.fz) + Math.PI / 2 * 0.6 * doorSideAt(s, line);
       state.viewPitch = -0.05;
       audio.announce(`Prochaine station : ${s.name}.`);
     }

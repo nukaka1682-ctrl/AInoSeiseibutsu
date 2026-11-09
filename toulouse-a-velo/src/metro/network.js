@@ -6,6 +6,8 @@
 // - 右側通行: 終点（A 線は Balma-Gramont、B 線は Ramonville）へ向かう電車は、進む向きの右の線路
 // 座標はゲームのローカル座標（x 東・z 南、m）。駅の局所座標は s（ホームの向き、終点へ向かう向きが +）と t（その右が +）
 
+import { STATION_FACTS } from './osmentrances.js';
+
 export const LINE_COLORS = { A: '#e2231a', B: '#f6b400' };
 
 // [id, BD TOPO の名前, 案内の名前, 日本語, 緯度, 経度]
@@ -74,6 +76,13 @@ export const LAYOUT = {
 export const TRAIN_CARS = { A: 4, B: 2 };
 
 export const wallT = () => LAYOUT.psd + LAYOUT.platformW; // ホームの奥の壁（軸から）
+// 島式のホーム（Capitole・Esquirol・Jean Jaurès の A 線。フランス語版ウィキペディア「un grand quai central」）: ホームドアの線（軸から）と、
+// 駅の前後で 2 本の線路の間が広がる長さ
+export const ISLAND_HALF = 5.2, ISLAND_TRANSITION = 60;
+// 島式のホームの駅の線ならホームドアの線の t（軸から）、相対式なら null
+export const islandOf = (station, line) => station.island?.[line] ?? null;
+// 電車の扉を開ける側（進む向きの右が +1。島式のホームでは左）
+export const doorSideAt = (station, line) => (islandOf(station, line) ? -1 : 1);
 
 // 駅の一覧（緯度経度は同梱の駅 bdStations があればそれで置き換える）
 export function stationList(bdStations = null) {
@@ -103,9 +112,48 @@ const norm = (x, z) => {
   return [x / l, z / l];
 };
 
+// OSM のホーム（toulouse-metro-osm.json の platforms）から、線ごとのホームの中心と向き・階。ホームの形の点の主成分の向き、
+// 中心は向きに沿った広がりの真ん中。hint: 向きの符号をそろえる向き（終点へ向かう向き）
+export function osmPlatformFrame(st, line, proj, hint) {
+  const plats = (st?.platforms || []).filter((q) => q.line === line || (q.line == null && line === 'A'));
+  // ホームの形ごとの主成分の向き（2 つのホームが前後にずれていても、それぞれの長い辺の向き）を、長さの重みで平均
+  let sx = 0, sz = 0, wsum = 0, cx = 0, cz = 0;
+  const all = [];
+  for (const q of plats) {
+    const pts = q.poly.map(([la, lo]) => proj.project(la, lo));
+    if (pts.length < 4) continue;
+    const mx = pts.reduce((a, p) => a + p[0], 0) / pts.length, mz = pts.reduce((a, p) => a + p[1], 0) / pts.length;
+    let sxx = 0, szz = 0, sxz = 0;
+    for (const [x, z] of pts) {
+      sxx += (x - mx) ** 2;
+      szz += (z - mz) ** 2;
+      sxz += (x - mx) * (z - mz);
+    }
+    const a = 0.5 * Math.atan2(2 * sxz, sxx - szz);
+    let ax = Math.cos(a), az = Math.sin(a);
+    if (hint && ax * hint[0] + az * hint[1] < 0) [ax, az] = [-ax, -az];
+    else if (!hint && wsum && ax * sx + az * sz < 0) [ax, az] = [-ax, -az];
+    const us = pts.map(([x, z]) => (x - mx) * ax + (z - mz) * az), len = Math.max(...us) - Math.min(...us);
+    sx += ax * len;
+    sz += az * len;
+    cx += mx * len;
+    cz += mz * len;
+    wsum += len;
+    all.push(...pts);
+  }
+  if (!wsum) return null;
+  const al = Math.hypot(sx, sz) || 1, ax = sx / al, az = sz / al;
+  const mx = cx / wsum, mz = cz / wsum;
+  // 中心: 向きに沿った広がりの真ん中（横は形の中心の平均）
+  const us = all.map(([x, z]) => (x - mx) * ax + (z - mz) * az);
+  const u0 = Math.min(...us), u1 = Math.max(...us);
+  const levels = plats.map((q) => q.level).filter((v) => v != null);
+  return { center: [mx + (ax * (u0 + u1)) / 2, mz + (az * (u0 + u1)) / 2], axis: [ax, az], level: levels.length ? Math.min(...levels) : null, length: u1 - u0 };
+}
+
 // 路線網。proj: LocalProjection、levelOf(station) → { ym, yp: { A, B } }（改札階・ホームの床の高さ。地形と出入口から決める。
-// 省略すると平らな地面の 6 m 下を改札階に）
-export function buildNetwork(proj, { bdStations = null, levelOf = null } = {}) {
+// 省略すると平らな地面の 6 m 下を改札階に）。osm: toulouse-metro-osm.json の stations（あれば駅のホームの位置と向きはこれから）
+export function buildNetwork(proj, { bdStations = null, levelOf = null, osm = null } = {}) {
   const stations = stationList(bdStations);
   const byId = new Map(stations.map((s) => [s.id, s]));
   for (const s of stations) [s.x, s.z] = proj.project(s.lat, s.lon);
@@ -118,9 +166,29 @@ export function buildNetwork(proj, { bdStations = null, levelOf = null } = {}) {
       s.axis[line] = [ax, az];
     });
   }
-  // 2 つの線の駅（Jean Jaurès）: 2 本目の線のホームは 1 本目に直交させる（向きは元の向きに近い方）
+  // OSM のホームがある駅: 線ごとのホームの中心と向き（Jean Jaurès は 2 つの線のホームが別の所）
   for (const s of stations) {
-    if (s.lines.length < 2) continue;
+    const o = osm?.[s.id];
+    if (!o) continue;
+    s.cx = {};
+    s.osmLevel = {};
+    for (const line of s.lines) {
+      const fr = osmPlatformFrame(o, line, proj, s.axis[line]);
+      if (!fr) continue;
+      s.cx[line] = fr.center;
+      s.axis[line] = fr.axis;
+      s.osmLevel[line] = fr.level;
+    }
+    const cs = Object.values(s.cx);
+    if (cs.length) [s.x, s.z] = [cs.reduce((a, c) => a + c[0], 0) / cs.length, cs.reduce((a, c) => a + c[1], 0) / cs.length];
+    // 島式のホーム（OSM の駅の間取りで組み立てる駅だけ）
+    for (const [line, kind] of Object.entries(STATION_FACTS[s.id]?.platform || {})) {
+      if (kind === 'central' && s.cx[line]) (s.island ||= {})[line] = ISLAND_HALF;
+    }
+  }
+  // 2 つの線の駅（Jean Jaurès）: OSM がなければ、2 本目の線のホームは 1 本目に直交させる（向きは元の向きに近い方）
+  for (const s of stations) {
+    if (s.lines.length < 2 || s.cx?.[s.lines[1]]) continue;
     const [ax, az] = s.axis[s.lines[0]], [bx, bz] = s.axis[s.lines[1]];
     const r = [-az, ax], side = r[0] * bx + r[1] * bz >= 0 ? 1 : -1;
     s.axis[s.lines[1]] = [r[0] * side, r[1] * side];
@@ -154,12 +222,13 @@ export function buildLinePath(line, list) {
     if (last && S - last.S < 1e-6) return;
     pts.push({ S, x, z, y, hx, hz });
   };
+  const C = (s) => s.cx?.[line] || [s.x, s.z]; // 線のホームの中心
   list.forEach((s, i) => {
-    const [ax, az] = s.axis[line], L = boxHalf(line, s), y = s.yp[line];
+    const [ax, az] = s.axis[line], L = boxHalf(line, s), y = s.yp[line], [sx, sz] = C(s);
     // 1 つ前の駅からの曲線
     if (i > 0) {
-      const p = list[i - 1], [px, pz] = p.axis[line], Lp = boxHalf(line, p), yp0 = p.yp[line];
-      const x0 = p.x + px * Lp, z0 = p.z + pz * Lp, x1 = s.x - ax * L, z1 = s.z - az * L;
+      const p = list[i - 1], [px, pz] = p.axis[line], Lp = boxHalf(line, p), yp0 = p.yp[line], [qx, qz] = C(p);
+      const x0 = qx + px * Lp, z0 = qz + pz * Lp, x1 = sx - ax * L, z1 = sz - az * L;
       const chord = Math.hypot(x1 - x0, z1 - z0), m = chord * 0.45;
       const n = Math.max(4, Math.ceil(chord / 2));
       for (let k = 1; k < n; k++) {
@@ -176,20 +245,34 @@ export function buildLinePath(line, list) {
     const n = Math.ceil((2 * L) / 2);
     for (let k = 0; k <= n; k++) {
       const u = -L + (2 * L * k) / n;
-      push(s.x + ax * u, s.z + az * u, y, ax, az);
+      push(sx + ax * u, sz + az * u, y, ax, az);
     }
   });
   // 駅の中心の S（ホームの直線の上で駅の中心に最も近い点を、線分の上で正確に）
   for (const s of list) {
+    const [sx, sz] = C(s);
     let best = Infinity, bestS = 0;
     for (let i = 0; i + 1 < pts.length; i++) {
       const a = pts[i], b = pts[i + 1], dx = b.x - a.x, dz = b.z - a.z, l2 = dx * dx + dz * dz;
-      const t = Math.max(0, Math.min(1, ((s.x - a.x) * dx + (s.z - a.z) * dz) / (l2 || 1)));
-      const d = Math.hypot(a.x + dx * t - s.x, a.z + dz * t - s.z);
+      const t = Math.max(0, Math.min(1, ((sx - a.x) * dx + (sz - a.z) * dz) / (l2 || 1)));
+      const d = Math.hypot(a.x + dx * t - sx, a.z + dz * t - sz);
       if (d < best) [best, bestS] = [d, a.S + (b.S - a.S) * t];
     }
     s.S = s.S || {};
     s.S[line] = bestS;
+  }
+  // 線路の中心の横のずれ（軸から）: 島式のホームの駅では、ホームの両側（ホームドアの線の 1.25 m 外）。駅の箱の端から
+  // ISLAND_TRANSITION m かけて、ふつうの間隔へなめらかに戻す
+  const base = LAYOUT.trackOff, gap = LAYOUT.psd - LAYOUT.trackOff;
+  for (const p of pts) p.off = base;
+  for (const s of list) {
+    const isl = islandOf(s, line);
+    if (!isl) continue;
+    const S0 = s.S[line], L = boxHalf(line, s), want = isl + gap;
+    for (const p of pts) {
+      const d = Math.abs(p.S - S0) - L, x = Math.max(0, Math.min(1, d / ISLAND_TRANSITION)), k = d <= 0 ? 1 : 1 - x * x * (3 - 2 * x);
+      p.off = Math.max(p.off, base + (want - base) * k);
+    }
   }
   return { line, stations: list, pts, length: pts[pts.length - 1].S };
 }
@@ -209,6 +292,7 @@ export function pathAt(path, S, out = {}) {
   out.x = a.x + (b.x - a.x) * t;
   out.z = a.z + (b.z - a.z) * t;
   out.y = a.y + (b.y - a.y) * t;
+  out.off = a.off != null ? a.off + (b.off - a.off) * t : LAYOUT.trackOff;
   const [hx, hz] = norm(a.hx + (b.hx - a.hx) * t, a.hz + (b.hz - a.hz) * t);
   out.hx = hx;
   out.hz = hz;
@@ -218,7 +302,7 @@ export function pathAt(path, S, out = {}) {
 // 線路の上の点: 進む向き dir（+1 終点へ、-1 起点へ）の電車の線路（右側通行）。out に x, z, y と車両の向き fx, fz
 export function trackAt(path, S, dir, out = {}) {
   pathAt(path, S, out);
-  const rx = -out.hz, rz = out.hx, o = LAYOUT.trackOff * dir;
+  const rx = -out.hz, rz = out.hx, o = (out.off ?? LAYOUT.trackOff) * dir;
   out.x += rx * o;
   out.z += rz * o;
   out.fx = out.hx * dir;
@@ -230,11 +314,12 @@ export function trackAt(path, S, dir, out = {}) {
 export function stationFrame(station, line) {
   const [ax, az] = station.axis[line];
   const nx = -az, nz = ax;
+  const [cx, cz] = station.cx?.[line] || [station.x, station.z];
   return {
-    ax, az, nx, nz, x: station.x, z: station.z,
-    at: (s, t) => [station.x + ax * s + nx * t, station.z + az * s + nz * t],
+    ax, az, nx, nz, x: cx, z: cz,
+    at: (s, t) => [cx + ax * s + nx * t, cz + az * s + nz * t],
     local: (x, z) => {
-      const dx = x - station.x, dz = z - station.z;
+      const dx = x - cx, dz = z - cz;
       return [dx * ax + dz * az, dx * nx + dz * nz];
     },
     rotY: Math.atan2(-az, ax), // three.js の rotation.y（局所の +x が s、+z が t）
