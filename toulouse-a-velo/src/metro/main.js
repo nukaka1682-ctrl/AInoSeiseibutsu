@@ -18,7 +18,7 @@ import { MapRenderer, drawMinimap } from '../ui/minimap.js';
 import { LINES, LINE_COLORS, TRAIN_CARS, buildNetwork, doorSideAt, relevelNetwork, runTime, stationFrame, stationList, terminusOf } from './network.js';
 import { adjustStationPits, buildStationNav, planStation, stationLevelsFor } from './stationplan.js';
 import { buildStationMesh } from './stationmesh.js';
-import { alignShallowPits, buildOsmStationNav, completeShallowPits, osmCapable, osmConnected, osmStationDepth, planOsmStation, projectStationOsm } from './osmplan.js';
+import { alignShallowPits, buildOsmStationNav, completeShallowPits, osmCapable, osmConnected, osmStationDepth, osmStationLevels, planOsmStation, projectStationOsm } from './osmplan.js';
 import { buildOsmStationMesh } from './osmmesh.js';
 import { Nav } from './nav.js';
 import { Walker } from './walker.js';
@@ -218,25 +218,10 @@ async function loadAll() {
   terrain.metroAdjust = () => {
     const groundAt = (x, z) => terrain.h(x, z);
     for (const s of network.stations) {
-      s.layout = 'synth';
-      s.osmPlan = null;
-      const own = entrancesOf(s), o = osmOf(s);
-      if (o && osmCapable(s)) {
-        // OSM の間取り（出入口からどのホームへも歩けるときだけ。歩けなければ今までの間取り）
-        try {
-          osmStationDepth(s, own, groundAt);
-          const plan = planOsmStation(s, o, own.filter((e) => e.rim != null), { ground: groundAt(s.x, s.z), network });
-          if (plan && osmConnected(plan)) {
-            s.layout = 'osm';
-            s.osmPlan = plan;
-            continue;
-          }
-          console.info(`駅 ${s.name}: OSM の間取りがつながらないので、今までの間取り`);
-        } catch (err) {
-          console.warn(`駅 ${s.name}: OSM の間取りを組み立てられない`, err);
-        }
-      }
-      adjustStationPits(s, own, groundAt);
+      // OSM の間取り: 出入口からどのホームへも歩ける駅（scripts/metro-osm.mjs が調べた印 layout）。間取りは駅を組み立てるときに作る
+      s.layout = osmStations?.[s.id]?.layout === 'osm' && osmCapable(s) ? 'osm' : 'synth';
+      if (s.layout === 'osm') osmStationDepth(s, entrancesOf(s), groundAt);
+      else adjustStationPits(s, entrancesOf(s), groundAt);
     }
   };
   const world = await assembleStreamWorld({
@@ -246,12 +231,12 @@ async function loadAll() {
   scene.add(world.group);
   // 駅の高さ（改札階・ホーム）と線路の縦断面
   relevelNetwork(network, (s) => {
-    if (s.layout === 'osm') return { ym: s.osmPlan.ym, yp: Object.fromEntries(s.osmPlan.lines.map((L) => [L.line, L.yp])) };
+    if (s.layout === 'osm') return osmStationLevels(s, terrain.h(s.x, s.z));
     const lv = stationLevelsFor(s, entrancesOf(s), terrain.h(s.x, s.z));
     return { ym: lv.ym, yp: lv.yp };
   });
   const map = new MapRenderer(world.parsed, world.rect);
-  base = { world, network, terrain, entrancesOf, map };
+  base = { world, network, terrain, entrancesOf, osmOf, map };
   life = new StreetLife(world, entrancesOf);
   world.group.add(life.group);
   window.__metroDebug.life = life;
@@ -292,7 +277,14 @@ function setupSurfaceNav(world, terrain) {
 // ---------------------------------------------------------------- 駅・トンネルを組み立てる・捨てる
 function planFor(id) {
   const b = base, s = b.network.byId.get(id);
-  if (s.layout === 'osm' && s.osmPlan) return s.osmPlan;
+  if (s.layout === 'osm') {
+    // OSM の間取り（1 回だけ作って使い回す）
+    if (!s.osmPlan) {
+      s.osmPlan = planOsmStation(s, b.osmOf(s), b.entrancesOf(s).filter((e) => e.rim != null), { ground: b.terrain.h(s.x, s.z), network: b.network });
+      if (!osmConnected(s.osmPlan)) console.warn(`駅 ${s.name}: OSM の間取りで、歩けない所があるかもしれない`);
+    }
+    return s.osmPlan;
+  }
   return planStation(s, b.entrancesOf(s), b.terrain.h(s.x, s.z), b.network);
 }
 

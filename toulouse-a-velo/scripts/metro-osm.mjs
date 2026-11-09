@@ -15,8 +15,12 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { stationList } from '../src/metro/network.js';
+import { buildNetwork, stationList } from '../src/metro/network.js';
 import { STATION_FACTS, stationBouches } from '../src/metro/osmentrances.js';
+import { alignShallowPits, completeShallowPits, osmCapable, osmConnected, osmStationDepth, planOsmStation, projectStationOsm } from '../src/metro/osmplan.js';
+import { projectEntrances } from '../src/world/metro.js';
+import { LocalProjection, bboxAround } from '../src/geo.js';
+import { AREA_PRESETS } from '../src/config.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BBOX = '43.54,1.37,43.65,1.50';
@@ -126,6 +130,25 @@ const lidar = JSON.parse(await readFile(join(root, 'public', 'data', 'toulouse-m
 for (const [id, st] of Object.entries(out)) {
   st.bouches = STATION_FACTS[id]?.hall === 'aerial' ? [] : stationBouches(st, lidar, STATION_FACTS[id] || {});
 }
+// 駅の中を OSM の間取りで組み立てられるか（出入口からどのホームにも歩けるか。平らな地面で調べる。ゲームの main.js はこれを見て、
+// 'osm' の駅だけ OSM の間取りに、ほかは今までの間取りにする。test/unit/metro-osm.test.mjs が、この印と osmplan.js が合うかを確かめる）
+{
+  const P = AREA_PRESETS.toulouse, bbox = bboxAround(P.lat, P.lon, P.radius);
+  const proj = new LocalProjection((bbox.s + bbox.n) / 2, (bbox.w + bbox.e) / 2);
+  const network = buildNetwork(proj, { osm: out });
+  for (const s of network.stations) {
+    const st = out[s.id];
+    st.layout = 'synth';
+    if (!osmCapable(s)) continue;
+    const bouches = st.bouches.filter((b) => b.kind === 'metro');
+    let pits = projectEntrances(bouches, proj).map((e) => ({ ...e, rim: 0, slope: [0, 0] }));
+    alignShallowPits(s, pits);
+    pits = pits.concat(completeShallowPits(s, pits));
+    osmStationDepth(s, pits, () => 0);
+    const plan = planOsmStation(s, projectStationOsm(st, proj), pits, { ground: 0, network });
+    if (plan && osmConnected(plan)) st.layout = 'osm';
+  }
+}
 const file = join(root, 'public', 'data', 'toulouse-metro-osm.json');
 const meta = { source: 'OpenStreetMap contributors (ODbL 1.0)', fetchedAt: osm.osm3s?.timestamp_osm_base || null, radius: R };
 await writeFile(file, JSON.stringify({ meta, stations: out }));
@@ -134,5 +157,5 @@ console.log(`${file}: 駅 ${Object.keys(out).length}、ホーム ${sum('platform
 for (const [id, s] of Object.entries(out)) {
   if (!s.osm || !s.platforms.length) console.warn(`  ${id}: OSM の駅 ${s.osm || 'なし'}、ホーム ${s.platforms.length}`);
   const k = (kind) => s.bouches.filter((b) => b.kind === kind).length;
-  console.log(`  ${id.padEnd(26)} 出入口 ${s.entrances.length}: 吹き抜け ${k('metro')}（LiDAR ${s.bouches.filter((b) => b.src === 'osm+lidar').length}）・建物 ${k('door')}・エレベーター ${k('elevator')}`);
+  console.log(`  ${id.padEnd(26)} 出入口 ${s.entrances.length}: 吹き抜け ${k('metro')}（LiDAR ${s.bouches.filter((b) => b.src === 'osm+lidar').length}）・建物 ${k('door')}・エレベーター ${k('elevator')}  間取り ${s.layout}`);
 }

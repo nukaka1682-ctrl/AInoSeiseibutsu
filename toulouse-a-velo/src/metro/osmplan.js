@@ -108,6 +108,23 @@ function onRingEdge(r, x, z, eps) {
   }
   return false;
 }
+// 凸包（反時計回り）
+function convexHull(pts) {
+  const p = pts.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lower = [], upper = [];
+  for (const q of p) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], q) <= 0) lower.pop();
+    lower.push(q);
+  }
+  for (let i = p.length - 1; i >= 0; i--) {
+    const q = p[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], q) <= 0) upper.pop();
+    upper.push(q);
+  }
+  return lower.slice(0, -1).concat(upper.slice(0, -1));
+}
+
 function areaOf(pts) {
   let a = 0;
   for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) a += pts[j][0] * pts[i][1] - pts[i][0] * pts[j][1];
@@ -171,6 +188,12 @@ export function osmStationDepth(station, pits, groundAt) {
     e.H = Math.max(2.8, Math.min(want, entranceMaxDepth(e)));
   }
   return Y;
+}
+
+// OSM の間取りの駅の高さ: 地下 1 階 ym（station.hallY。osmStationDepth で決める）と、線ごとのホームの床 yp
+export function osmStationLevels(station, ground) {
+  const Y = levelHeights(station.hallY, ground, platformLevelsOf(station));
+  return { ym: station.hallY, yp: Object.fromEntries(station.lines.map((l) => [l, Y(station.osmLevel[l])])) };
 }
 
 // ホームが地下 1 階の駅の、OSM に階段の地図のない出入口（osm-guess）: ホームの奥の壁ぎわに、ホームの向きに下りる吹き抜け
@@ -334,16 +357,37 @@ export function planOsmStation(station, osm, pits, { ground, network = null } = 
   for (const L of lines) {
     const f = L.frame;
     if (L.island) {
+      // s の範囲が重なるものは横に並べ（OSM の横の順に。両側に 1.6 m の通り道が残るなら）、ホームの真ん中にそろえる
       const list = blocks.filter((b) => b.toPlatform && b.line === L.line).sort((a, b) => span(a)[0] - span(b)[0]);
-      for (let i = 1; i < list.length; i++) {
-        if (!overlapS(list[i - 1], list[i], 1.5)) continue;
-        const need = span(list[i - 1])[1] + 1.5 - span(list[i])[0];
-        list[i - 1].sBot -= need / 2;
-        list[i].sBot += need / 2;
-      }
+      const clusters = [];
       for (const b of list) {
-        const lim = Math.max(0, L.island - b.W / 2 - 1.2);
-        b.tc = Math.abs(b.tOsm) < 2.5 ? 0 : Math.max(-lim, Math.min(lim, b.tOsm));
+        const c = clusters.find((q) => q.some((a) => overlapS(a, b, 1.5)));
+        if (c) c.push(b);
+        else clusters.push([b]);
+      }
+      for (const c of clusters) {
+        const width = c.reduce((a, b) => a + b.W, 0) + 0.3 * (c.length - 1);
+        if (c.length > 1 && width > 2 * (L.island - 1.6)) {
+          // 並べられない: s の向きに離す
+          for (let i = 1; i < c.length; i++) {
+            if (!overlapS(c[i - 1], c[i], 1.5)) continue;
+            const need = span(c[i - 1])[1] + 1.5 - span(c[i])[0];
+            c[i - 1].sBot -= need / 2;
+            c[i].sBot += need / 2;
+          }
+          for (const b of c) b.tc = 0;
+          continue;
+        }
+        c.sort((a, b) => a.tOsm - b.tOsm);
+        let t = -width / 2;
+        for (const b of c) {
+          b.tc = t + b.W / 2;
+          t += b.W + 0.3;
+        }
+        if (c.length === 1) {
+          const lim = Math.max(0, L.island - c[0].W / 2 - 1.6);
+          c[0].tc = Math.abs(c[0].tOsm) < 2.5 ? 0 : Math.max(-lim, Math.min(lim, c[0].tOsm));
+        }
       }
       continue;
     }
@@ -376,6 +420,30 @@ export function planOsmStation(station, osm, pits, { ground, network = null } = 
   for (let i = blocks.length - 1; i >= 0; i--) {
     const a = blocks[i];
     if (blocks.some((b, j) => j < i && b.lo === a.lo && b.hi === a.hi && b.dir[0] * a.dir[0] + b.dir[1] * a.dir[1] > 0.9 && Math.hypot(b.top[0] - a.top[0], b.top[1] - a.top[1]) < Math.max(a.W, b.W) / 2)) blocks.splice(i, 1);
+  }
+  // 平行に並んで重なる階段（ホームへ下りるもの以外。OSM で折り返しの階段を近くに描いたもの）は、横へ離す（壁を共有）
+  for (let iter = 0; iter < 4; iter++) {
+    let moved = false;
+    for (let i = 0; i < blocks.length; i++) {
+      for (let j = 0; j < i; j++) {
+        const a = blocks[j], b = blocks[i];
+        if (a.toPlatform && b.toPlatform) continue;
+        if (Math.abs(a.dir[0] * b.dir[0] + a.dir[1] * b.dir[1]) < 0.9) continue;
+        const v = [-a.dir[1], a.dir[0]], u = a.dir;
+        const rel = [b.top[0] - a.top[0], b.top[1] - a.top[1]];
+        const lat = rel[0] * v[0] + rel[1] * v[1];
+        const need = (a.W + b.W) / 2 + 0.05 - Math.abs(lat);
+        if (need <= 0) continue;
+        // s の範囲が重なるか（a の局所の s で）
+        const sb0 = rel[0] * u[0] + rel[1] * u[1], sb1 = sb0 + (b.dir[0] * u[0] + b.dir[1] * u[1]) * b.len;
+        if (Math.max(sb0, sb1) < -0.5 || Math.min(sb0, sb1) > a.len + 0.5) continue;
+        const sg = lat >= 0 ? 1 : -1, wa = a.toPlatform ? 0 : b.toPlatform ? 1 : 0.5, wb = 1 - wa;
+        a.top = [a.top[0] - v[0] * sg * need * wa, a.top[1] - v[1] * sg * need * wa];
+        b.top = [b.top[0] + v[0] * sg * need * wb, b.top[1] + v[1] * sg * need * wb];
+        moved = true;
+      }
+    }
+    if (!moved) break;
   }
   const finishBlock = (b) => {
     b.frame = localFrame(b.top, b.dir);
@@ -462,7 +530,7 @@ export function planOsmStation(station, osm, pits, { ground, network = null } = 
       if (b.hi === l && !b.doorStep) {
         parts.push(poly(orientedRect(b.top, b.dir, -PAD, 0.1, -b.W / 2 - 0.4, b.W / 2 + 0.4)));
         // 吹き抜けのまわりの通り道（吹き抜けが通路を横切っても、まわりを歩ける）
-        if (!isPlat) parts.push(poly(orientedRect(b.top, b.dir, -0.1, b.len + 1.6, -b.W / 2 - 1.6, b.W / 2 + 1.6)));
+        if (!isPlat) parts.push(poly(orientedRect(b.top, b.dir, -PAD, b.len + 1.6, -b.W / 2 - 1.6, b.W / 2 + 1.6)));
         needed.push(b.frame.at(-PAD / 2, 0));
       }
       if (b.lo === l) {
@@ -475,6 +543,17 @@ export function planOsmStation(station, osm, pits, { ground, network = null } = 
       parts.push(poly(p.pad));
       needed.push([p.d.x + p.d.dx * 1.5, p.d.z + p.d.dz * 1.5]);
     }
+    // 折り返しの踊り場: この階に下りてくる階段の下の踊り場と、この階から下りる階段の上の踊り場が近ければ、まとめて 1 つの広い踊り場に
+    for (const a of blocks) {
+      if (a.lo !== l || a.doorStep) continue;
+      for (const b of blocks) {
+        if (b === a || b.hi !== l || b.doorStep) continue;
+        const pa = orientedRect(a.bottom, a.dir, -0.1, PAD, -a.W / 2 - 0.4, a.W / 2 + 0.4), pb = orientedRect(b.top, b.dir, -PAD, 0.1, -b.W / 2 - 0.4, b.W / 2 + 0.4);
+        const ca = a.frame.at(a.len + PAD / 2, 0), cb = b.frame.at(-PAD / 2, 0);
+        if (Math.hypot(ca[0] - cb[0], ca[1] - cb[1]) > 9) continue;
+        parts.push(poly(convexHull([...pa, ...pb])));
+      }
+    }
     let raw = minus(unionAll(parts), trackCuts);
     // 踊り場・扉の前・ホームのないかたまりは捨てる
     raw = raw.filter((pg) => needed.some((q) => inMulti([pg], ...q)));
@@ -483,6 +562,7 @@ export function planOsmStation(station, osm, pits, { ground, network = null } = 
     const lv = { level: l, y: Y(l), platform: isPlat, raw, needed, H: isPlat ? PLAT_H : OSM_HALL_H, links: 0 };
     lv.floor = minus(lv.raw, cuts);
     connectPieces(lv, trackCuts, cuts);
+    widenNecks(lv, trackCuts, cuts);
     lv.ceiling = minus(lv.raw, ceilCuts);
     levels.set(l, lv);
   }
@@ -637,6 +717,149 @@ function connectPieces(lv, trackCuts, cuts) {
   }
 }
 
+// 体の幅では通れない狭い所（床の形どうしのつなぎ目）: 床を 0.15 m の格子にして、壁から r より遠いマスのかたまりを数える。
+// つながった床の中で、縮めたかたまりが分かれていれば、いちばん近い所を通路（幅 3.2 m）でつなぐ（多角形の演算はつなぐときだけ）
+function widenNecks(lv, trackCuts, cuts, r = 0.32) {
+  for (let iter = 0; iter < 6; iter++) {
+    const g = rasterNecks(lv.floor, r);
+    if (!g) return;
+    const raw = minus(clip('union', lv.raw, poly(segRect(g.a, g.b, PATH_HALF))), trackCuts), floor = minus(raw, cuts);
+    if (floor.length > lv.floor.length) return; // つなぐと切れる（吹き抜けを横切る）: やめる
+    lv.raw = raw;
+    lv.floor = floor;
+    lv.links++;
+  }
+}
+
+// 格子で、縮めると分かれる所の両側の点 { a, b }（なければ null）
+function rasterNecks(mp, r, cell = 0.15) {
+  let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+  for (const pg of mp) for (const [x, z] of pg[0]) {
+    x0 = Math.min(x0, x);
+    z0 = Math.min(z0, z);
+    x1 = Math.max(x1, x);
+    z1 = Math.max(z1, z);
+  }
+  if (!Number.isFinite(x0)) return null;
+  const nx = Math.ceil((x1 - x0) / cell) + 2, nz = Math.ceil((z1 - z0) / cell) + 2, N = nx * nz;
+  if (N > 4e6) return null;
+  const inside = new Uint8Array(N);
+  const xs = [];
+  for (let j = 0; j < nz; j++) {
+    const zc = z0 + (j + 0.5) * cell;
+    xs.length = 0;
+    for (const pg of mp) {
+      for (const rg of pg) {
+        for (let i = 0; i + 1 < rg.length; i++) {
+          const [ax, az] = rg[i], [bx, bz] = rg[i + 1];
+          if ((az > zc) !== (bz > zc)) xs.push(ax + ((zc - az) / (bz - az)) * (bx - ax));
+        }
+      }
+    }
+    xs.sort((a, b) => a - b);
+    for (let k = 0; k + 1 < xs.length; k += 2) {
+      const i0 = Math.max(0, Math.ceil((xs[k] - x0) / cell - 0.5)), i1 = Math.min(nx - 1, Math.floor((xs[k + 1] - x0) / cell - 0.5));
+      for (let i = i0; i <= i1; i++) inside[j * nx + i] = 1;
+    }
+  }
+  // 外のマスからの距離（チャンファー 3-4。単位はマス）
+  const INF = 1e9, d = new Float32Array(N);
+  for (let k = 0; k < N; k++) d[k] = inside[k] ? INF : 0;
+  const a1 = 1, a2 = Math.SQRT2;
+  for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
+    const k = j * nx + i;
+    if (!d[k]) continue;
+    let v = d[k];
+    if (i > 0) v = Math.min(v, d[k - 1] + a1);
+    if (j > 0) {
+      v = Math.min(v, d[k - nx] + a1);
+      if (i > 0) v = Math.min(v, d[k - nx - 1] + a2);
+      if (i + 1 < nx) v = Math.min(v, d[k - nx + 1] + a2);
+    } else v = Math.min(v, a1);
+    if (i === 0 || i + 1 === nx || j + 1 === nz) v = Math.min(v, a1);
+    d[k] = v;
+  }
+  for (let j = nz - 1; j >= 0; j--) for (let i = nx - 1; i >= 0; i--) {
+    const k = j * nx + i;
+    if (!d[k]) continue;
+    let v = d[k];
+    if (i + 1 < nx) v = Math.min(v, d[k + 1] + a1);
+    if (j + 1 < nz) {
+      v = Math.min(v, d[k + nx] + a1);
+      if (i + 1 < nx) v = Math.min(v, d[k + nx + 1] + a2);
+      if (i > 0) v = Math.min(v, d[k + nx - 1] + a2);
+    }
+    d[k] = v;
+  }
+  const rc = r / cell;
+  // かたまり: 床（inside）と、縮めた床（d >= rc）
+  const label = (ok) => {
+    const lab = new Int32Array(N).fill(-1), sizes = [];
+    const stack = [];
+    for (let k = 0; k < N; k++) {
+      if (lab[k] >= 0 || !ok(k)) continue;
+      const id = sizes.length;
+      let n = 0;
+      lab[k] = id;
+      stack.push(k);
+      while (stack.length) {
+        const c = stack.pop();
+        n++;
+        const i = c % nx, j = (c - i) / nx;
+        for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const ii = i + di, jj = j + dj;
+          if (ii < 0 || jj < 0 || ii >= nx || jj >= nz) continue;
+          const q = jj * nx + ii;
+          if (lab[q] < 0 && ok(q)) {
+            lab[q] = id;
+            stack.push(q);
+          }
+        }
+      }
+      sizes.push(n);
+    }
+    return { lab, sizes };
+  };
+  const full = label((k) => inside[k] === 1), ero = label((k) => d[k] >= rc);
+  const minCells = Math.ceil(0.4 / (cell * cell)); // 0.4 m² より小さい縮めたかたまりは数えない
+  // 床のかたまりごとの、縮めたかたまり（大きいもの）
+  const per = new Map();
+  for (let k = 0; k < N; k++) {
+    const e = ero.lab[k];
+    if (e < 0 || ero.sizes[e] < minCells) continue;
+    const f = full.lab[k];
+    if (!per.has(f)) per.set(f, new Set());
+    per.get(f).add(e);
+  }
+  for (const [f, set] of per) {
+    if (set.size < 2) continue;
+    // いちばん大きい縮めたかたまりから、床の中を幅優先で、ほかの縮めたかたまりに着くまで
+    const main = [...set].reduce((a, b) => (ero.sizes[b] > ero.sizes[a] ? b : a));
+    const from = new Int32Array(N).fill(-1), q = [];
+    for (let k = 0; k < N; k++) if (ero.lab[k] === main) {
+      from[k] = k;
+      q.push(k);
+    }
+    for (let h = 0; h < q.length; h++) {
+      const c = q[h], i = c % nx, j = (c - i) / nx;
+      for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const ii = i + di, jj = j + dj;
+        if (ii < 0 || jj < 0 || ii >= nx || jj >= nz) continue;
+        const n2 = jj * nx + ii;
+        if (from[n2] >= 0 || full.lab[n2] !== f) continue;
+        from[n2] = from[c];
+        const e = ero.lab[n2];
+        if (e >= 0 && e !== main && set.has(e)) {
+          const P = (k) => [x0 + ((k % nx) + 0.5) * cell, z0 + (Math.floor(k / nx) + 0.5) * cell];
+          return { a: P(from[c]), b: P(n2) };
+        }
+        q.push(n2);
+      }
+    }
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------- 歩ける所
 export function buildOsmStationNav(plan) {
   const nav = new NavLayer(plan.station.id, { cell: 6 });
@@ -695,14 +918,14 @@ export function buildOsmStationNav(plan) {
     for (const [a, b] of [...lanes, [g.t1, g.t1]]) {
       if (a - t > 0.02) {
         const [p, q] = [at(0, t), at(0, a)];
-        nav.addWall(p[0], p[1], q[0], q[1], y - 0.2, y + 1.2);
+        nav.addWall(p[0], p[1], q[0], q[1], y - 0.2, y + 1.2, { gate: true });
       }
       t = b;
     }
     for (const [a, b] of lanes) {
       for (const tt of [a, b]) {
         const [p, q] = [at(-0.7, tt), at(0.7, tt)];
-        nav.addWall(p[0], p[1], q[0], q[1], y - 0.2, y + 1.0);
+        nav.addWall(p[0], p[1], q[0], q[1], y - 0.2, y + 1.0, { gate: true });
       }
     }
   }

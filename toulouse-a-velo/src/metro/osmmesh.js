@@ -4,6 +4,7 @@
 // - 改札（回転式の三脚の改札とガラスの仕切り）、出入口の吹き抜けの囲い（扉の口）、扉の先の数段の階段
 // - ホーム: 相対式は奥の壁に駅名の板・広告・路線図、島式は線路の向こうの壁に。ベンチ・方面の吊り看板・次の電車の LED 表示
 import * as THREE from 'three';
+import polygonClipping from 'polygon-clipping';
 import { Builder } from './geom.js';
 import { LAYOUT } from './network.js';
 import { MID_LANDING, PLAT_H, TREAD, escalatorHeight, escalatorRun, flightHeight, stairRun } from './stationplan.js';
@@ -101,13 +102,21 @@ export function buildOsmStationMesh(plan, { streetAt = () => '', network = null 
   const nameKey = signs.material('name', 2.4, 0.6, nameDraw(st.name, style.accent));
   const lvOf = (l) => plan.levels.get(l);
 
+  // 島式のホームのヴォールト（Capitole: 白いタイルの丸天井が線路とホームの上をおおう）。階段の吹き抜けのない s の範囲
+  for (const L of plan.lines) L.vault = style.vault && L.island ? vaultRange(plan, L) : null;
   // ---------------------------------------------------------------- 各階の床・天井・壁・照明
   for (const [, lv] of plan.levels) {
     const y = lv.y, yc = y + lv.H;
     const fk = lv.platform ? 'floor' : style.hallFloor;
     for (const pg of lv.floor) B.floorPoly(fk, open(pg[0]), pg.slice(1).map(open), y);
     const tint = lv.platform ? [1, 1, 1] : style.ceilingTint || [1, 1, 1];
-    for (const pg of lv.ceiling) B.floorPoly('ceiling', open(pg[0]), pg.slice(1).map(open), yc, { up: false, color: tint });
+    let ceiling = lv.ceiling;
+    for (const L of plan.lines) {
+      if (L.level !== lv.level || !L.vault) continue;
+      const f = L.frame, [s0, s1] = L.vault;
+      ceiling = polygonClipping.difference(ceiling, [[f.at(s0, -L.island - 0.01), f.at(s1, -L.island - 0.01), f.at(s1, L.island + 0.01), f.at(s0, L.island + 0.01), f.at(s0, -L.island - 0.01)]]);
+    }
+    for (const pg of ceiling) B.floorPoly('ceiling', open(pg[0]), pg.slice(1).map(open), yc, { up: false, color: tint });
     for (const [a, b] of floorEdges(lv.floor, blockFeet, pitFeet)) {
       if (lv.platform && psdEdge(plan, lv.level, a, b)) continue;
       B.wall(tileKey, a, b, y, yc, { n: inwardNormal(lv.raw, a, b) });
@@ -198,7 +207,7 @@ function platformMesh(B, signs, plan, L, style, tileKey, mats, nameKey, network,
       };
       for (let s = -Lb + 1; s <= Lb - 1 + 1e-6; s += 0.5) {
         const [x, z] = at(s, t);
-        if (blocked(x, z, 0.5) || !inMulti(lv.ceiling, x, z)) flush(s - 0.5);
+        if (blocked(x, z, 0.5) || !inMulti(lv.ceiling, x, z) || (L.vault && s > L.vault[0] - 0.5 && s < L.vault[1] + 0.5)) flush(s - 0.5);
         else if (a == null) a = s;
       }
       flush(Lb - 1);
@@ -266,7 +275,11 @@ function trackZone(B, L, style, ybed, yc) {
   for (const tr of tracks) {
     const t0 = Math.min(tr.z0, tr.z1), t1 = Math.max(tr.z0, tr.z1);
     B.floor('concrete', rect(-Lb, Lb, t0, t1), ybed, { color: [0.6, 0.6, 0.6] });
-    B.floor('darkCeiling', rect(-Lb, Lb, t0, t1), yc, { up: false });
+    if (L.vault) {
+      // ヴォールトの外だけ平らな暗い天井
+      if (L.vault[0] > -Lb + 0.01) B.floor('darkCeiling', rect(-Lb, L.vault[0], t0, t1), yc, { up: false });
+      if (L.vault[1] < Lb - 0.01) B.floor('darkCeiling', rect(L.vault[1], Lb, t0, t1), yc, { up: false });
+    } else B.floor('darkCeiling', rect(-Lb, Lb, t0, t1), yc, { up: false });
     for (const o of [-0.86, 0.86]) {
       const [x, z] = at(0, tr.tc + o);
       B.box('paint', x, z, ybed, yp - 1.0, f.ax, f.az, 2 * Lb, 0.36, { color: C.pad });
@@ -285,6 +298,7 @@ function trackZone(B, L, style, ybed, yc) {
       for (const se of [-Lb, Lb]) B.wall('concrete', at(se, tEdge), at(se, tw), yp + 3.6, yc, { n: [-f.ax * Math.sign(se), -f.az * Math.sign(se)] });
     }
   }
+  if (L.vault) vaultMesh(B, L, yc);
   if (!L.island) {
     for (let s = -Lb + 3; s <= Lb - 3; s += 6) {
       const [x, z] = at(s, 0);
@@ -632,6 +646,57 @@ function hallFurniture(B, signs, plan, lv, style, nameKey) {
   } else if (style.art === 'columns') {
     B.cyl('concrete', x, z, y, yH, 0.45, { seg: 20, color: [0.86, 0.86, 0.84] });
     ring(0.5);
+  }
+}
+
+// ヴォールトをかける s の範囲（ホームの箱のうち、この線のホームへ上から下りる階段の吹き抜けにかからない、いちばん長い区間）
+function vaultRange(plan, L) {
+  const cuts = plan.blocks.filter((b) => b.lo === L.level || (b.hi != null && b.lo < L.level && L.level < b.hi)).map((b) => {
+    const ss = b.foot.map((q) => L.frame.local(...q)[0]);
+    return [Math.min(...ss) - 0.3, Math.max(...ss) + 0.3];
+  }).filter(([a, b]) => b > -L.Lb && a < L.Lb).sort((p, q) => p[0] - q[0]);
+  let best = null, s = -L.Lb;
+  for (const [a, b] of [...cuts, [L.Lb, L.Lb]]) {
+    if (a - s > (best ? best[1] - best[0] : 0)) best = [s, Math.min(a, L.Lb)];
+    s = Math.max(s, b);
+  }
+  return best && best[1] - best[0] > 8 ? best : null;
+}
+
+// 白いタイルのヴォールト（線路の向こうの壁の上 2.6 m から、真ん中で天井の 1.2 m 上まで。半楕円）と、両端の半円の壁
+function vaultMesh(B, L, yc) {
+  const f = L.frame, at = f.at, [s0, s1] = L.vault, Rt = L.island + TRACK_W, y0 = L.yp + 2.6, Rh = yc + 1.2 - y0, n = 16;
+  const P = (sv, th) => {
+    const [x, z] = at(sv, Rt * Math.cos(th));
+    return [x, y0 + Rh * Math.sin(th), z];
+  };
+  for (let k = 0; k < n; k++) {
+    const a0 = Math.PI - (k / n) * Math.PI, a1 = Math.PI - ((k + 1) / n) * Math.PI, am = (a0 + a1) / 2;
+    // 内向きの法線（楕円の法線を反転）
+    const nt = -Math.cos(am) / Rt, ny = -Math.sin(am) / Rh, nl = Math.hypot(nt, ny);
+    const nrm = [(f.nx * nt) / nl, ny / nl, (f.nz * nt) / nl];
+    const segs = Math.max(1, Math.ceil((s1 - s0) / 3));
+    for (let i = 0; i < segs; i++) {
+      const sa = s0 + ((s1 - s0) * i) / segs, sb = s0 + ((s1 - s0) * (i + 1)) / segs;
+      B.quad('tile', P(sa, a0), P(sb, a0), P(sb, a1), P(sa, a1), nrm, { uvs: [[sa / 1.2, (k * Rh) / n / 0.6], [sb / 1.2, (k * Rh) / n / 0.6], [sb / 1.2, ((k + 1) * Rh) / n / 0.6], [sa / 1.2, ((k + 1) * Rh) / n / 0.6]] });
+    }
+  }
+  // 両端の半円（ホームの天井から上。駅の中を向く）
+  for (const [se, sg] of [[s0, 1], [s1, -1]]) {
+    const c = [...at(se, 0)];
+    const cpt = [c[0], yc, c[1]];
+    for (let k = 0; k < n; k++) {
+      const a0 = Math.PI - (k / n) * Math.PI, a1 = Math.PI - ((k + 1) / n) * Math.PI;
+      const p0 = P(se, a0), p1 = P(se, a1);
+      if (p0[1] < yc && p1[1] < yc) continue;
+      B.quad('tile', [p0[0], Math.max(yc, p0[1]), p0[2]], [p1[0], Math.max(yc, p1[1]), p1[2]], [p1[0], yc, p1[2]], [p0[0], yc, p0[2]], [f.ax * sg, 0, f.az * sg]);
+    }
+    void cpt;
+  }
+  // 照明（ヴォールトの両側の、ホームの縁の上に吊った帯）
+  for (const sg of [1, -1]) {
+    const [cx, cz] = at((s0 + s1) / 2, (L.island - 0.4) * sg);
+    B.box('light', cx, cz, yc + 0.35, yc + 0.43, f.ax, f.az, s1 - s0 - 2, 0.16);
   }
 }
 

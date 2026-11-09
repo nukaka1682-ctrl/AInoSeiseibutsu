@@ -75,12 +75,17 @@ test('階の高さ: 地下 1 階から 5 m ごと、ホームの階の上は 5.5
   assert.equal(Y(-2.5), -12.75);
 });
 
-test('OSM の間取り: 地下の駅はどれも、出入口からどのホームにも行ける（OSM に駅の中の階段がない Compans-Caffarelli は今までの間取り）', () => {
+test('OSM の間取り: 地下の駅はどれも、出入口からどのホームにも行ける（OSM に駅の中の階段がない Compans-Caffarelli は今までの間取り）。データの印 layout と合う', () => {
   for (const s of network.stations) {
-    if (!osmCapable(s)) continue;
+    const flag = osm.stations[s.id].layout;
+    if (!osmCapable(s)) {
+      assert.equal(flag, 'synth', s.id);
+      continue;
+    }
     const p = plan(s.id);
     assert.ok(p, s.id);
     assert.equal(osmConnected(p), s.id !== 'compans-caffarelli', `${s.id} のつながり`);
+    assert.equal(flag, osmConnected(p) ? 'osm' : 'synth', `${s.id} の印（scripts/metro-osm.mjs で作り直す）`);
   }
 });
 
@@ -148,5 +153,42 @@ test('OSM の間取りのつなぎ目: 出入口の扉・階段の上と下に�
         assert.equal(seamless(nav, b.frame.at(b.len - 0.6, t), b.frame.at(b.len + 0.8, t), b.y1), null, `${s.id} の ${b.hi}→${b.lo} の下の端`);
       }
     }
+  }
+});
+
+// 体の幅で歩く（壁から 0.2 m 離れたマスだけ。改札の通路 0.8 m は格子が粗いので除く）: 出入口からホームの両側へ、ホームからどの出入口へも
+function walkableWide(p) {
+  const nav = new Nav(), layer = buildOsmStationNav(p);
+  for (const w of layer.walls) if (w.gate) w.active = false;
+  nav.add(layer);
+  const G = 0.25, seen = new Set(), q = [];
+  const key = (x, z, y) => `${Math.round(x / G)},${Math.round(z / G)},${Math.round(y / 1.2)}`;
+  for (const e of p.pits) {
+    const [x, z] = entranceFrame(e).at(-e.len / 2 + 0.6, 0), fl = nav.floorAt(x, z, 0.3);
+    if (fl) q.push([x, z, fl.y]);
+  }
+  const reached = new Set(), landings = new Set();
+  for (let i = 0; i < q.length && i < 200000; i++) {
+    const [x, z, y] = q[i];
+    for (const [dx, dz] of [[G, 0], [-G, 0], [0, G], [0, -G]]) {
+      const st = nav.step(x, z, y, x + dx, z + dz);
+      if (!st) continue;
+      const k = key(x + dx, z + dz, st.y);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      if (nav.resolve(x + dx, z + dz, 0.2, st.y).hit) continue;
+      if (st.region?.kind === 'platform') reached.add(`${st.region.line}${st.region.side}`);
+      if (st.region?.kind === 'landing') landings.add(st.region.pit);
+      q.push([x + dx, z + dz, st.y]);
+    }
+  }
+  return { reached, landings };
+}
+
+test('OSM の間取りを体の幅で歩く: 折り返しの階段（Esquirol）・吹き抜けのまわり（Carmes）・通路のつなぎ目（Marengo）・改札（Saint-Cyprien）', () => {
+  for (const id of ['esquirol', 'carmes', 'marengo', 'saint-cyprien']) {
+    const p = plan(id), { reached, landings } = walkableWide(p);
+    for (const L of p.lines) for (const side of [1, -1]) assert.ok(reached.has(`${L.line}${side}`), `${id} の ${L.line} 線 ${side} のホーム`);
+    assert.equal(landings.size, p.pits.length, `${id} のどの出入口の踊り場にも着く`);
   }
 });
