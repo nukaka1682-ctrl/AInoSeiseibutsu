@@ -182,10 +182,27 @@ export function osmStationDepth(station, pits, groundAt) {
     ym = Math.round(ym * 100) / 100;
   } else ym = hallLevel(station, own, groundAt);
   station.hallY = ym;
-  const Y = levelHeights(ym, groundAt(station.x, station.z), plat);
-  for (const e of own) {
-    const want = rimAt(e, e.len / 2, 0) - Y(e.level ?? -1) + 0.03; // 踊り場は床の 3 cm 下（床と重ならない）
-    e.H = Math.max(2.8, Math.min(want, entranceMaxDepth(e)));
+  return osmPitDepths(station, own, groundAt(station.x, station.z));
+}
+
+// 出入口の吹き抜けの深さ e.H と着く階 e.level（station.hallY から）。吹き抜けの長さで届かない深さ（3 m より多く足りない）の
+// ホームでない階なら、届く階で止める（Marengo の、地上から地下 2 階へ直に下りるエスカレーター: 地下 1 階に着き、駅の中の階段で下りる）
+export function osmPitDepths(station, pits, ground) {
+  const plat = platformLevelsOf(station);
+  const Y = levelHeights(station.hallY, ground, plat);
+  for (const e of pits) {
+    if (e.kind !== 'metro' || e.rim == null) continue;
+    let lv = e.osmLevel ?? e.level ?? -1;
+    e.osmLevel = lv; // OSM の着く階（作り直しても変わらない）
+    const depth = (l) => {
+      const want = rimAt(e, e.len / 2, 0) - Y(l) + 0.03; // 踊り場は床の 3 cm 下（床と重ならない）
+      return { want, H: Math.max(2.8, Math.min(want, entranceMaxDepth(e))) };
+    };
+    let d = depth(lv);
+    // ホームへ直に下りる吹き抜け（Faculté de Pharmacie の地上の駅舎からホームへのエスカレーター）はそのまま（扉の先の階段でホームへ）
+    while (lv < -1 && Number.isInteger(lv) && !plat.has(lv) && d.want - d.H > 3) d = depth(++lv);
+    e.level = lv;
+    e.H = d.H;
   }
   return Y;
 }
