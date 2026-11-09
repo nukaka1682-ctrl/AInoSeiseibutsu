@@ -249,6 +249,7 @@ async function loadAll() {
   life = new StreetLife(world, entrancesOf);
   world.group.add(life.group);
   window.__metroDebug.life = life;
+  window.__metroDebug.base = base; // 確認用（test/metro-shot.mjs から全駅の出入口を調べる）
   setupSurfaceNav(world, terrain);
   return base;
 }
