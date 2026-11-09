@@ -108,7 +108,7 @@ if (shots.includes('all') || shots.includes('walk')) {
       for (const w of gateWalls) w.active = true;
       return { error: `道が見つからない（${q.length} 点）` };
     }
-    const nearGate = (x, z) => p.gates.some((g) => {
+    const nearGate = (x, z, y) => Math.abs(y - p.ym) < 1 && p.gates.some((g) => {
       const [s, t] = g.frame.local(x, z);
       return Math.abs(s - g.s) < 1.4 && t > g.t0 - 0.3 && t < g.t1 + 0.3;
     });
@@ -152,6 +152,7 @@ if (shots.includes('all') || shots.includes('walk')) {
       if (i > 0) {
         const [px, pz] = path[i - 1];
         for (const g of p.gates) {
+          if (Math.abs(y - p.ym) > 1) continue; // 改札は改札の階だけ（ほかの階で同じ線を横切っても通らない）
           const [s0, t0] = g.frame.local(px, pz), [s1, t1] = g.frame.local(x, z);
           if ((s0 - g.s) * (s1 - g.s) > 0 || t1 < g.t0 - 0.3 || t1 > g.t1 + 0.3 || (!osm && Math.abs(t1) > 8.2)) continue;
           const tc = laneCenters(g).reduce((a, b) => (Math.abs(b - t1) < Math.abs(a - t1) ? b : a));
@@ -159,7 +160,7 @@ if (shots.includes('all') || shots.includes('walk')) {
           pts.push([...g.frame.at(g.s - dir * 1.2, tc), null], [...g.frame.at(g.s + dir * 1.2, tc), 'gate']);
         }
       }
-      if (keep.has(i) && !nearGate(x, z)) pts.push([x, z, change ? `${kind}-${i}` : null]);
+      if (keep.has(i) && !nearGate(x, z, y)) pts.push([x, z, change ? `${kind}-${i}` : null]);
       last = kind;
     });
     return { start, y: f0.y, pts };
