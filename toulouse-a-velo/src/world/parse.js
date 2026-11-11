@@ -76,28 +76,34 @@ export const CAR_ROADS = new Set([
   'trunk_link', 'primary_link', 'secondary_link', 'tertiary_link',
 ]);
 
-// データの誤りを写真に合わせて直す道（IGN の道の番号 → 置き換えるタグ。shift: 線を進む向きの右へずらす m、
-// parkSide: 路上駐車する側 'right' / 'left'、bare: 路面の標示（車線・自転車レーン・絵）を描かない）。利用者の Street View: Purpan の近くの
-// Avenue de Grande-Bretagne の西行き（北側）の車道は 1 車線（約 4 m）。データは 4〜5 車線・14〜15 m
-// 道の番号は地図データを取り直すと変わることがある（IGN がデータを更新すると番号がずれる）ので、通りの名前（name）も
-// 合う道だけを直す（別の道を誤って直さない）
-const ROAD_FIXES = {
-  41226: { name: /Grande[- ]Bretagne/i, lanes: '1', width: '4' },
-  142020: { name: /Grande[- ]Bretagne/i, lanes: '1', width: '4' },
-  142062: { name: /Grande[- ]Bretagne/i, lanes: '1', width: '4' },
+// データの誤りを写真に合わせて直す道（置き換えるタグ。shift: 線を進む向きの右へずらす m、parkSide: 路上駐車する側
+// 'right' / 'left'、bare: 路面の標示（車線・自転車レーン・絵）を描かない）。
+// 道は、通りの名前（name）・場所（box [南, 西, 北, 東]。道の両端の中点が入る）・データの値（when）・進む向き（west: 西行き）で選ぶ。
+// IGN の道の番号は、データが更新されると変わる（2026 年秋の更新で番号がずれ、番号で選んでいた補正が外れた）ので使わない
+const ROAD_FIXES = [
+  // 利用者の Street View: Avenue de Grande-Bretagne の西行き（トラムの軌道の北側）の車道は 1 車線（約 4 m）。
+  // データは 4〜5 車線・14〜17 m
+  { name: /Grande[- ]Bretagne/i, box: [43.6035, 1.4025, 43.6056, 1.4070], when: (t) => t.oneway && +t.lanes >= 4, fix: { lanes: '1', width: '4' } },
+  // 利用者の Street View 225653: Purpan の脇（A620 の西）の Avenue de Grande-Bretagne の西行きは標示のない 1 車線（約 4.5 m）。
+  // データは 3 車線・8〜9 m で、線はトラムの軌道の縁にあり、実際の車線の中心はもう少し北（航空写真。軌道の芝との間を
+  // あけすぎないよう 2 m）
+  { name: /Grande[- ]Bretagne/i, box: [43.6052, 1.40183, 43.6062, 1.4030], west: true, when: (t) => t.oneway && +t.lanes === 3, fix: { lanes: '1', width: '4.5', shift: 2, bare: true } },
   // 利用者の Street View 224901: Rue Laganne（Prairie des Filtres の西）は、西の庭の塀から東の擁壁まで約 8 m で、
   // 1 車線＋東の擁壁沿いの縦列駐車（約 5.5 m）と西の約 2 m の歩道。データの線は通りの中心より約 2 m 東（航空写真）
-  37419: { name: /^Rue Laganne$/i, width: '5.5', shift: -2, parkSide: 'right' },
-  // 利用者の Street View 225653: Purpan の脇の Avenue de Grande-Bretagne の西行きは標示のない 1 車線（約 4.5 m）。
-  // データの線はトラムの軌道の縁にあり、実際の車線の中心はもう少し北（航空写真。軌道の芝との間をあけすぎないよう 2 m）
-  99386: { name: /Grande[- ]Bretagne/i, lanes: '1', width: '4.5', shift: 2, bare: true },
-};
-export function roadFix(id, tags) {
-  const f = ROAD_FIXES[id];
-  if (!f || !tags?.highway || !f.name.test(tags.name || '')) return null;
-  const { name, ...fix } = f;
-  return fix;
+  { name: /^Rue Laganne$/i, box: [43.5955, 1.4355, 43.5966, 1.4365], fix: { width: '5.5', shift: -2, parkSide: 'right' } },
+];
+// tags: 道のタグ、a・b: 道の両端 [緯度, 経度]（一方通行は進む向きの順）
+export function roadFix(tags, a, b) {
+  if (!tags?.highway || !tags.name) return null;
+  const lat = (a[0] + b[0]) / 2, lon = (a[1] + b[1]) / 2;
+  for (const f of ROAD_FIXES) {
+    if (!f.name.test(tags.name) || lat < f.box[0] || lon < f.box[1] || lat > f.box[2] || lon > f.box[3]) continue;
+    if ((f.when && !f.when(tags)) || (f.west && !(b[1] < a[1]))) continue;
+    return f.fix;
+  }
+  return null;
 }
+const FIX_NAMES = /Grande[- ]Bretagne|^Rue Laganne$/i; // 補正のある通り（両端の緯度・経度を求めるのはこの通りだけ）
 
 // ポン・ヌフの橋の端のまわりの、名前のない細い車道（IGN の 2026 年秋のデータで増えた、河岸へ下りる道・歩道の上の側道。
 // 橋の端のすぐ先で橋の道の中心につながり、橋の歩道とその続きの上に路面や別の橋として重なる）は作らない。
@@ -393,7 +399,15 @@ export function parseOsm(osm, proj, rect, bdtopo = []) {
   const rails = [];
   const waterLines = [];
   for (const w of ways.values()) {
-    const fix = roadFix(w.id, w.tags);
+    let fix = null;
+    if (w.tags?.highway && w.nodes && FIX_NAMES.test(w.tags.name || '')) {
+      const ends = [w.nodes[0], w.nodes[w.nodes.length - 1]].map((id) => nodePos.get(id));
+      if (ends[0] && ends[1]) {
+        const ll = ends.map((p) => proj.unproject(p[0], p[1]));
+        if (w.tags.oneway === '-1' || w.tags.oneway === 'reverse') ll.reverse();
+        fix = roadFix(w.tags, ll[0], ll[1]);
+      }
+    }
     const t = fix ? { ...w.tags, ...fix } : w.tags;
     if (!t || !w.nodes) continue;
     if (t.highway && !SKIP_HIGHWAY.has(t.highway)) {
