@@ -206,14 +206,14 @@ test('IGN: 建物・道路・水域・広場を OSM 形式に変換する', () =
 });
 
 test('写真で直す道: 線を横にずらし、両端（交差点）は動かさない', () => {
-  // Rue Laganne（way 37419）: 北向きの一方通行を 2 m 西（進む向きの左）へ、端から 12 m かけてずらす
-  const proj = new LocalProjection(43.6, 1.445);
+  // Rue Laganne（Prairie des Filtres の西の区間）: 北向きの一方通行を 2 m 西（進む向きの左）へ、端から 12 m かけてずらす
+  const proj = new LocalProjection(43.5953, 1.4359);
   const node = (id, x, z) => {
     const [lat, lon] = proj.unproject(x, z);
     return { type: 'node', id, lat, lon };
   };
   const elements = [node(1, 0, 0), node(2, 10, -90), node(3, 20, -180),
-    { type: 'way', id: 37419, nodes: [1, 2, 3], tags: { highway: 'residential', oneway: 'yes', name: 'Rue Laganne' } }];
+    { type: 'way', id: 1000, nodes: [1, 2, 3], tags: { highway: 'residential', oneway: 'yes', name: 'Rue Laganne' } }];
   const parsed = parseOsm({ elements }, proj, { minX: -500, minZ: -500, maxX: 500, maxZ: 500 }, []);
   const road = parsed.roads[0];
   assert.equal(road.width, 5.5);
@@ -366,4 +366,36 @@ test('隣と接する壁: 同じ線上にある別の建物の辺と高さ', () 
   const [t0, t1, h] = cover[0];
   assert.ok(Math.abs(t0 - 2) < 0.01 && Math.abs(t1 - 8) < 0.01 && h === 9);
   assert.deepEqual(party(a, [0, 0], [10, 0]), []); // 南の壁は通りに面している
+});
+
+test('写真で決めた道の補正: 通りの名前・場所・データの値・向きが合う道だけ（道の番号は使わない）', async () => {
+  const { roadFix } = await import('../../src/world/parse.js');
+  const lag = { highway: 'residential', name: 'Rue Laganne', oneway: 'yes' };
+  assert.deepEqual(roadFix(lag, [43.5953, 1.4357], [43.59683, 1.43634]), { width: '5.5', shift: -2, parkSide: 'right' });
+  assert.equal(roadFix(lag, [43.59317, 1.43479], [43.5942, 1.43523]), null, '同じ通りの離れた区間');
+  assert.equal(roadFix({ ...lag, name: 'Cours Dillon' }, [43.5953, 1.4357], [43.59683, 1.43634]), null);
+  const gb = { highway: 'secondary', name: 'Avenue de Grande Bretagne', oneway: 'yes', lanes: '5', width: '15' };
+  assert.deepEqual(roadFix(gb, [43.60447, 1.40507], [43.60458, 1.40481]), { lanes: '1', width: '4' });
+  assert.equal(roadFix({ ...gb, lanes: '1', width: '3' }, [43.60431, 1.40505], [43.60403, 1.40577]), null, 'すでに 1 車線の道');
+  const gb3 = { ...gb, lanes: '3', width: '8' };
+  assert.equal(roadFix(gb3, [43.60543, 1.40292], [43.60597, 1.40185]).shift, 2, 'A620 の西の西行き');
+  assert.equal(roadFix(gb3, [43.60597, 1.40185], [43.60543, 1.40292]), null, '東行きは直さない');
+});
+
+test('ポン・ヌフの橋の端のまわりの名前のない細い車道は作らない（名前のある道・離れた道・広い道は残す）', async () => {
+  const { dropPontNeufLanes } = await import('../../src/world/parse.js');
+  const r = (id, name, pts, extra = {}) => ({ id, name, type: 'residential', width: 3, pts, ...extra });
+  const bridge = r(1, 'Pont Neuf', [[0, 0], [100, 0]], { type: 'secondary', width: 9, bridge: true });
+  const lane = r(2, '', [[102, 0], [103, -20]]);
+  const laneBridge = r(3, '', [[95, 6], [103, 6]], { bridge: true });
+  const quai = r(4, 'Quai de Tounis', [[114, 2], [110, 20]]);
+  const far = r(5, '', [[102, 0], [103, -60]]);
+  const wide = r(6, '', [[102, 0], [103, -20]], { width: 6 });
+  const path = r(7, '', [[102, 0], [103, -20]], { type: 'footway' });
+  assert.deepEqual(dropPontNeufLanes([bridge, lane, laneBridge, quai, far, wide, path]).map((x) => x.id), [1, 4, 5, 6, 7]);
+  assert.equal(dropPontNeufLanes([lane, quai]).length, 2, 'ポン・ヌフのないエリアでは何もしない');
+  const long = { ...r(8, '', [[104, 95], [107, 31], [109, 14], [107, 8], [104, 5]]), nodeIds: [1, 2, 3, 4, 5] };
+  dropPontNeufLanes([bridge, long]);
+  assert.deepEqual(long.pts, [[104, 95], [107, 31], [109, 14]], '遠くから来る細い道は橋の端の歩道の手前で止める');
+  assert.deepEqual(long.nodeIds, [1, 2, 3]);
 });

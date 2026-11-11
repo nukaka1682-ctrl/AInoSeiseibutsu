@@ -76,20 +76,58 @@ export const CAR_ROADS = new Set([
   'trunk_link', 'primary_link', 'secondary_link', 'tertiary_link',
 ]);
 
-// データの誤りを写真に合わせて直す道（IGN の道の番号 → 置き換えるタグ。shift: 線を進む向きの右へずらす m、
-// parkSide: 路上駐車する側 'right' / 'left'、bare: 路面の標示（車線・自転車レーン・絵）を描かない）。利用者の Street View: Purpan の近くの
-// Avenue de Grande-Bretagne の西行き（北側）の車道は 1 車線（約 4 m）。データは 4〜5 車線・14〜15 m
-const ROAD_FIXES = {
-  41226: { lanes: '1', width: '4' },
-  142020: { lanes: '1', width: '4' },
-  142062: { lanes: '1', width: '4' },
+// データの誤りを写真に合わせて直す道（置き換えるタグ。shift: 線を進む向きの右へずらす m、parkSide: 路上駐車する側
+// 'right' / 'left'、bare: 路面の標示（車線・自転車レーン・絵）を描かない）。
+// 道は、通りの名前（name）・場所（box [南, 西, 北, 東]。道の両端の中点が入る）・データの値（when）・進む向き（west: 西行き）で選ぶ。
+// IGN の道の番号は、データが更新されると変わる（2026 年秋の更新で番号がずれ、番号で選んでいた補正が外れた）ので使わない
+const ROAD_FIXES = [
+  // 利用者の Street View: Avenue de Grande-Bretagne の西行き（トラムの軌道の北側）の車道は 1 車線（約 4 m）。
+  // データは 4〜5 車線・14〜17 m
+  { name: /Grande[- ]Bretagne/i, box: [43.6035, 1.4025, 43.6056, 1.4070], when: (t) => t.oneway && +t.lanes >= 4, fix: { lanes: '1', width: '4' } },
+  // 利用者の Street View 225653: Purpan の脇（A620 の西）の Avenue de Grande-Bretagne の西行きは標示のない 1 車線（約 4.5 m）。
+  // データは 3 車線・8〜9 m で、線はトラムの軌道の縁にあり、実際の車線の中心はもう少し北（航空写真。軌道の芝との間を
+  // あけすぎないよう 2 m）
+  { name: /Grande[- ]Bretagne/i, box: [43.6052, 1.40183, 43.6062, 1.4030], west: true, when: (t) => t.oneway && +t.lanes === 3, fix: { lanes: '1', width: '4.5', shift: 2, bare: true } },
   // 利用者の Street View 224901: Rue Laganne（Prairie des Filtres の西）は、西の庭の塀から東の擁壁まで約 8 m で、
   // 1 車線＋東の擁壁沿いの縦列駐車（約 5.5 m）と西の約 2 m の歩道。データの線は通りの中心より約 2 m 東（航空写真）
-  37419: { width: '5.5', shift: -2, parkSide: 'right' },
-  // 利用者の Street View 225653: Purpan の脇の Avenue de Grande-Bretagne の西行きは標示のない 1 車線（約 4.5 m）。
-  // データの線はトラムの軌道の縁にあり、実際の車線の中心はもう少し北（航空写真。軌道の芝との間をあけすぎないよう 2 m）
-  99386: { lanes: '1', width: '4.5', shift: 2, bare: true },
-};
+  { name: /^Rue Laganne$/i, box: [43.5955, 1.4355, 43.5966, 1.4365], fix: { width: '5.5', shift: -2, parkSide: 'right' } },
+];
+// tags: 道のタグ、a・b: 道の両端 [緯度, 経度]（一方通行は進む向きの順）
+export function roadFix(tags, a, b) {
+  if (!tags?.highway || !tags.name) return null;
+  const lat = (a[0] + b[0]) / 2, lon = (a[1] + b[1]) / 2;
+  for (const f of ROAD_FIXES) {
+    if (!f.name.test(tags.name) || lat < f.box[0] || lon < f.box[1] || lat > f.box[2] || lon > f.box[3]) continue;
+    if ((f.when && !f.when(tags)) || (f.west && !(b[1] < a[1]))) continue;
+    return f.fix;
+  }
+  return null;
+}
+const FIX_NAMES = /Grande[- ]Bretagne|^Rue Laganne$/i; // 補正のある通り（両端の緯度・経度を求めるのはこの通りだけ）
+
+// ポン・ヌフの橋の端のまわりの、名前のない細い車道（IGN の 2026 年秋のデータで増えた、河岸へ下りる道・歩道の上の側道。
+// 橋の端のすぐ先で橋の道の中心につながり、橋の歩道とその続きの上に路面や別の橋として重なる）は作らない。
+// 橋の way の端から PN_LANE_REACH m 以内に全部の点がある、幅 PN_LANE_WIDTH m 以下の名前のない道
+const PN_LANE_REACH = 30, PN_LANE_WIDTH = 3.5, PN_LANE_TRIM = 12;
+export function dropPontNeufLanes(roads) {
+  const ends = roads.filter((r) => r.name === 'Pont Neuf' && r.bridge && r.pts.length >= 2).flatMap((r) => [r.pts[0], r.pts[r.pts.length - 1]]);
+  if (!ends.length) return roads;
+  const near = (p) => ends.some((e) => Math.hypot(p[0] - e[0], p[1] - e[1]) < PN_LANE_REACH);
+  const lane = (r) => !r.name && r.width <= PN_LANE_WIDTH && CAR_ROADS.has(r.type);
+  const out = roads.filter((r) => !(lane(r) && r.pts.every(near)));
+  // 遠くから来て橋の端の歩道の上で終わる細い道（河岸沿いの側道）は、歩道の手前（橋の端から PN_LANE_TRIM m）で止める
+  const inApron = (p) => ends.some((e) => Math.hypot(p[0] - e[0], p[1] - e[1]) < PN_LANE_TRIM);
+  for (const r of out) {
+    if (!lane(r)) continue;
+    let i0 = 0, i1 = r.pts.length;
+    while (i1 - i0 > 2 && inApron(r.pts[i0])) i0++;
+    while (i1 - i0 > 2 && inApron(r.pts[i1 - 1])) i1--;
+    if (i0 === 0 && i1 === r.pts.length) continue;
+    r.pts = r.pts.slice(i0, i1);
+    if (r.nodeIds) r.nodeIds = r.nodeIds.slice(i0, i1);
+  }
+  return out;
+}
 
 // 折れ線 pts（と頂点の番号 ids）を進む向きの右へ d m ずらす。両端（交差点）はそのままで、端から ramp m かけてずらしきる
 // （その所に頂点を足す。番号は way の番号から作る）
@@ -361,7 +399,16 @@ export function parseOsm(osm, proj, rect, bdtopo = []) {
   const rails = [];
   const waterLines = [];
   for (const w of ways.values()) {
-    const t = w.tags && w.tags.highway && ROAD_FIXES[w.id] ? { ...w.tags, ...ROAD_FIXES[w.id] } : w.tags;
+    let fix = null;
+    if (w.tags?.highway && w.nodes && FIX_NAMES.test(w.tags.name || '')) {
+      const ends = [w.nodes[0], w.nodes[w.nodes.length - 1]].map((id) => nodePos.get(id));
+      if (ends[0] && ends[1]) {
+        const ll = ends.map((p) => proj.unproject(p[0], p[1]));
+        if (w.tags.oneway === '-1' || w.tags.oneway === 'reverse') ll.reverse();
+        fix = roadFix(w.tags, ll[0], ll[1]);
+      }
+    }
+    const t = fix ? { ...w.tags, ...fix } : w.tags;
     if (!t || !w.nodes) continue;
     if (t.highway && !SKIP_HIGHWAY.has(t.highway)) {
       if (t.area === 'yes' && isClosed(w)) continue; // 広場はポリゴン側で処理
@@ -378,7 +425,7 @@ export function parseOsm(osm, proj, rect, bdtopo = []) {
         pts.reverse();
         ids.reverse();
       }
-      if (t.shift && ROAD_FIXES[w.id]) shiftLine(pts, ids, +t.shift, w.id);
+      if (fix?.shift) shiftLine(pts, ids, +t.shift, w.id);
       const tunnel = t.tunnel && t.tunnel !== 'no' && t.tunnel !== 'building_passage';
       const layer = parseLength(t.layer) || 0;
       roads.push({
@@ -396,8 +443,8 @@ export function parseOsm(osm, proj, rect, bdtopo = []) {
         sidewalk: t.sidewalk || '',
         lanes: Math.round(parseLength(t.lanes)) || 0, // 車線の数（IGN の nombre_de_voies・OSM の lanes。路面の車線の破線）
         cycleway: t.cycleway || '', // OSM の自転車レーン（lane など）
-        parkSide: ROAD_FIXES[w.id]?.parkSide || '', // 路上駐車する側（写真で決めた道だけ）
-        bare: !!ROAD_FIXES[w.id]?.bare, // 路面の標示を描かない（写真で決めた道だけ）
+        parkSide: fix?.parkSide || '', // 路上駐車する側（写真で決めた道だけ）
+        bare: !!fix?.bare, // 路面の標示を描かない（写真で決めた道だけ）
       });
       if (t.name) named.push({ name: t.name, tags: t, x: pts[0][0], z: pts[0][1], pts, line: true });
     } else if (t.railway && !(t.tunnel && t.tunnel !== 'no')) {
@@ -468,7 +515,7 @@ export function parseOsm(osm, proj, rect, bdtopo = []) {
   reshapeRoads(roads, proj); // ジャン・ジョレス通りの 2023 年の車道の位置（ramblas.js）
   unifyWaterLevels(areas);
   fillWaterUnderBridges(areas, roads);
-  return { nodePos, buildings, parts, roads, areas, rails, waterLines, trees, named, proj };
+  return { nodePos, buildings, parts, roads: dropPontNeufLanes(roads), areas, rails, waterLines, trees, named, proj };
 }
 
 // 水面の高さをそろえる: 長い継ぎ目（合わせて minSeam m 以上）で接している水は、いちばん深い水と同じ深さ・種類にする。

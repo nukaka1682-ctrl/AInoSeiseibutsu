@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MASONRY_NAME, PONT_NEUF, archLayout, archRise, bridgeGroups, bridgeStyle, columns, conditionUnderpasses, wetIntervals } from '../../src/world/bridges.js';
+import { MASONRY_NAME, PONT_NEUF, archLayout, archRise, bridgeGroups, bridgeStyle, columns, conditionUnderpasses, pontNeufApproaches, wetIntervals } from '../../src/world/bridges.js';
 import { fillWaterUnderBridges, unifyWaterLevels } from '../../src/world/parse.js';
 import { pointInRing } from '../../src/geo.js';
 import { bankVertexWidths, naturalHeight, subdivideRing } from '../../src/world/ground.js';
@@ -245,4 +245,22 @@ test('高架の下の擁壁: 歩道の先に両側の壁を立て、壁の前と
   assert.ok(h(10, 5.2) < 0.05 && h(10, -5.2) < 0.05, '壁の足元は道の高さ（斜面が壁の前に出ない）');
   assert.ok(h(10, 17) > 5.9, '壁の裏の先は盛り土の上');
   assert.equal(terrain.underpass, walls);
+});
+
+test('ポン・ヌフの取り付け道路: 橋の両端から、同じ名前の橋でない車道をほかの道が交わる所までたどる', () => {
+  const r = (id, pts, extra = {}) => ({ id, name: 'Pont Neuf', type: 'secondary', width: 9, pts, ...extra });
+  const bridge = r(1, [[0, 0], [100, 0]], { bridge: true });
+  const east1 = r(2, [[100, 0], [104, 1]]), east2 = r(3, [[104, 1], [114, 2]]);
+  const west = r(4, [[-36, 9], [0, 0]]), further = r(5, [[-48, 12], [-36, 9]]);
+  const quai = { id: 6, name: 'Quai de Tounis', type: 'residential', width: 4, pts: [[114, 2], [110, 60]] };
+  const dillon = { id: 7, name: 'Cours Dillon', type: 'pedestrian', width: 3.5, pts: [[-36, 9], [-40, 80]] };
+  // 名前のない細い道（歩道の上の側道）が橋の端のすぐ先でつながっても、そこでは止めない
+  const lane = { id: 8, name: '', type: 'residential', width: 3, pts: [[104, 1], [103, -20]] };
+  const list = pontNeufApproaches([bridge, east1, east2, west, further, quai, dillon, lane]);
+  assert.equal(list.length, 2);
+  const e = list.find((a) => a.east), w = list.find((a) => !a.east);
+  assert.deepEqual([...e.ways].map((x) => x.id), [2, 3], '東: 交わる Quai de Tounis の所まで');
+  assert.deepEqual([...w.ways].map((x) => x.id), [4], '西: Cours Dillon の角で止まる（その先の同じ名前の道は含めない）');
+  assert.deepEqual(e.pts[0], [100, 0]);
+  assert.ok(Math.abs(w.length - Math.hypot(36, 9)) < 1e-9);
 });

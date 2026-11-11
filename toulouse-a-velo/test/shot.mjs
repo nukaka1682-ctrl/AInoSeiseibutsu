@@ -13,7 +13,7 @@ await mkdir(out, { recursive: true });
 const views = JSON.parse(process.argv[2] || '[{"name":"shot"}]');
 const fx = makeFixture('light');
 const server = await preview({ root, preview: { port: 4180, strictPort: true }, logLevel: 'warn' });
-const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined, args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 page.on('pageerror', (e) => console.error('pageerror', e));
 page.on('console', (m) => m.type() === 'error' && console.error(m.text()));

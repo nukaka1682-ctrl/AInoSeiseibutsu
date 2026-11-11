@@ -14,6 +14,7 @@ await mkdir(out, { recursive: true });
 const views = JSON.parse(process.argv[2] || '[{"name":"real-start"}]');
 const proxy = process.env.HTTPS_PROXY || process.env.https_proxy;
 const browser = await chromium.launch({
+  executablePath: process.env.CHROMIUM_PATH || undefined,
   args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
   ...(proxy ? { proxy: { server: proxy } } : {}),
 });
