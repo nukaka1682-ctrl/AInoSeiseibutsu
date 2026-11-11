@@ -50,10 +50,19 @@ export function projectEntrances(list, proj) {
     const fix = ENTRANCE_WIDTHS.find(([lat, lon]) => Math.abs(lat - e.lat) < 2e-6 && Math.abs(lon - e.lon) < 2e-6);
     if (fix) e = { ...e, wid: fix[2] };
     return {
-      kind: parking ? 'parking' : 'metro', station: e.station, name: e.name, x, z, ang: e.ang, down: e.down >= 0 ? 1 : -1,
+      kind: parking ? 'parking' : 'metro', station: e.station, name: e.name, x, z, ang: e.ang, down: e.down >= 0 ? 1 : -1, synthetic: !!e.synthetic,
       len: Math.min(parking ? 40 : 30, Math.max(6, e.len)), wid: Math.min(parking ? 12 : 9, Math.max(2.8, e.wid)), depth: e.depth,
     };
   });
+}
+
+// 代わりの出入口（data/metro.js の placeEntrance。synthetic）は、本物の出入口が 1 つも残らない駅にだけ使う（メトロのゲーム）。
+// fallback が false なら代わりの出入口は使わない（自転車のゲーム）
+export function chooseEntrances(list, fallback = false) {
+  const real = list.filter((e) => !e.synthetic);
+  if (!fallback) return real;
+  const has = new Set(real.filter((e) => e.kind === 'metro').map((e) => e.station));
+  return real.concat(list.filter((e) => e.synthetic && !has.has(e.station)));
 }
 
 // 出入口の局所の座標: 下りる向き d、横の向き s、中心 (x, z) からの (u, v) → (x, z)
@@ -166,16 +175,30 @@ export function clearEntrances(segs, list, pad = 2) {
   });
 }
 
-// 当たり判定の線分（吹き抜けの 4 辺。自転車は落ちない）
-export function entranceWalls(e) {
+// 当たり判定の線分（吹き抜けの 4 辺。自転車は落ちない）。walk: 歩いて下りる（上の端と、下の扉の端を開ける。長い 2 辺だけ）
+export function entranceWalls(e, walk = false) {
   const P = entranceCorners(e, 0.1);
-  return P.map((p, i) => [...p, ...P[(i + 1) % 4]]);
+  const all = P.map((p, i) => [...p, ...P[(i + 1) % 4]]);
+  return walk && e.kind === 'metro' ? [all[0], all[2]] : all;
 }
 
-// 吹き抜けの深さ（段の数は STEP_H ごと）
+// 下の踊り場の扉の寸法（地下の通路はここからつなぐ）: 幅の半分 dw、高さ dh、踊り場の床 yb、下の端の中心 (x, z)、下りる向き (dx, dz)
+export function entranceDoor(e) {
+  const f = entranceFrame(e), H = entranceDepth(e), yb = rimAt(e, e.len / 2, 0) - H;
+  const [x, z] = f.at(e.len / 2, 0);
+  return { dw: Math.min(e.wid - 0.6, 3.6) / 2, dh: Math.min(2.4, H - 0.3), yb, x, z, dx: f.dx, dz: f.dz, sx: f.sx, sz: f.sz, H };
+}
+
+// 吹き抜けの深さ（段の数は STEP_H ごと）。e.H があればその深さ（メトロのゲームで、階段の下を駅の改札階の床にそろえる）
 export function entranceDepth(e) {
   if (e.kind === 'parking') return Math.min(5.5, Math.max(RAMP_PORTAL_H + 0.6, (e.depth || 3) + 0.8));
+  if (e.H != null) return e.H;
   return Math.min(6.5, Math.max(3.5, (e.depth || 3) + 1.2));
+}
+
+// 階段で下りられる深さの上限（踏み面 0.3 m・蹴上げ 0.18 m まで。下の踊り場 LANDING を除いた長さで）
+export function entranceMaxDepth(e) {
+  return Math.max(2.8, (e.len - LANDING) * 0.6);
 }
 
 // 看板の絵（左半分: 黄色地に紺の丸と M。右半分: 駐車場の青地に白い P）
@@ -325,7 +348,8 @@ function writeRamp(e, w) {
 }
 
 // 出入口のメッシュ（エリア全体で 1 つのグループ）。list: fillMetroPits で rim を付けた出入口
-export function buildMetroEntrances(list, mats) {
+// open: 下の扉を開けておく（扉の形の穴をあけ、枠だけ。メトロのゲームで地下の通路につなぐ）
+export function buildMetroEntrances(list, mats, { open = false } = {}) {
   const stone = new MeshWriter(), steel = new MeshWriter(), plain = new MeshWriter(), sign = new MeshWriter();
   for (const e of list) {
     if (e.rim == null) continue;
@@ -343,16 +367,34 @@ export function buildMetroEntrances(list, mats) {
     const seed = Math.round(e.x * 3 + e.z * 7);
     // 吹き抜けの中の壁（上から下の踊り場の床の少し下まで。内側を向く）
     const inner = [[[-L, -W], [L, -W], [f.sx, f.sz]], [[L, W], [-L, W], [-f.sx, -f.sz]], [[L, -W], [L, W], [-f.dx, -f.dz]], [[-L, W], [-L, -W], [f.dx, f.dz]]];
+    const dw = Math.min(e.wid - 0.6, 3.6) / 2, dh = Math.min(2.4, H - 0.3);
     for (const [[u0, v0], [u1, v1], [nx, nz]] of inner) {
       const l = Math.hypot(u1 - u0, v1 - v0);
+      if (open && u0 === L && u1 === L) {
+        // 下の端の壁に扉の形の穴（扉の両脇と上）
+        const y1 = (v) => rimAt(e, L, v);
+        stone.quad(P(L, v0, yb - 0.2), P(L, -dw - 0.08, yb - 0.2), P(L, -dw - 0.08, y1(-dw)), P(L, v0, y1(v0)), [nx, 0, nz], [0, 0], [1, 0], [1, 1], [0, 1], C.wall);
+        stone.quad(P(L, dw + 0.08, yb - 0.2), P(L, v1, yb - 0.2), P(L, v1, y1(v1)), P(L, dw + 0.08, y1(dw)), [nx, 0, nz], [0, 0], [1, 0], [1, 1], [0, 1], C.wall);
+        stone.quad(P(L, -dw - 0.08, yb + dh + 0.08), P(L, dw + 0.08, yb + dh + 0.08), P(L, dw + 0.08, y1(dw)), P(L, -dw - 0.08, y1(-dw)), [nx, 0, nz], [0, 0], [1, 0], [1, 1], [0, 1], C.wall);
+        continue;
+      }
       stone.quad(P(u0, v0, yb - 0.2), P(u1, v1, yb - 0.2), P(u1, v1, rimAt(e, u1, v1)), P(u0, v0, rimAt(e, u0, v0)), [nx, 0, nz], [0, 0], [l / 2, 0], [l / 2, H / 2], [0, H / 2], C.wall);
     }
     // 下の踊り場の床と、下の端の壁のガラスの扉（枠つき）
     plain.quad(P(L - LANDING, -W, yb), P(L, -W, yb), P(L, W, yb), P(L - LANDING, W, yb), [0, 1, 0], [0, 0], [1, 0], [1, 1], [0, 1], C.floor);
-    const dw = Math.min(e.wid - 0.6, 3.6) / 2, dh = Math.min(2.4, H - 0.3);
     const o = -0.02;
-    plain.quad(P(L + o, -dw - 0.08, yb), P(L + o, dw + 0.08, yb), P(L + o, dw + 0.08, yb + dh + 0.08), P(L + o, -dw - 0.08, yb + dh + 0.08), [-f.dx, 0, -f.dz], [0, 0], [1, 0], [1, 1], [0, 1], C.frame);
-    plain.quad(P(L + o * 2, -dw, yb), P(L + o * 2, dw, yb), P(L + o * 2, dw, yb + dh), P(L + o * 2, -dw, yb + dh), [-f.dx, 0, -f.dz], [0, 0], [1, 0], [1, 1], [0, 1], C.door);
+    if (open) {
+      // 開いた扉の枠（両脇の柱と上の梁。ステンレス）
+      for (const v of [-dw - 0.04, dw + 0.04]) {
+        const [cx, cz] = f.at(L - 0.06, v);
+        box(steel, cx, cz, yb, yb + dh + 0.08, f.dx, f.dz, 0.12, 0.08, C.frame);
+      }
+      const [cx, cz] = f.at(L - 0.06, 0);
+      box(steel, cx, cz, yb + dh, yb + dh + 0.12, f.sx, f.sz, 2 * dw + 0.16, 0.12, C.frame);
+    } else {
+      plain.quad(P(L + o, -dw - 0.08, yb), P(L + o, dw + 0.08, yb), P(L + o, dw + 0.08, yb + dh + 0.08), P(L + o, -dw - 0.08, yb + dh + 0.08), [-f.dx, 0, -f.dz], [0, 0], [1, 0], [1, 1], [0, 1], C.frame);
+      plain.quad(P(L + o * 2, -dw, yb), P(L + o * 2, dw, yb), P(L + o * 2, dw, yb + dh), P(L + o * 2, -dw, yb + dh), [-f.dx, 0, -f.dz], [0, 0], [1, 0], [1, 1], [0, 1], C.door);
+    }
     // 階段（上の端から踊り場まで）。広い吹き抜けは片側をエスカレーター
     const run = Math.max(2, e.len - LANDING), drop = y0 - yb, n = Math.max(4, Math.round(drop / STEP_H)), tread = run / n, rise = drop / n;
     const esc = e.wid >= 4.2;
@@ -425,16 +467,23 @@ export function buildMetroEntrances(list, mats) {
   return group;
 }
 
-// 吹き抜けの穴の形（ステンシル。地面と同じ高さの長方形）
-export function writeEntranceMasks(w, list) {
+// 吹き抜けの穴の形（ステンシル。地面と同じ高さの長方形）。groundAt(x, z): 地形の高さ（あれば、1 m ごとの格子で地形より
+// 少し上にする。地形モデルに穴の写っていない出入口〔data/metro.js の代わりの出入口〕では、地形が縁の平面より高い所がある）
+export function writeEntranceMasks(w, list, groundAt = null) {
   for (const e of list) {
     if (e.rim == null) continue;
-    const L = e.len / 2, W = e.wid / 2, Y = [rimAt(e, -L, -W), rimAt(e, L, -W), rimAt(e, L, W), rimAt(e, -L, W)];
-    const P = entranceCorners(e, 0).map(([x, z], i) => [x, Y[i] + 0.03, z]);
-    // 上向きの面（反時計回り）
-    const [a, b, , d] = P;
-    const up = (d[0] - a[0]) * (b[2] - a[2]) - (d[2] - a[2]) * (b[0] - a[0]) > 0;
-    const Q = up ? P : [P[0], P[3], P[2], P[1]];
-    w.quad(...Q, [0, 1, 0], [0, 0], [1, 0], [1, 1], [0, 1], [1, 1, 1]);
+    const f = entranceFrame(e), L = e.len / 2, W = e.wid / 2;
+    const nu = groundAt ? Math.max(1, Math.ceil(e.len)) : 1, nv = groundAt ? Math.max(1, Math.ceil(e.wid)) : 1;
+    const P = (i, j) => {
+      const u = -L + (2 * L * i) / nu, v = -W + (2 * W * j) / nv, [x, z] = f.at(u, v);
+      const y = Math.max(rimAt(e, u, v), groundAt ? groundAt(x, z) : -Infinity) + 0.04;
+      return [x, y, z];
+    };
+    for (let i = 0; i < nu; i++) {
+      for (let j = 0; j < nv; j++) {
+        const a = P(i, j), b = P(i + 1, j), c = P(i + 1, j + 1), d = P(i, j + 1);
+        w.quad(a, b, c, d, [0, 1, 0], [0, 0], [1, 0], [1, 1], [0, 1], [1, 1, 1]); // 巻き順は法線で上向きにそろう
+      }
+    }
   }
 }

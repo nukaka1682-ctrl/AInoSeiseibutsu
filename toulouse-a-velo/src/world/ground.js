@@ -18,7 +18,7 @@ import { PONT_NEUF_HALF, bridgeGroups, buildAbutments, buildBridges, conditionUn
 import { DRAPE_LIFT, FLAT_TERRAIN } from './terrain.js';
 import { buildFarTerrain, createTerrainMaterials, splitGeometry, TERRAIN_ORDER } from './terrainmesh.js';
 import { conditionRoads, despike, sharpenQuays, WALK_DEF } from './terraincond.js';
-import { buildMetroEntrances, createMetroMaterials, fillMetroPits, orientRamps, projectEntrances, writeEntranceMasks } from './metro.js';
+import { buildMetroEntrances, chooseEntrances, createMetroMaterials, fillMetroPits, orientRamps, projectEntrances, writeEntranceMasks } from './metro.js';
 
 export const ORDER = {
   waterMask: -50,
@@ -876,9 +876,11 @@ export function buildGroundBase(parsed, rect, mats, terrain = FLAT_TERRAIN, layo
       for (let i = 0; i + 1 < r.pts.length; i++) carSegs.push([...r.pts[i], ...r.pts[i + 1], r.width / 2]);
     }
     const inCarriageway = (x, z) => carSegs.some(([ax, az, bx, bz, h]) => x > Math.min(ax, bx) - h && x < Math.max(ax, bx) + h && z > Math.min(az, bz) - h && z < Math.max(az, bz) + h && closestOnSegment(x, z, ax, az, bx, bz).d2 < h * h);
-    T.metro = projectEntrances(T.metroRaw, T.proj).filter((e) => !inWater(e.x, e.z) && !(e.kind === 'metro' && inCarriageway(e.x, e.z)));
+    // 代わりの出入口（data/metro.js の placeEntrance）は、メトロのゲーム（T.metroWalk）で本物の出入口が残らない駅にだけ使う
+    T.metro = chooseEntrances(projectEntrances(T.metroRaw, T.proj).filter((e) => !inWater(e.x, e.z) && !(e.kind === 'metro' && inCarriageway(e.x, e.z))), !!T.metroWalk);
     orientRamps(T.metro, parsed.roads);
     fillMetroPits(T, T.metro);
+    T.metroAdjust?.(T.metro); // メトロのゲーム: 出入口の階段の深さを駅の改札階にそろえる
     conditionRoads(T, parsed.roads, inWater);
     // ブリエンヌ運河の岸は草の土手（利用者の写真 NCM_0186）。地形の段を岸壁にしない
     const brienne = parsed.proj ? BRIENNE.line.map((ll) => parsed.proj.project(...ll)) : [];
@@ -896,7 +898,7 @@ export function buildGroundBase(parsed, rect, mats, terrain = FLAT_TERRAIN, layo
   if (!T.flat && T.metro.length) {
     // メトロの出入口の吹き抜け: 水と同じステンシルの穴（地面のあとに深度テスト付きで印を付け、その所の深度を一番奥に戻す）
     const hole = new MeshWriter();
-    writeEntranceMasks(hole, T.metro);
+    writeEntranceMasks(hole, T.metro, (x, z) => T.h(x, z));
     const geo = hole.toGeometry();
     const m = new THREE.Mesh(geo, mats.waterMask);
     m.renderOrder = TERRAIN_ORDER.mask;
@@ -904,7 +906,7 @@ export function buildGroundBase(parsed, rect, mats, terrain = FLAT_TERRAIN, layo
     const r = new THREE.Mesh(geo, mats.terrain.maskReset);
     r.renderOrder = TERRAIN_ORDER.maskReset;
     r.name = 'metro-mask-reset';
-    group.add(m, r, buildMetroEntrances(T.metro, mats.metro));
+    group.add(m, r, buildMetroEntrances(T.metro, mats.metro, { open: !!T.metroWalk })); // メトロのゲームでは下の扉を開けて地下の通路へ
   }
   const bankTrees = []; // 街の外れの土手に植える木 { x, z, y, h, r }
   {
