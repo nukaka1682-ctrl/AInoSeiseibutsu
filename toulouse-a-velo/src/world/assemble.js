@@ -12,7 +12,7 @@ import { FLAT_TERRAIN, surfaceFns } from './terrain.js';
 import { buildTerrainTile } from './terrainmesh.js';
 import { buildCoverMesh } from './cover.js';
 import { tileBounds, tileLayout } from '../data/tiles.js';
-import { buildTrees, fillParkTrees, planeTreeTest, streetTrees, treelessTest, magnoliaTest, liftQuayTrees, underDeck } from './trees.js';
+import { buildTrees, fillParkTrees, planeTreeTest, streetTrees, treelessTest, magnoliaTest, liftQuayTrees, underDeck, addPhotoTrees } from './trees.js';
 import { buildEnclosures, clearNamedAreas, clearRoads, fixedWalls, projectTrees, projectWalls, tameWalls } from './enclosures.js';
 import { clearEntrances, entranceWalls, inEntrance, projectEntrances } from './metro.js';
 import { findTowers } from './towers.js';
@@ -137,6 +137,7 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
     treePts = parsed.trees.filter(inRect).concat(extra, avenue);
   }
   treePts = treePts.concat(ground.bankTrees || []); // 街の外れの川岸の土手の木
+  treePts = addPhotoTrees(treePts, proj, (x, z) => x >= rect.minX && x < rect.maxX && z >= rect.minZ && z < rect.maxZ); // 写真で決まる並木
   const towers = findTowers(proj, parsed.buildings); // 八角形の鐘楼は専用のモデル
   markBrickSites(proj, parsed.buildings, parsed.areas);
   markStreetStyles(parsed.buildings, parsed.roads);

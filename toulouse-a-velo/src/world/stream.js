@@ -8,7 +8,7 @@ import { Grid, pointInRing } from '../geo.js';
 import { CAR_ROADS, parseOsm } from './parse.js';
 import { loadTileData, tileAt, tileBounds, tileLayout } from '../data/tiles.js';
 import { buildBuildings } from './buildings.js';
-import { buildTrees, fillParkTrees, planeTreeTest, streetTrees, treelessTest, magnoliaTest, liftQuayTrees, underDeck } from './trees.js';
+import { buildTrees, fillParkTrees, planeTreeTest, streetTrees, treelessTest, magnoliaTest, liftQuayTrees, underDeck, addPhotoTrees } from './trees.js';
 import { buildEnclosures, clearNamedAreas, clearRoads, fixedWalls, projectTrees, projectWalls, tameWalls } from './enclosures.js';
 import { clearEntrances, entranceWalls, inEntrance } from './metro.js';
 import { findCapitoleFacade, markBrickSites, markStreetStyles } from './landmarkfacades.js';
@@ -284,6 +284,7 @@ class TileStreamer {
       treePts = fillParkTrees(parks, [], free).concat(streetTrees(roads, (x, z) => inB(x, z) && !this.roadnet.onRoad(x, z, 0.2) && !this.inWater(x, z) && !insideBuilding(x, z)));
     }
     treePts = treePts.concat(this.bankTrees.filter((t) => inB(t.x, t.z))); // 街の外れの川岸の土手の木
+    treePts = addPhotoTrees(treePts, this.proj, inB); // 写真で決まる並木
     const clear = monumentClearance(monuments, this.proj);
     treePts = liftQuayTrees(treePts, T); // 岸壁の下の段の木は上の段へ
     this.treeless ||= treelessTest(this.parsed.areas);

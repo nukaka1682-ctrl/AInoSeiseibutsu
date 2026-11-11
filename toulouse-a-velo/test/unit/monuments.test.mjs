@@ -300,3 +300,19 @@ test('店の並ぶ通りの飾り: 通りに面した建物の正面の辺だけ
   const metal = group.children.find((m) => m.name === 'monument-metal');
   assert.ok(metal && metal.geometry.attributes.position.count > 100, '縦樋・手すりなどの金物のメッシュ');
 });
+
+test('自転車置き場: 線に沿って 1 m ごとの輪と自転車、当たり判定は線分 1 本', () => {
+  const proj = new LocalProjection(43.598, 1.4317);
+  const list = findMonuments(proj, { buildings: [], areas: [], roads: [], bounds: null }).filter((m) => m.kind === 'bikeracks');
+  assert.equal(list.length, 2);
+  const mat = new THREE.MeshBasicMaterial();
+  const { group, colliders } = buildMonuments(list, { monument: mat, monumentMetal: mat }, { groundAt: () => 0 });
+  assert.equal(colliders.length, 2);
+  assert.ok(colliders.every((c) => c.length === 4 && Math.hypot(c[2] - c[0], c[3] - c[1]) > 8));
+  const metal = group.children.find((m) => m.name === 'monument-metal');
+  assert.ok(metal.geometry.attributes.position.count >= 2 * 10 * 3 * 24, '輪（3 本の棒）が 20 個以上');
+  const pos = metal.geometry.attributes.position;
+  let top = 0;
+  for (let i = 0; i < pos.count; i++) top = Math.max(top, pos.getY(i));
+  assert.ok(top > 0.75 && top < 1.1, `輪の高さ ${top}`);
+});
