@@ -14,7 +14,7 @@ import { LOCKS, lockFrame } from './locks.js';
 import { RaisedIndex, oldTownBase, planStreets, streetSteps, writePrism } from './streets.js';
 import { CAR_ROADS } from './parse.js';
 import { catenaryStations, mergeIntervals, slicePolyline, subtract, tramCrossCuts } from './markings.js';
-import { PONT_NEUF_HALF, bridgeGroups, buildAbutments, buildBridges, conditionUnderpasses, pontNeufApproaches, setupDecks } from './bridges.js';
+import { PONT_NEUF_HALF, bridgeGroups, buildAbutments, buildBridges, conditionUnderpasses, pontNeufApproaches, raiseBridgeEnds, setupDecks } from './bridges.js';
 import { DRAPE_LIFT, FLAT_TERRAIN } from './terrain.js';
 import { buildFarTerrain, createTerrainMaterials, splitGeometry, TERRAIN_ORDER } from './terrainmesh.js';
 import { conditionRoads, despike, sharpenQuays, WALK_DEF } from './terraincond.js';
@@ -881,13 +881,18 @@ export function buildGroundBase(parsed, rect, mats, terrain = FLAT_TERRAIN, layo
     orientRamps(T.metro, parsed.roads);
     fillMetroPits(T, T.metro);
     T.metroAdjust?.(T.metro); // メトロのゲーム: 出入口の階段の深さを駅の改札階にそろえる
+    const mounds = raiseBridgeEnds(T, parsed.roads, parsed.proj); // 橋の端の地面を測った橋面の高さに（bridges.js。地形より橋面を信じる）
     conditionRoads(T, parsed.roads, inWater);
     // ブリエンヌ運河の岸は草の土手（利用者の写真 NCM_0186）。地形の段を岸壁にしない
     const brienne = parsed.proj ? BRIENNE.line.map((ll) => parsed.proj.project(...ll)) : [];
     const inBasin0 = parsed.proj ? lockBasinTest(parsed.proj) : () => false; // 船だまりの岸壁は lockBasinWalls
     const onBrienne = (x, z) => brienne.some((p, i) => i + 1 < brienne.length && closestOnSegment(x, z, ...p, ...brienne[i + 1]).d2 < 25 * 25);
+    // 盛り上げた橋の端（raiseBridgeEnds）の縁を岸壁にしたもののうち、橋の下を横切る壁は作らない（橋の上の当たり判定になる）
+    const bridgeWays = mounds.length ? parsed.roads.filter((r) => r.bridge && r.pts.length >= 2) : [];
+    const underRaisedEnd = (x, z) => mounds.some((m) => Math.hypot(x - m.x, z - m.z) < 24)
+      && bridgeWays.some((r) => r.pts.some((p, i) => i + 1 < r.pts.length && closestOnSegment(x, z, ...p, ...r.pts[i + 1]).d2 < (r.width / 2 + 3) ** 2));
     const quays = sharpenQuays(T, parsed.proj ? parsed.proj.project(...QUAY_LATLON) : [-250, 0], QUAY_RADIUS + 150, { inWater, paths: parsed.roads })
-      .filter((q) => !onBrienne((q.ax + q.bx) / 2, (q.az + q.bz) / 2) && !inBasin0((q.ax + q.bx) / 2, (q.az + q.bz) / 2));
+      .filter((q) => !onBrienne((q.ax + q.bx) / 2, (q.az + q.bz) / 2) && !inBasin0((q.ax + q.bx) / 2, (q.az + q.bz) / 2) && !underRaisedEnd((q.ax + q.bx) / 2, (q.az + q.bz) / 2));
     const basin = parsed.proj ? lockBasinWalls(T, water, parsed.proj, inWater) : [];
     const fixedQ = parsed.proj ? fixedQuayWalls(T, parsed.proj, inWater) : [];
     T.setQuayWalls(parsed.proj ? quays.concat(quayLinks(quays, parsed.proj), basin, fixedQ) : quays);

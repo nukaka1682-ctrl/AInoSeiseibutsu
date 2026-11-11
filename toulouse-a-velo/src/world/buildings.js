@@ -298,7 +298,8 @@ function writeWalls(W, ring, sign, b, plainColor, facade, covers = null) {
       if (y0 < 0.5) {
         const gt = Math.min(y1, y0 + groundH);
         const v1 = (gt - y0) / groundH;
-        W.ground.quad(P(t0, y0), P(t1, y0), P(t1, gt), P(t0, gt), nrm, [u0, sv], [u1, sv], [u1, sv + v1], [u0, sv + v1], fc);
+        // 病院などの大きな建物（landmarkfacades.js の BRICK_SITES）の 1 階は、店や馬車門でなく上の階と同じ窓の並び
+        (b.plainGround ? W.upper : W.ground).quad(P(t0, y0), P(t1, y0), P(t1, gt), P(t0, gt), nrm, [u0, sv], [u1, sv], [u1, sv + v1], [u0, sv + v1], fc);
         yb = gt;
       }
       if (y1 > yb + 0.05) {

@@ -119,6 +119,7 @@ export function markBrickSites(proj, buildings, areas = []) {
       if (b.info.area > 150 && Math.hypot(b.inside[0] - x, b.inside[1] - z) < s.r) {
         b.tags['building:material'] = 'brick';
         b.style = STYLE.brickStone;
+        b.plainGround = true; // 1 階に店・馬車門を並べない（利用者の写真 211104: オテル・デューの 1 階は窓の並び）
         if (s.floor) b.info.floorHeight = s.floor;
         if (s.roof) {
           b.tags['roof:material'] = s.roof.material;
@@ -203,6 +204,9 @@ const STREET_STYLES = [
   { name: /^(Rue de Metz|Place [EÉ]tienne[- ]Esquirol)$/i, styles: [[STYLE.haussmann, 1]], slate: true, keepBrick: true },
   // 利用者の写真 NCM_0096: Place Jeanne d'Arc の角の建物は黄土色の切り石のオスマン様式（通しの鉄のバルコニー・灰色のマンサード）
   { name: /^Place Jeanne[- ]d'Arc$/i, styles: [[STYLE.haussmann, 1]], slate: true },
+  // Place Intérieure Saint-Cyprien と Allées Charles de Fitte（利用者の Street View 210226: 広場のまわりは白い窓枠の赤いレンガの建物。
+  // 漆喰の建物はほとんどない）
+  { name: /^(Place Int[ée]rieure Saint[- ]Cyprien|All[ée]es Charles de Fitte)$/i, styles: [[STYLE.brickStone, 0.6], [STYLE.brickShutters, 0.3], [STYLE.salmon, 0.1]] },
   { name: /^Rue de la R[ée]publique$/i, styles: [[STYLE.faubourg, 0.45], [STYLE.salmon, 0.2], [STYLE.ochre, 0.15], [STYLE.brickShutters, 0.2]] },
 ];
 const STREET_REACH = 10;
