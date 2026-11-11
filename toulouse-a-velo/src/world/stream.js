@@ -8,7 +8,7 @@ import { Grid, pointInRing } from '../geo.js';
 import { CAR_ROADS, parseOsm } from './parse.js';
 import { loadTileData, tileAt, tileBounds, tileLayout } from '../data/tiles.js';
 import { buildBuildings } from './buildings.js';
-import { buildTrees, fillParkTrees, planeTreeTest, streetTrees, treelessTest, magnoliaTest, liftQuayTrees } from './trees.js';
+import { buildTrees, fillParkTrees, planeTreeTest, streetTrees, treelessTest, magnoliaTest, liftQuayTrees, underDeck } from './trees.js';
 import { buildEnclosures, clearNamedAreas, clearRoads, fixedWalls, projectTrees, projectWalls, tameWalls } from './enclosures.js';
 import { clearEntrances, entranceWalls, inEntrance } from './metro.js';
 import { findCapitoleFacade, markBrickSites, markStreetStyles } from './landmarkfacades.js';
@@ -276,7 +276,7 @@ class TileStreamer {
     const inB = (x, z) => x >= B.minX && x < B.maxX && z >= B.minZ && z < B.maxZ;
     let treePts;
     if (data.trees.length) {
-      treePts = projectTrees(data.trees, this.proj).filter((p) => !this.inWater(p.x, p.z) && !this.roadnet.onRoad(p.x, p.z, -1.5) && !inEntrance(this.terrain.metro || [], p.x, p.z));
+      treePts = projectTrees(data.trees, this.proj).filter((p) => !this.inWater(p.x, p.z) && !this.roadnet.onRoad(p.x, p.z, -1.5) && !underDeck(this.terrain, p.x, p.z) && !inEntrance(this.terrain.metro || [], p.x, p.z));
     } else {
       const free = (x, z) => inB(x, z) && !this.roadnet.onRoad(x, z, 1.5) && !this.inWater(x, z) && !insideBuilding(x, z);
       const parks = this.parsed.areas.filter((a) => a.bounds.maxX > B.minX && a.bounds.minX < B.maxX && a.bounds.maxZ > B.minZ && a.bounds.minZ < B.maxZ);

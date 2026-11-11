@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MASONRY_NAME, PONT_NEUF, archLayout, archRise, bridgeGroups, bridgeStyle, columns, conditionUnderpasses, pontNeufApproaches, wetIntervals } from '../../src/world/bridges.js';
+import { MASONRY_NAME, PONT_NEUF, archLayout, archRise, bridgeGroups, bridgeStyle, columns, conditionUnderpasses, pontNeufApproaches, raiseBridgeEnds, wetIntervals } from '../../src/world/bridges.js';
 import { fillWaterUnderBridges, unifyWaterLevels } from '../../src/world/parse.js';
 import { pointInRing } from '../../src/geo.js';
 import { bankVertexWidths, naturalHeight, subdivideRing } from '../../src/world/ground.js';
@@ -263,4 +263,29 @@ test('ポン・ヌフの取り付け道路: 橋の両端から、同じ名前の
   assert.deepEqual([...w.ways].map((x) => x.id), [4], '西: Cours Dillon の角で止まる（その先の同じ名前の道は含めない）');
   assert.deepEqual(e.pts[0], [100, 0]);
   assert.ok(Math.abs(w.length - Math.hypot(36, 9)) < 1e-9);
+});
+
+test('橋の端の地面: 測った橋面より低い端（橋でない道につながる）を橋面の高さまで盛り上げ、離れた所と低くない端はそのまま', () => {
+  // 5 m の格子（x・z −100〜100）。地面は 0 m。南北の橋（z −60〜60）の測った橋面は 6 m。北の端は地面 0 m（6 m 低い）、
+  // 南の端のまわりはもとから 6 m の台地
+  const cols = 41, rows = 41, DAT = 145, data = new Float32Array(cols * rows);
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) data[r * cols + c] = (-100 + r * 5 > 40 ? 6 : 0) + DAT;
+  const near = { ax: 0.2, bx: 20, az: 0.2, bz: 20, cols, rows, data };
+  const h = (x, z) => data[Math.round(z * 0.2 + 20) * cols + Math.round(x * 0.2 + 20)] - DAT;
+  const proj = { project: (lat, lon) => [lon, lat] }; // 緯度 = z、経度 = x として扱う
+  const profile = { name: 'Pont', a: [-60, 0], b: [60, 0], y: Array.from({ length: 25 }, () => 6 + DAT) };
+  const terrain = { flat: false, near, datum: DAT, h, profiles: [profile] };
+  const bridge = { id: 1, type: 'secondary', width: 8, bridge: true, pts: [[0, -60], [0, 60]] };
+  const north = { id: 2, type: 'secondary', width: 8, pts: [[0, -100], [0, -60]] };
+  const south = { id: 3, type: 'secondary', width: 8, pts: [[0, 60], [0, 100]] };
+  const raised = raiseBridgeEnds(terrain, [bridge, north, south], proj);
+  assert.equal(raised.length, 1, '低い北の端だけ');
+  assert.ok(Math.abs(raised[0].z + 60) < 1e-9 && Math.abs(raised[0].drop - 6) < 1e-9);
+  assert.ok(Math.abs(h(0, -60) - 6) < 1e-6 && Math.abs(h(5, -55) - 6) < 1e-6, '端のまわりは橋面の高さ');
+  assert.ok(h(15, -60) > 0.5 && h(15, -60) < 5.5, '縁はなだらかに下がる');
+  assert.equal(h(0, -35), 0, '18 m より先はもとの地面');
+  assert.equal(h(40, -60), 0);
+  // 橋でない道につながらない端（橋の続き）は上げない
+  for (let k = 0; k < data.length; k++) data[k] = DAT;
+  assert.equal(raiseBridgeEnds(terrain, [bridge], proj).length, 0);
 });

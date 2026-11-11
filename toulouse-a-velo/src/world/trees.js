@@ -352,3 +352,9 @@ export function buildTrees(points, { isPlane = () => false, isMagnolia = () => f
   group.add(trunks, crowns);
   return group;
 }
+
+// 橋面の下（橋の幅の中）か。河岸から生えた木の幹が橋面を突き抜けて、橋の上の当たり判定になるのを防ぐ（Pont Saint-Pierre の
+// 西の端で、橋の下の木の幹に自転車が止められた）
+export function underDeck(terrain, x, z) {
+  return !!(terrain && !terrain.flat && terrain.deckGrid && terrain.deck(x, z) != null);
+}

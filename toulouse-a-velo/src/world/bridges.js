@@ -357,6 +357,51 @@ export function archRise(a, depth, ring, ratio = 0.3) {
 
 // ---- メッシュ ----
 
+// 橋の端の地面を、測った橋面の高さまで上げる（地形をならす前に呼ぶ。ground.js）。
+// 地形のデータ（LiDAR の地面）は橋を取り除いた面なので、橋の端の点が橋台より手前（下の河岸の道・土手の斜面の上）にあると、
+// 端の地面が橋面より数 m 低い。そこへ橋面を合わせると、橋が端へ向かって下がり、その先の道との間に壁ができる
+// （Pont des Catalans の南の端: 測った橋面 −4 m、端の地面 −8〜−10 m、20 m 先の道 −5 m。自転車が通れなかった）。
+// 本物は橋面のまま道へ続くので、地形より測った橋面を信じて、端のまわり（半径 inner m は橋面の高さ、outer m までで元の地面へ）
+// を盛り上げる。その後の conditionRoads が、続く道をこの高さからなだらかにつなぐ。
+// 対象: 測った縦断面があり、端が橋でない道につながり、端の地面が橋面より minDrop〜maxDrop m 低い橋。返り値: 上げた端の一覧
+export function raiseBridgeEnds(terrain, roads, proj, { minDrop = 1.5, maxDrop = 8.5, inner = 10, outer = 18 } = {}) {
+  if (!terrain || terrain.flat || !terrain.near || !proj) return [];
+  const g = terrain.near, D = g.data, DAT = terrain.datum;
+  const land = new Grid(20);
+  for (const o of roads) if (!o.bridge && !o.tunnel && o.type !== 'steps') for (const q of o.pts) land.insertPoint(q[0], q[1], q);
+  const onLand = (p) => {
+    let hit = false;
+    land.queryPoint(p[0], p[1], 1.5, (q) => {
+      if (!hit && Math.hypot(q[0] - p[0], q[1] - p[1]) < 1.5) hit = true;
+    });
+    return hit;
+  };
+  const out = [];
+  for (const b of terrain.profiles || []) {
+    if (!b.y || b.y.length < 4) continue;
+    const ys = cleanProfile(b.y.map((v) => v - DATUM));
+    if (!ys) continue;
+    for (const [ll, y] of [[b.a, ys[0]], [b.b, ys[ys.length - 1]]]) {
+      const p = proj.project(...ll), drop = y - terrain.h(p[0], p[1]);
+      if (!(drop > minDrop && drop < maxDrop) || !onLand(p)) continue;
+      const c0 = Math.max(0, Math.floor(g.ax * (p[0] - outer) + g.bx)), c1 = Math.min(g.cols - 1, Math.ceil(g.ax * (p[0] + outer) + g.bx));
+      const r0 = Math.max(0, Math.floor(g.az * (p[1] - outer) + g.bz)), r1 = Math.min(g.rows - 1, Math.ceil(g.az * (p[1] + outer) + g.bz));
+      for (let r = r0; r <= r1; r++) {
+        const z = (r - g.bz) / g.az;
+        for (let c = c0; c <= c1; c++) {
+          const x = (c - g.bx) / g.ax, k = r * g.cols + c, d = Math.hypot(x - p[0], z - p[1]);
+          if (d >= outer || Number.isNaN(D[k])) continue;
+          const f = d <= inner ? 1 : 1 - (d - inner) / (outer - inner), w = f * f * (3 - 2 * f);
+          const cur = D[k] - DAT;
+          if (cur < y) D[k] = cur + (y - cur) * w + DAT;
+        }
+      }
+      out.push({ name: b.name || '', x: p[0], z: p[1], y, drop });
+    }
+  }
+  return out;
+}
+
 // ---- 地形があるときの橋の高さ ----
 // 橋のまとまり（親の way）ごとの橋面の縦断面を地形に登録する（terrain.deck）。事前取得で表面モデルから測った縦断面
 // （両端の緯度経度で合わせる）があればそれ、なければ両端の地面を結ぶ線に少し山なりを足したもの。両端は 30 m かけて
