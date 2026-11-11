@@ -814,7 +814,8 @@ export function bridgeStyle(road, v, waterDepthAt, levelAt = null, deckAt = null
 }
 
 // ポン・ヌフの両端の取り付け道路: 橋の way の端（ほかの橋の way とつながらない端）から、橋でない同じ名前の車道を、
-// ほかの道が交わる所まで（40 m まで）たどった折れ線。返り値: [{ end: 橋の端 [x, z], pts: 端から外への折れ線, ways: Set, east }]
+// 名前のあるほかの道が交わる所まで（40 m まで）たどった折れ線。名前のない細い道（歩道の上の側道・河岸へ下りる道。地図データに
+// よっては橋の端のすぐ先でつながる）では止めない。返り値: [{ end: 橋の端 [x, z], pts: 端から外への折れ線, ways: Set, east }]
 // （streets.js はこの道の歩道を作らず、ground.js が橋の歩道の続きを敷く）
 export function pontNeufApproaches(roads) {
   const pn = roads.filter((r) => r.name === 'Pont Neuf' && CAR_ROADS.has(r.type) && !r.tunnel && r.pts.length >= 2);
@@ -822,7 +823,7 @@ export function pontNeufApproaches(roads) {
   if (!bridge.length) return [];
   const near = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1]) < 0.5;
   const ends = (r) => [r.pts[0], r.pts[r.pts.length - 1]];
-  const others = roads.filter((r) => !pn.includes(r) && !r.tunnel && r.pts.length >= 2);
+  const others = roads.filter((r) => r.name && !pn.includes(r) && !r.tunnel && r.pts.length >= 2);
   const crossed = (p) => others.some((r) => r.pts.some((q) => near(p, q)));
   const out = [];
   const bEnds = bridge.flatMap((b) => ends(b).filter((p) => !bridge.some((o) => o !== b && ends(o).some((q) => near(p, q)))));

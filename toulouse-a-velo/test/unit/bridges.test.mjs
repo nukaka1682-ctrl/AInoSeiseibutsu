@@ -254,7 +254,9 @@ test('ポン・ヌフの取り付け道路: 橋の両端から、同じ名前の
   const west = r(4, [[-36, 9], [0, 0]]), further = r(5, [[-48, 12], [-36, 9]]);
   const quai = { id: 6, name: 'Quai de Tounis', type: 'residential', width: 4, pts: [[114, 2], [110, 60]] };
   const dillon = { id: 7, name: 'Cours Dillon', type: 'pedestrian', width: 3.5, pts: [[-36, 9], [-40, 80]] };
-  const list = pontNeufApproaches([bridge, east1, east2, west, further, quai, dillon]);
+  // 名前のない細い道（歩道の上の側道）が橋の端のすぐ先でつながっても、そこでは止めない
+  const lane = { id: 8, name: '', type: 'residential', width: 3, pts: [[104, 1], [103, -20]] };
+  const list = pontNeufApproaches([bridge, east1, east2, west, further, quai, dillon, lane]);
   assert.equal(list.length, 2);
   const e = list.find((a) => a.east), w = list.find((a) => !a.east);
   assert.deepEqual([...e.ways].map((x) => x.id), [2, 3], '東: 交わる Quai de Tounis の所まで');
