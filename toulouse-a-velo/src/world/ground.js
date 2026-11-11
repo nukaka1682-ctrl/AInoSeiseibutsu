@@ -67,8 +67,8 @@ const namedSurface = (area) => PLAZA_SURFACES.find((p) => p.match.test(area.name
 const SLAB_ALLEES = [{ name: /^All[ée]es du Pr[ée]sident Franklin Roosevelt$/i, half: 14, color: c3('#f0e2d8') }];
 // 河岸の遊歩道と水際のあいだの丸い川石の石畳の斜面（利用者の写真 NCM_0104・0138: Pont Saint-Pierre の下流の右岸は、遊歩道
 // Promenade Henri Martin から水際まで灰色〜茶色がかった丸い川石 galets を敷き詰めた斜面がゆるく水へ下りる。ラ・ドラードの前
-// （maxX より東）は石の板の河岸）。遊歩道の中心から水の側へ from〜to m の帯（水に沈む分は水面に隠れる）
-const PEBBLE_BEACHES = [{ name: /^Promenade Henri Martin$/i, maxX: -150, from: 1.6, to: 16, color: c3('#ffffff') }];
+// （east [緯度, 経度] より東）は石の板の河岸）。遊歩道の中心から水の側へ from〜to m の帯（水に沈む分は水面に隠れる）
+const PEBBLE_BEACHES = [{ name: /^Promenade Henri Martin$/i, east: [43.6020, 1.43764], from: 1.6, to: 16, color: c3('#ffffff') }];
 // ポン・ヌフの両端の歩道（利用者の指摘: 橋の付け根・歩道との際が雑。航空写真: 両岸とも橋の淡い花崗岩の歩道がそのまま街の
 // 歩道へ続き、縁石は丸い角で曲がる）。取り付け道路（bridges.js の pontNeufApproaches）の両側に、橋の歩道と同じ幅
 // （車道の縁 PN_ROAD_HALF m から欄干の線 PONT_NEUF_HALF m まで）・同じ花崗岩の板と縁の濃い帯を敷き、先の縁石を半径 PN_KERB_R m で
@@ -1373,7 +1373,8 @@ function* groundDetailSteps(parsed, clip, mats, waterDepthAt, opts) {
   for (const road of parsed.roads) {
     const pb = !road.bridge && !road.tunnel && PEBBLE_BEACHES.find((b) => b.name.test(road.name || ''));
     if (!pb) continue;
-    const pts = road.pts.filter(([x]) => x < pb.maxX);
+    const maxX = parsed.proj ? parsed.proj.project(...pb.east)[0] : Infinity; // エリアごとに原点が違うので緯度・経度から
+    const pts = road.pts.filter(([x]) => x < maxX);
     if (pts.length < 2) continue;
     const m = pts.length >> 1, probe = offsets(pts, 12);
     const side = waterDepthAt(...probe.L[m]) > 0 ? 'L' : waterDepthAt(...probe.R[m]) > 0 ? 'R' : null;
