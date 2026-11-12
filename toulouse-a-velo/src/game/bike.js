@@ -428,7 +428,7 @@ export class Bike {
   // 夜でなければ外す（ライトの数が変わると材料のシェーダーが作り直されるので、付けっぱなしで強さ 0 にはしない）
   setHeadlight(on) {
     if (on && !this.headlight) {
-      const light = new THREE.SpotLight('#fff2dc', 18, 28, 0.55, 0.7, 1.6);
+      const light = new THREE.SpotLight('#fff2dc', 12, 28, 0.55, 0.7, 1.6);
       light.position.set(0, 0.95, -0.12); // ハンドルの前（steerGroup の中の位置）
       light.target.position.set(0, -1.2, -12);
       light.castShadow = false;

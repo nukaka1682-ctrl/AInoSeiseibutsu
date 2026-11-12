@@ -1042,7 +1042,7 @@ export class FurnitureSet {
     this.parts = [];
     this.at = null;
     this.count = 0;
-    this.lampHeads = []; // 夜の明かり: 灯具ごとに [x, y, z, 地面の高さ, 灯具の高さ, 白い光か]
+    this.lampHeads = []; // 夜の明かり: 灯具ごとに [x, y, z, 地面の高さ, 灯具の高さ, 白い光か, 光のたまりの中心 [x, z]（街灯の 1 つ目の灯具だけ）]
     this.glow = null; // 光の玉（Points）と地面の光のたまり（InstancedMesh）。夜になって初めて作る
     this.lampsOn = false;
   }
@@ -1068,10 +1068,13 @@ export class FurnitureSet {
       ys[i] = it.y || 0;
       if (cols) c.set(it.color).toArray(cols, i * 3);
       // 街灯の灯具の世界座標（Y 軸まわりの向き a だけ。街灯は傾けない）
-      for (const [hx, hy, hz] of LAMP_HEADS[name] || []) {
+      // 光のたまりは街灯ごとに 1 つ（灯具が 1 つならその真下、いくつもある燭台形は柱の足元）
+      const heads = LAMP_HEADS[name] || [];
+      heads.forEach(([hx, hy, hz], j) => {
         const ca = Math.cos(it.a || 0), sa = Math.sin(it.a || 0);
-        this.lampHeads.push([it.x + hx * ca + hz * sa, (it.y || 0) + hy, it.z - hx * sa + hz * ca, it.y || 0, hy, LAMP_WHITE.has(name)]);
-      }
+        const x = it.x + hx * ca + hz * sa, z = it.z - hx * sa + hz * ca;
+        this.lampHeads.push([x, (it.y || 0) + hy, z, it.y || 0, hy, LAMP_WHITE.has(name), j ? null : heads.length > 1 ? [it.x, it.z] : [x, z]]);
+      });
     });
     if (cols) mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3);
     mesh.castShadow = shadow;
@@ -1154,25 +1157,39 @@ export class FurnitureSet {
     const pos = points.geometry.getAttribute('position'), col = points.geometry.getAttribute('color');
     const mats = pools.instanceMatrix.array, pc = pools.instanceColor.array;
     const r2 = FURNITURE_FAR * FURNITURE_FAR;
-    let k = 0;
+    let k = 0, kp = 0;
+    const P = pos.array, C = col.array;
     for (let i = 0; i < n; i++) {
-      const [hx, hy, hz, gy, h, white] = L[i];
+      const [hx, hy, hz, gy, h, white, pool] = L[i];
       if ((hx - x) ** 2 + (hz - z) ** 2 > r2) continue;
-      pos.array.set([hx, hy - 0.05, hz], k * 3);
-      // 光の玉: 暖色 #ffd9a0（大通りの鋼の柱・円盤は白っぽく）。光のたまり: 同じ色で弱く（色は材料の色 × これ）
-      if (white) col.array.set([1.0, 0.95, 0.88], k * 3);
-      else col.array.set([1.0, 0.7, 0.36], k * 3);
-      if (white) pc.set([0.32, 0.33, 0.34], k * 3);
-      else pc.set([0.4, 0.36, 0.3], k * 3);
-      const s = h * 1.3; // 光のたまりの半径
-      mats.set([s, 0, 0, 0, 0, 1, 0, 0, 0, 0, s, 0, hx, gy + 0.06, hz, 1], k * 16);
+      // 光の玉: 暖色 #ffd9a0（大通りの鋼の柱・円盤は白っぽく）
+      P[k * 3] = hx;
+      P[k * 3 + 1] = hy - 0.05;
+      P[k * 3 + 2] = hz;
+      C[k * 3] = 1.0;
+      C[k * 3 + 1] = white ? 0.95 : 0.7;
+      C[k * 3 + 2] = white ? 0.88 : 0.36;
       k++;
+      if (!pool) continue;
+      // 光のたまり: 同じ色で弱く（色は材料の色 × これ）。半径 = 灯具の高さ × 1.3
+      pc[kp * 3] = white ? 0.2 : 0.24;
+      pc[kp * 3 + 1] = white ? 0.21 : 0.2;
+      pc[kp * 3 + 2] = white ? 0.22 : 0.16;
+      const s = h * 1.3, o = kp * 16;
+      mats.fill(0, o, o + 16);
+      mats[o] = mats[o + 10] = s;
+      mats[o + 5] = mats[o + 15] = 1;
+      mats[o + 12] = pool[0];
+      mats[o + 13] = gy + 0.06;
+      mats[o + 14] = pool[1];
+      kp++;
     }
     points.geometry.setDrawRange(0, k);
     pos.needsUpdate = col.needsUpdate = true;
-    pools.count = k;
+    pools.count = kp;
     pools.instanceMatrix.needsUpdate = pools.instanceColor.needsUpdate = true;
-    points.visible = pools.visible = k > 0;
+    points.visible = k > 0;
+    pools.visible = kp > 0;
   }
 }
 

@@ -773,20 +773,23 @@ export function makeFacadeAtlases() {
 
 // 窓の明かりのマスクを仕上げる: ガラスの範囲（白）のうち、描き上がった絵がガラスの色（青灰色・暗い）のままの所だけを残す
 // （上に描いた白い窓枠・桟、アーチの窓の外のレンガ、明るい鎧戸を除く。カーテンは残す）。半分の解像度のテクスチャにする
+// （どちらも先に半分の解像度に縮めてから読み比べる。読み戻す画素を 1/4 にして、ページの読み込みを遅くしない）
 function litMask(atlas, mask) {
-  const w = atlas.width, h = atlas.height;
-  const a = atlas.getContext('2d').getImageData(0, 0, w, h).data;
-  const mctx = mask.getContext('2d');
-  const img = mctx.getImageData(0, 0, w, h), d = img.data;
+  const w = atlas.width / 2, h = atlas.height / 2;
+  const [sa, actx] = canvas(w, h);
+  actx.drawImage(atlas, 0, 0, w, h);
+  const [half, hctx] = canvas(w, h);
+  hctx.drawImage(mask, 0, 0, w, h);
+  const a = actx.getImageData(0, 0, w, h).data;
+  const img = hctx.getImageData(0, 0, w, h), d = img.data;
   for (let i = 0; i < d.length; i += 4) {
     if (!d[i]) continue;
     const r = a[i], g = a[i + 1], b = a[i + 2];
     const keep = b - r > -14 && r + g + b < 3 * 200;
-    d[i] = d[i + 1] = d[i + 2] = keep ? 255 : 0;
+    if (!keep) d[i] = d[i + 1] = d[i + 2] = 0;
   }
-  mctx.putImageData(img, 0, 0);
-  const [half, hctx] = canvas(w / 2, h / 2);
-  hctx.drawImage(mask, 0, 0, w / 2, h / 2);
+  hctx.putImageData(img, 0, 0);
+  sa.width = 0; // 縮めたアトラスは捨てる
   const t = new THREE.CanvasTexture(half);
   t.wrapS = THREE.RepeatWrapping;
   t.colorSpace = THREE.NoColorSpace;
@@ -870,7 +873,7 @@ export function useFacadeAtlas(material) {
               float r2 = fract(r * 173.31);
               vec3 col = mix(vec3(1.0, 0.58, 0.25), vec3(1.0, 0.84, 0.64), r2);
               float k = litM * uNight * (0.7 + 0.45 * fract(facadeUv.y)) * (0.85 + 0.5 * dot(sampledDiffuseColor.rgb, vec3(0.3, 0.59, 0.11)));
-              facadeLitColor = col * k * mix(0.55, 0.95, fract(r2 * 7.0));
+              facadeLitColor = col * k * mix(0.3, 0.55, fract(r2 * 7.0));
             }
           }
         }` : ''}
