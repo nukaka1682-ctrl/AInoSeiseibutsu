@@ -289,6 +289,10 @@ kbd {
 .delta-good { color: #2e7d4f; font-weight: 700; }
 .delta-bad { color: #b0412e; }
 
+/* ---- 坂の表示（速度の横） ---- */
+#hud-grade { margin-left: 10px; font-size: 18px; font-weight: 700; }
+#hud-grade:empty { display: none; }
+
 /* ---- 旅の手帳 ---- */
 #carnet-screen { background: rgba(20, 16, 14, 0.55); align-items: flex-start; }
 .carnet-panel { max-width: 920px; }

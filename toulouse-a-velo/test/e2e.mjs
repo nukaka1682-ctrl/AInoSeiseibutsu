@@ -216,6 +216,33 @@ try {
   await tour.screenshot({ path: join(out, '12-result.png') });
   await tour.close();
 
+  // ---- タイトル画面: コースの選択と設定の保存（読み込み直すと戻る。opt-refresh は戻さない）----
+  const tp = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+  tp.on('pageerror', (e) => errors.push(String(e)));
+  await tp.goto('http://localhost:4179/?area=light');
+  await tp.check('input[name=mode][value=tour]');
+  await tp.selectOption('#opt-tour', 'garonne');
+  await tp.evaluate(() => {
+    for (const [id, v] of [['opt-shadows', false], ['opt-refresh', true]]) {
+      const el = document.getElementById(id);
+      el.checked = v;
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  });
+  await tp.screenshot({ path: join(out, '15-title-tour.png') });
+  await tp.reload();
+  const restored = await tp.evaluate(() => ({
+    shadows: document.getElementById('opt-shadows').checked,
+    refresh: document.getElementById('opt-refresh').checked,
+    mode: document.querySelector('input[name=mode]:checked').value,
+    tour: document.getElementById('opt-tour').value,
+    pick: !document.getElementById('tour-pick').classList.contains('hidden'),
+    area: document.querySelector('input[name=area]:checked').value,
+  }));
+  check(!restored.shadows && !restored.refresh && restored.mode === 'tour' && restored.tour === 'garonne' && restored.pick && restored.area === 'light',
+    `設定を読み込み直しても戻る（${JSON.stringify(restored)}）`);
+  await tp.close();
+
   // ---- 塀（同梱データの、地籍と LiDAR から見つけた塀）----
   // スタート地点の 10 m 先に、道を横切る長さ 16 m の塀を置く: 道路の上は切り取られて通れ、道の外の部分は当たり判定がある
   const ahead = (d, side) => [start.x + Math.sin(start.heading) * d + Math.cos(start.heading) * side, start.z - Math.cos(start.heading) * d + Math.sin(start.heading) * side];

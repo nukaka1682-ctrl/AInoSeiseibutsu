@@ -22,6 +22,7 @@ import { MEDAL_ICON, TOURS, fmtDelta, medalFor, medalTimes, nextMedal, loadRecor
 import { Violets, planViolets } from './game/violets.js';
 import { TravelStats, renderCarnet, stampDiscovery } from './ui/carnet.js';
 import { PhotoMode } from './game/photomode.js';
+import { restoreTitleSettings, saveTitleSettings } from './game/settings.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -113,6 +114,9 @@ for (const t of TOURS) $('opt-tour').add(new Option(`${t.ja}（${t.fr}）`, t.id
 if (TOURS.some((t) => t.id === params.get('tour'))) $('opt-tour').value = params.get('tour');
 const showTourPick = () => show('tour-pick', document.querySelector('input[name=mode]:checked')?.value === 'tour');
 for (const r of document.querySelectorAll('input[name=mode]')) r.addEventListener('change', showTourPick);
+// タイトルの設定を前回のとおりに戻す（URL で指定した項目は URL を優先）。変えるたびに保存（opt-refresh は保存しない）
+restoreTitleSettings($('title-screen'), store, params);
+$('title-screen').addEventListener('change', () => saveTitleSettings($('title-screen'), store));
 showTourPick();
 
 function show(id, on = true) {
@@ -521,6 +525,7 @@ function update(dt, forced) {
 
   groundMats.water.userData.time.value = state.playTime; // 水面の波を流す
 
+  rig.applyLook(dt, ctl.look); // 右ドラッグ・右スティックで見回す
   rig.update(dt, bike, w.collision, w.groundAt ? (x, z) => w.groundAt(x, z, bike.y + 1) : null); // カメラが坂・河岸に潜らないように
   audio.update(dt, bike.speed, ctl.throttle === 0);
 
@@ -584,6 +589,8 @@ function update(dt, forced) {
     state.streetTimer = 0.3;
     const road = w.roadnet.streetNameAt(bike.x, bike.z);
     $('hud-street').textContent = road ? road.name : '';
+    // 坂の表示（勾配が ±1.5 % 以上のとき）
+    $('hud-grade').textContent = Math.abs(bike.grade) >= 0.015 ? `${bike.grade > 0 ? '▲' : '▼'} ${Math.round(Math.abs(bike.grade) * 100)}%` : '';
     $('hud-stats').innerHTML = `走行距離 ${fmtDist(bike.odometer)} · 最高 ${Math.round(bike.topSpeed)} km/h<br>${CAMERA_LABELS[rig.mode]}`;
     updateModeHud();
   }
@@ -808,6 +815,7 @@ input.on('KeyJ', () => openCarnet(state.phase !== 'carnet'));
 input.on('KeyF', () => openPhoto(state.phase !== 'photo'));
 input.on('Space', () => state.phase === 'play' && audio.bell());
 input.bindTouch($('touch-controls'));
+input.bindLook(renderer.domElement);
 
 for (const btn of document.querySelectorAll('#hud-buttons button')) {
   btn.addEventListener('click', () => {

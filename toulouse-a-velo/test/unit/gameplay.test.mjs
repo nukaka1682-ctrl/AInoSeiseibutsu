@@ -5,6 +5,9 @@ import { TOURS, availableTours, loadRecord, medalFor, medalTimes, nextMedal, pic
 import { planViolets } from '../../src/game/violets.js';
 import { TravelStats, bearingLabel, stampDiscovery } from '../../src/ui/carnet.js';
 import { photoFileName } from '../../src/game/photomode.js';
+import { applySettings, collectSettings, urlSkips } from '../../src/game/settings.js';
+import { CameraRig } from '../../src/game/camera.js';
+import * as THREE from 'three';
 
 // localStorage の代わり（JSON で出し入れする）
 function memoryStore(init = {}) {
@@ -160,6 +163,70 @@ test('TravelStats: odometer の差を足し、5 秒ごとに保存する・発�
   stampDiscovery(s, 'capitole', new Date('2026-05-01T10:00:00Z'));
   stampDiscovery(s, 'capitole', new Date('2026-06-01T10:00:00Z')); // 2 回目は上書きしない
   assert.equal(s.get('tav-discovered-at').capitole, '2026-05-01T10:00:00.000Z');
+});
+
+test('collectSettings: チェックボックス・選択・エリアとモードを集め、opt-refresh は保存しない', () => {
+  const els = [
+    { id: 'opt-shadows', type: 'checkbox', checked: false },
+    { id: 'opt-refresh', type: 'checkbox', checked: true },
+    { id: 'opt-time', type: 'select-one', value: 'soir' }, // 別の作業が足す項目も id で扱う
+    { id: 'opt-tour', type: 'select-one', value: 'garonne' },
+    { name: 'area', type: 'radio', value: 'toulouse', checked: false },
+    { name: 'area', type: 'radio', value: 'centre', checked: true },
+    { name: 'mode', type: 'radio', value: 'tour', checked: true },
+    { id: 'other', type: 'checkbox', checked: true },
+  ];
+  assert.deepEqual(collectSettings(els), { 'opt-shadows': false, 'opt-time': 'soir', 'opt-tour': 'garonne', 'radio:area': 'centre', 'radio:mode': 'tour' });
+});
+
+test('applySettings: 保存した値を戻す・URL で指定した項目は URL を優先・opt-refresh は戻さない', () => {
+  const els = () => [
+    { id: 'opt-shadows', type: 'checkbox', checked: true },
+    { id: 'opt-refresh', type: 'checkbox', checked: false },
+    { id: 'opt-tour', type: 'select-one', value: 'classique', options: [{ value: 'classique' }, { value: 'garonne' }] },
+    { name: 'area', type: 'radio', value: 'toulouse', checked: true },
+    { name: 'area', type: 'radio', value: 'centre', checked: false },
+    { name: 'mode', type: 'radio', value: 'free', checked: true },
+    { name: 'mode', type: 'radio', value: 'tour', checked: false },
+  ];
+  const saved = { 'opt-shadows': false, 'opt-refresh': true, 'opt-tour': 'garonne', 'radio:area': 'centre', 'radio:mode': 'tour' };
+  const a = els();
+  applySettings(a, saved);
+  assert.equal(a[0].checked, false);
+  assert.equal(a[1].checked, false);
+  assert.equal(a[2].value, 'garonne');
+  assert.equal(a[4].checked, true);
+  assert.equal(a[6].checked, true);
+  // ?area=light&tour=jardins: エリアとコースは戻さない
+  const b = els();
+  applySettings(b, saved, urlSkips(new URLSearchParams('area=light&tour=jardins&autostart=1')));
+  assert.equal(b[0].checked, false);
+  assert.equal(b[2].value, 'classique');
+  assert.equal(b[4].checked, false);
+  assert.equal(b[6].checked, true);
+  // 選択肢にない値は戻さない
+  const c = els();
+  applySettings(c, { 'opt-tour': 'nulle-part' });
+  assert.equal(c[2].value, 'classique');
+  assert.deepEqual(applySettings(els(), null), []);
+});
+
+test('CameraRig.applyLook: ±150° に収まり、離すと 0.6 秒でほぼ戻る', () => {
+  const rig = new CameraRig(new THREE.PerspectiveCamera());
+  rig.applyLook(1 / 60, { x: 0, y: 0, dx: -100000, dy: 0, held: true });
+  assert.ok(Math.abs(rig.lookYaw - (150 * Math.PI) / 180) < 1e-9);
+  for (let t = 0; t < 0.6; t += 1 / 60) rig.applyLook(1 / 60, { x: 0, y: 0, dx: 0, dy: 0, held: false });
+  assert.ok(Math.abs(rig.lookYaw) < 0.03, `${rig.lookYaw}`);
+  rig.applyLook(1 / 60, undefined); // テストのシミュレーション（look なし）でも動く
+  rig.lookYaw = 0;
+  rig.lookPitch = 0;
+  // 見回していなければ、カメラは今までと同じ位置
+  const bike = { x: 10, y: 0, z: 5, heading: 0.7, speed: 3, lean: 0 };
+  const col = { raycast: () => 1 };
+  rig.update(1 / 60, bike, col);
+  const p = rig.camera.position.clone();
+  const behind = [bike.x - Math.sin(0.7) * (5.2 + 0.36), bike.z + Math.cos(0.7) * (5.2 + 0.36)];
+  assert.ok(Math.hypot(p.x - behind[0], p.z - behind[1]) < 1e-6);
 });
 
 test('写真モードのファイル名', () => {

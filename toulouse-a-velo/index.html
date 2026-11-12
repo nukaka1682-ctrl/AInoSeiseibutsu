@@ -42,6 +42,7 @@
         <div class="controls-help">
           <div><kbd>W</kbd>/<kbd>↑</kbd> こぐ　<kbd>S</kbd>/<kbd>↓</kbd> ブレーキ・後退　<kbd>A</kbd><kbd>D</kbd>/<kbd>←</kbd><kbd>→</kbd> ハンドル</div>
           <div><kbd>Shift</kbd> 立ちこぎ　<kbd>Space</kbd> ベル　<kbd>C</kbd> カメラ　<kbd>M</kbd> 地図　<kbd>R</kbd> 道路に戻る　<kbd>Esc</kbd> ポーズ</div>
+          <div><kbd>J</kbd> 旅の手帳　<kbd>F</kbd> 写真モード　右ドラッグ 見回す</div>
           <div class="muted">ゲームパッド・スマホのタッチ操作にも対応</div>
         </div>
         <p class="credits">地図データ © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a>（ODbL）／ IGN BD TOPO®（Licence Ouverte / Etalab 2.0）<br />🚇 メトロに乗って駅から街へ出る <a href="./metro.html">Toulouse en métro</a> もあります</p>
@@ -71,7 +72,7 @@
 
     <!-- HUD -->
     <div id="hud" class="hidden">
-      <div id="hud-speed"><span id="speed-value">0</span><small>km/h</small></div>
+      <div id="hud-speed"><span id="speed-value">0</span><small>km/h</small><span id="hud-grade"></span></div>
       <div id="hud-stats"></div>
       <div id="hud-street"></div>
       <canvas id="minimap" width="220" height="220"></canvas>
@@ -126,6 +127,11 @@
         <button id="title-btn">タイトルに戻る</button>
         <button id="carnet-btn">📖 旅の手帳</button>
         <button id="photo-btn">📷 写真モード</button>
+        <div class="controls-help">
+          <div><kbd>W</kbd>/<kbd>↑</kbd> こぐ　<kbd>S</kbd>/<kbd>↓</kbd> ブレーキ・後退　<kbd>A</kbd><kbd>D</kbd>/<kbd>←</kbd><kbd>→</kbd> ハンドル</div>
+          <div><kbd>Shift</kbd> 立ちこぎ　<kbd>Space</kbd> ベル　<kbd>C</kbd> カメラ　<kbd>M</kbd> 地図　<kbd>R</kbd> 道路に戻る　<kbd>Esc</kbd> ポーズ</div>
+          <div><kbd>J</kbd> 旅の手帳　<kbd>F</kbd> 写真モード　右ドラッグ（右スティック） 見回す</div>
+        </div>
       </div>
     </section>
 
