@@ -1011,10 +1011,12 @@ export class FurnitureSet {
     this.parts = [];
     this.at = null;
     this.count = 0;
+    this.items = {}; // 種類ごとの置いた物 { x, y, z, a, ... }（街のにぎわい: テラスの客・ハトの場所に使う）
   }
 
   // items: { x, y, z, a, sx, sy, color } の列。全部の行列を覚えておき、cull で近い物だけを前に詰めて描く
   add(name, geometry, material, items, { shadow = false } = {}) {
+    this.items[name] = items;
     if (!items.length) {
       geometry.dispose();
       return;

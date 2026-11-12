@@ -16,12 +16,12 @@ import { HIP_X, HIP_Y, SHOULDER_X, SHOULDER_Y, armGeometry, bagGeometry, hairGeo
 const FRAMES = ['#c0392b', '#1d1d1f', '#e8e6e0', '#2e5e8c', '#3c6e47', '#8a8d91', '#d4a017', '#5b3a6e'];
 
 let personMat = null;
-function material() {
+export function material() {
   return (personMat ||= new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.78 }));
 }
 
 // 歩く人の部品: geo（局所の形）、color（人の見た目からの色）、who（その部品を持つ人）、limb（'leg' | 'arm' なら左右 2 つ、関節で回す）
-function partList() {
+export function partList() {
   const fill = (g) => {
     if (!g.attributes.color) {
       const c = new Float32Array(g.attributes.position.count * 3).fill(1);

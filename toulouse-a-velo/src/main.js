@@ -15,6 +15,7 @@ import { Bike } from './game/bike.js';
 import { CAMERA_LABELS, CameraRig } from './game/camera.js';
 import { Input } from './game/input.js';
 import { AudioFx } from './game/audio.js';
+import { CityLife } from './game/citylife.js';
 import { animateBeacon, createBeacon, distanceToLandmark } from './game/landmarks.js';
 import { MapRenderer, drawFullMap, drawMinimap } from './ui/minimap.js';
 import { setupScene } from './world/scene.js';
@@ -206,6 +207,11 @@ function finishWorld(world) {
   world.routeMesh.renderOrder = ORDER.route;
   world.routeMesh.frustumCulled = false;
   world.group.add(world.routeMesh);
+  // 街のにぎわい（歩く人・カフェの客・ハト）。設定で外したとき・?life=0 では出さない
+  if ($('opt-life')?.checked !== false && params.get('life') !== '0') {
+    world.life = new CityLife(world, { people: 70, radius: 110 });
+    world.group.add(world.life.group);
+  }
   scene.add(world.group);
   return world;
 }
@@ -475,6 +481,8 @@ function update(dt, forced) {
     });
   }
   state.playTime += dt;
+  w.life?.update(dt, bike, camera);
+  for (const ev of w.life?.events.splice(0) || []) if (ev.type === 'person') audio.bump(0.25);
 
   for (const ev of bike.events.splice(0)) {
     if (ev.type === 'bump') {
@@ -691,7 +699,11 @@ input.on('Tab', (e) => {
   else openMap(true);
 });
 input.on('KeyR', respawn);
-input.on('Space', () => state.phase === 'play' && audio.bell());
+input.on('Space', () => {
+  if (state.phase !== 'play') return;
+  audio.bell();
+  state.world?.life?.bell(state.bike);
+});
 input.bindTouch($('touch-controls'));
 
 for (const btn of document.querySelectorAll('#hud-buttons button')) {
@@ -699,7 +711,10 @@ for (const btn of document.querySelectorAll('#hud-buttons button')) {
     const a = btn.dataset.action;
     if (a === 'map') openMap(true);
     else if (a === 'camera') rig.cycle();
-    else if (a === 'bell') audio.bell();
+    else if (a === 'bell') {
+      audio.bell();
+      state.world?.life?.bell(state.bike);
+    }
     else if (a === 'pause') togglePause(true);
     btn.blur();
   });
