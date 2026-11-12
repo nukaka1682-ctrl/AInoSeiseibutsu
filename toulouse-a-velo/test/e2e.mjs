@@ -144,6 +144,19 @@ try {
   await sim(1.5, { throttle: 1 });
   await page.waitForTimeout(500);
   await page.screenshot({ path: join(out, '09-fpv.png') });
+
+  // スミレ: 花の 1 つの場所へ自転車を置いて進めると集まる
+  const vio = await page.evaluate(() => {
+    const vs = window.__tav.world.violets;
+    const v = vs?.pending[0];
+    if (!v) return { total: vs?.total || 0 };
+    const before = vs.collected.size;
+    window.__tav.bike.place(v.x, v.z, 0);
+    window.__tavSimulate(0.3, {});
+    return { total: vs.total, before, after: vs.collected.size, hud: document.getElementById('hud-mode').textContent };
+  });
+  check(vio.total > 0 && vio.after === vio.before + 1, `スミレを集める（${vio.before} → ${vio.after} / ${vio.total}、HUD「${vio.hud}」）`);
+
   await page.close();
 
   // ---- タイムアタック ----
@@ -159,6 +172,19 @@ try {
   const idx = await tour.evaluate(() => window.__tav.tour.index);
   check(idx === 2, `チェックポイント通過（index=${idx}）`);
   await tour.screenshot({ path: join(out, '10-tour.png') });
+  // 残りのチェックポイントを回ってゴール → 結果画面にメダルと区間の時間
+  const fin = await tour.evaluate(() => {
+    const s = window.__tav;
+    for (let i = 0; i < 20 && s.phase === 'play'; i++) {
+      const lm = s.target;
+      s.bike.place(lm.approach.x, lm.approach.z, 0);
+      window.__tavSimulate(2, { throttle: 1 });
+    }
+    return { phase: s.phase, id: s.tour.id, times: s.tour.times, text: document.getElementById('result-text').textContent, rows: document.querySelectorAll('.result-splits tbody tr').length, n: s.tour.list.length };
+  });
+  check(fin.phase === 'result' && fin.id === 'classique' && fin.times.gold > 0 && /メダル|完走/.test(fin.text) && fin.rows === fin.n - 1,
+    `ゴールで結果画面（${fin.id}、${fin.text.slice(0, 40).replace(/\s+/g, ' ')}…、区間 ${fin.rows}）`);
+  await tour.screenshot({ path: join(out, '12-result.png') });
   await tour.close();
 
   // ---- 塀（同梱データの、地籍と LiDAR から見つけた塀）----

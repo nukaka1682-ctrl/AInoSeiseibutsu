@@ -18,6 +18,8 @@ import { AudioFx } from './game/audio.js';
 import { animateBeacon, createBeacon, distanceToLandmark } from './game/landmarks.js';
 import { MapRenderer, drawFullMap, drawMinimap } from './ui/minimap.js';
 import { setupScene } from './world/scene.js';
+import { MEDAL_ICON, TOURS, fmtDelta, medalFor, medalTimes, nextMedal, loadRecord, pickTour, saveRecord, splitDelta, tourLength } from './game/tours.js';
+import { Violets, planViolets } from './game/violets.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -72,6 +74,7 @@ const state = {
   toastTimer: 0,
   lastWarn: 0,
   discovered: new Set(store.get('tav-discovered', [])),
+  tourId: 'classique', // タイムアタックのコース（game/tours.js の TOURS）
 };
 window.__tav = state; // デバッグ・テスト用
 state.rig = rig;
@@ -102,6 +105,12 @@ const areas = { ...(customArea ? { custom: customArea } : {}), ...AREA_PRESETS }
   if (params.get('mode') === 'tour') document.querySelector('input[name=mode][value=tour]').checked = true;
   if (params.get('refresh') === '1') $('opt-refresh').checked = true; // 同梱データ・キャッシュを使わずに取得する
 }
+// タイムアタックのコースの選択（モードでタイムアタックを選んだときだけ見せる。?tour=garonne でも選べる）
+for (const t of TOURS) $('opt-tour').add(new Option(`${t.ja}（${t.fr}）`, t.id));
+if (TOURS.some((t) => t.id === params.get('tour'))) $('opt-tour').value = params.get('tour');
+const showTourPick = () => show('tour-pick', document.querySelector('input[name=mode]:checked')?.value === 'tour');
+for (const r of document.querySelectorAll('input[name=mode]')) r.addEventListener('change', showTourPick);
+showTourPick();
 
 function show(id, on = true) {
   $(id).classList.toggle('hidden', !on);
@@ -120,6 +129,7 @@ async function startGame() {
   audio.resume();
   state.presetId = document.querySelector('input[name=area]:checked')?.value || DEFAULT_AREA;
   state.mode = document.querySelector('input[name=mode]:checked')?.value || 'free';
+  state.tourId = $('opt-tour').value || 'classique';
   const area = areas[state.presetId];
   const shadows = $('opt-shadows').checked;
   renderer.shadowMap.enabled = shadows;
@@ -206,6 +216,10 @@ function finishWorld(world) {
   world.routeMesh.renderOrder = ORDER.route;
   world.routeMesh.frustumCulled = false;
   world.group.add(world.routeMesh);
+  // スミレ集め（自由走行のとき。集めた花はエリアごとに保存）
+  const okPoint = (x, z) => !world.collision.blockedByWater(x, z) && !world.collision.outOfBounds(x, z);
+  world.violets = new Violets(world, planViolets(world.landmarks, (x, z) => world.roadnet.nearestRideablePoint(x, z, okPoint)), store.get(`tav-violets-${state.presetId}`, []));
+  world.group.add(world.violets.group);
   scene.add(world.group);
   return world;
 }
@@ -227,7 +241,7 @@ function disposeWorld() {
 function spawnPoint(w) {
   let at = null;
   if (state.mode === 'tour') {
-    const first = w.landmarks.find((l) => l.id === TOUR_ROUTE[0]);
+    const first = pickTour(w.landmarks, state.tourId).list[0] || w.landmarks.find((l) => l.id === TOUR_ROUTE[0]);
     if (first) at = first.approach;
   }
   if (!at) at = (w.landmarks.find((l) => l.id === 'place-capitole') || w.landmarks.find((l) => l.id === 'capitole'))?.approach;
@@ -265,15 +279,21 @@ function beginPlay() {
   state.toastTimer = 0;
 
   if (state.mode === 'tour') {
-    const list = TOUR_ROUTE.map((id) => w.landmarks.find((l) => l.id === id)).filter(Boolean);
-    if (list.length >= 3) {
-      state.tour = { list, index: 1, started: false, time: 0, splits: [] };
+    // 選んだコースが走れなければ classique（それも無理なら自由走行）
+    const { tour: def, list, fellBack } = pickTour(w.landmarks, state.tourId);
+    if (def) {
+      const length = tourLength(list, (ax, az, bx, bz) => w.roadnet.route(ax, az, bx, bz));
+      const times = medalTimes(length);
+      state.tour = { list, index: 1, started: false, time: 0, splits: [], id: def.id, name: def.ja, length, times, record: loadRecord(store, state.presetId, def.id) };
       setTarget(list[1]);
+      if (fellBack) toast(`このエリアには選んだコースの名所が足りないため、「${def.ja}」で走ります`, 4);
+      toast(`🏁 <b>${def.ja}</b>（約 ${(length / 1000).toFixed(1)} km）<br>🥇 ${fmtClock(times.gold)}　🥈 ${fmtClock(times.silver)}　🥉 ${fmtClock(times.bronze)}`, 6);
     } else {
       state.mode = 'free';
       toast('このエリアにはタイムアタックの名所が足りないため、自由走行で始めます');
     }
   }
+  if (w.violets) w.violets.group.visible = state.mode !== 'tour'; // タイムアタック中は集められない
   const p = spawnPoint(w);
   bike.place(p.x, p.z, p.heading, groundForTeleport(p.x, p.z, p.road));
   if (!w.stream) w.furniture?.cull(p.x, p.z, true); // 一度に作る街: 始まる前から近くの小物を描く（遊んでいる間は update で）
@@ -338,6 +358,12 @@ function fmtTime(s) {
   return `${m}:${r.toFixed(1).padStart(4, '0')}`;
 }
 
+// メダルの時間（m:ss）
+function fmtClock(s) {
+  const m = Math.floor(s / 60);
+  return `${m}:${String(Math.floor(s - m * 60)).padStart(2, '0')}`;
+}
+
 function fmtDist(m) {
   return m >= 1000 ? `${(m / 1000).toFixed(2)} km` : `${Math.round(m)} m`;
 }
@@ -345,11 +371,13 @@ function fmtDist(m) {
 function updateModeHud() {
   const t = state.tour;
   if (state.mode === 'tour' && t) {
-    $('hud-mode').innerHTML = `🏁 名所めぐり ${t.index}/${t.list.length - 1}<br>⏱ ${fmtTime(t.time)}`;
+    const m = t.times && medalFor(t.time, t.times); // 今ねらえるメダル
+    $('hud-mode').innerHTML = `🏁 ${t.name || '名所めぐり'} ${t.index}/${t.list.length - 1}<br>⏱ ${fmtTime(t.time)}${m ? `　${MEDAL_ICON[m]} ${fmtClock(t.times[m])} まで` : ''}`;
   } else {
     const n = state.world?.landmarks.length || 0;
     const d = state.world?.landmarks.filter((l) => l.discovered).length || 0;
-    $('hud-mode').innerHTML = `🗺️ 発見した名所 ${d}/${n}`;
+    const v = state.world?.violets;
+    $('hud-mode').innerHTML = `🗺️ 発見した名所 ${d}/${n}${v?.total ? `<br>💜 ${v.collected.size}/${v.total}` : ''}`;
   }
 }
 
@@ -516,11 +544,15 @@ function update(dt, forced) {
       audio.chime();
       if (t.index >= t.list.length) finishTour();
       else {
-        toast(`<b>✅ ${cur.ja}</b> ${fmtTime(t.time)}<br>次は ${t.list[t.index].ja}`, 4, true);
+        const delta = splitDelta(t.record, t.splits.length - 1, t.time); // 自己ベストとの差
+        toast(`<b>✅ ${cur.ja}</b> ${fmtTime(t.time)}${delta == null ? '' : `（${fmtDelta(delta)}）`}<br>次は ${t.list[t.index].ja}`, 4, true);
         setTarget(t.list[t.index]);
       }
     }
   }
+
+  // スミレ集め
+  if (w.violets) for (const v of w.violets.update(dt, bike, state.playTime)) collectViolet(v);
 
   // ナビ
   if (state.target) {
@@ -552,27 +584,45 @@ function update(dt, forced) {
   tickToast(dt);
 }
 
+function collectViolet(v) {
+  const vs = state.world.violets;
+  store.set(`tav-violets-${state.presetId}`, [...vs.collected]);
+  audio.collect();
+  toast(`💜 スミレ ${vs.collected.size} / ${vs.total}`, 2.5, true);
+  const lm = state.world.landmarks.find((l) => l.id === v.lm);
+  if (lm && vs.bouquetDone(lm.id)) toast(`💐 <b>${lm.ja}</b> のスミレの花束がそろいました`, 4);
+  if (vs.remaining === 0) toast('👑 <b>トゥールーズのスミレを全部集めました！</b>', 6);
+  updateModeHud();
+}
+
 // ミニマップと名所ラベル（描画フレームごと。テスト用のシミュレーションでは呼ばない）
 function drawHud() {
   const w = state.world;
   const bike = state.bike;
   drawMinimap($('minimap'), w.map, {
     x: bike.x, z: bike.z, heading: bike.heading, zoom: 0.9, route: state.route, landmarks: w.landmarks, target: state.target,
+    violets: w.violets?.group.visible ? w.violets.pending : null,
   });
   updateLabels();
 }
 
 function finishTour() {
   const t = state.tour;
-  const key = `tav-best-${state.presetId}`;
-  const best = store.get(key, null);
-  const isBest = best == null || t.time < best;
-  if (isBest) store.set(key, t.time);
+  const medal = medalFor(t.time, t.times);
+  const next = nextMedal(t.time, t.times);
+  const prev = t.record; // 走る前の自己ベスト（区間の差を比べる）
+  const { isBest, record } = saveRecord(store, state.presetId, t.id, t.time, t.splits.map((s) => s.time), medal);
   state.phase = 'result';
   input.enabled = false;
-  $('result-text').innerHTML = `<p style="font-size:32px;font-weight:800;margin:8px 0">${fmtTime(t.time)}</p>
-    <p>${isBest ? '🎉 自己ベスト更新！' : `自己ベスト: ${fmtTime(best)}`}</p>
-    <ol>${t.splits.map((s) => `<li>${s.name} — ${fmtTime(s.time)}</li>`).join('')}</ol>
+  const rows = t.splits.map((s, i) => {
+    const lap = s.time - (i ? t.splits[i - 1].time : 0);
+    const d = splitDelta(prev, i, s.time);
+    return `<tr><td>${s.name}</td><td>${fmtTime(lap)}</td><td>${fmtTime(s.time)}</td><td class="${d == null ? '' : d < 0 ? 'delta-good' : 'delta-bad'}">${d == null ? '' : fmtDelta(d)}</td></tr>`;
+  }).join('');
+  $('result-text').innerHTML = `<p class="result-medal">${medal ? `${MEDAL_ICON[medal]} ${{ gold: '金', silver: '銀', bronze: '銅' }[medal]}メダル` : '完走'}<small>${t.name}（約 ${(t.length / 1000).toFixed(1)} km）</small></p>
+    <p style="font-size:32px;font-weight:800;margin:8px 0">${fmtTime(t.time)}</p>
+    <p>${isBest ? '🎉 自己ベスト更新！' : `自己ベスト: ${fmtTime(record.best)}`}${next ? `　${MEDAL_ICON[next.medal]} まであと ${next.seconds.toFixed(1)} 秒` : ''}</p>
+    <table class="result-splits"><thead><tr><th>チェックポイント</th><th>区間</th><th>通過</th><th>自己ベスト比</th></tr></thead><tbody>${rows}</tbody></table>
     <p class="muted small">走行距離 ${fmtDist(state.bike.odometer)} · 最高速度 ${Math.round(state.bike.topSpeed)} km/h</p>`;
   show('result-screen');
 }
@@ -615,7 +665,7 @@ function renderFullMap() {
   c.height = Math.round(r.height * Math.min(devicePixelRatio, 2));
   const w = state.world;
   const b = state.bike;
-  mapXf = drawFullMap(c, w.map, { x: b.x, z: b.z, heading: b.heading, route: state.route, landmarks: w.landmarks, target: state.target });
+  mapXf = drawFullMap(c, w.map, { x: b.x, z: b.z, heading: b.heading, route: state.route, landmarks: w.landmarks, target: state.target, violets: w.violets?.group.visible ? w.violets.pending : null });
   const ul = $('landmark-list');
   ul.innerHTML = '';
   for (const lm of w.landmarks) {
@@ -727,6 +777,7 @@ $('free-btn').addEventListener('click', () => {
   input.enabled = true;
   state.mode = 'free';
   state.tour = null;
+  if (state.world.violets) state.world.violets.group.visible = true;
   setTarget(null);
   state.phase = 'play';
   updateModeHud();

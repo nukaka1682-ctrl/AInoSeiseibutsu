@@ -276,3 +276,15 @@ kbd {
 }
 
 .choice a { color: var(--rose-dark); }
+
+/* ---- コースの選択・結果（メダル） ---- */
+.tour-pick { display: flex; align-items: center; gap: 8px; margin: 8px 0 0 4px; color: var(--muted); }
+.tour-pick select { flex: 1; min-width: 0; font: inherit; padding: 6px 8px; border: 2px solid #ead8cc; border-radius: 10px; background: #fff; color: var(--ink); }
+.result-medal { margin: 4px 0 0; font-size: 26px; font-weight: 800; color: var(--rose-dark); }
+.result-medal small { display: block; font-size: 13px; font-weight: 600; color: var(--muted); }
+.result-splits { width: 100%; border-collapse: collapse; font-size: 13px; margin: 8px 0; }
+.result-splits th { text-align: left; font-weight: 600; color: var(--muted); border-bottom: 1px solid #ead8cc; padding: 4px 6px; }
+.result-splits td { padding: 4px 6px; border-bottom: 1px solid #f3e6dd; font-variant-numeric: tabular-nums; }
+.result-splits td:first-child { width: 45%; }
+.delta-good { color: #2e7d4f; font-weight: 700; }
+.delta-bad { color: #b0412e; }

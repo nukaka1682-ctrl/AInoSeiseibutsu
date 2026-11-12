@@ -1,0 +1,133 @@
+// 遊びと UI の DOM に依らない部分: コースとメダル・記録・スミレの置き場所・手帳の方角・設定の保存
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { TOURS, availableTours, loadRecord, medalFor, medalTimes, nextMedal, pickTour, saveRecord, splitDelta, tourLength } from '../../src/game/tours.js';
+import { planViolets } from '../../src/game/violets.js';
+
+// localStorage の代わり（JSON で出し入れする）
+function memoryStore(init = {}) {
+  const m = new Map(Object.entries(init).map(([k, v]) => [k, JSON.stringify(v)]));
+  return {
+    get: (k, d) => (m.has(k) ? JSON.parse(m.get(k)) : d),
+    set: (k, v) => m.set(k, JSON.stringify(v)),
+    raw: m,
+  };
+}
+
+const lmAt = (id, x, z) => ({ id, x, z, approach: { x, z } });
+const allLandmarks = () => [...new Set(TOURS.flatMap((t) => t.route))].map((id, i) => lmAt(id, i * 100, 0));
+
+test('availableTours: 名所が欠けたコースは出ない', () => {
+  const all = allLandmarks();
+  assert.deepEqual(availableTours(all).map((t) => t.id), TOURS.map((t) => t.id));
+  const noBazacle = all.filter((l) => l.id !== 'bazacle');
+  const ids = availableTours(noBazacle).map((t) => t.id);
+  assert.ok(!ids.includes('grand'));
+  assert.ok(ids.includes('classique') && ids.includes('garonne'));
+});
+
+test('pickTour: 走れないコースは classique に、classique が欠けていればあるものだけ（3 か所以上）', () => {
+  const all = allLandmarks();
+  const a = pickTour(all, 'garonne');
+  assert.equal(a.tour.id, 'garonne');
+  assert.equal(a.fellBack, false);
+  assert.equal(a.list[0].id, 'saint-pierre');
+  const noBazacle = all.filter((l) => l.id !== 'bazacle');
+  const b = pickTour(noBazacle, 'grand');
+  assert.equal(b.tour.id, 'classique');
+  assert.equal(b.fellBack, true);
+  // 旧版と同じ: classique の名所が一部しかなくても 3 か所以上あれば走れる
+  const few = all.filter((l) => ['place-capitole', 'saint-sernin', 'jacobins'].includes(l.id));
+  const c = pickTour(few, 'classique');
+  assert.equal(c.tour.id, 'classique');
+  assert.equal(c.fellBack, false);
+  assert.deepEqual(c.list.map((l) => l.id), ['place-capitole', 'saint-sernin', 'jacobins', 'place-capitole']);
+  assert.equal(pickTour(few.slice(0, 1), 'classique').tour, null);
+});
+
+test('tourLength: ルートの長さの合計、引けない区間は直線の 1.3 倍', () => {
+  const list = [lmAt('a', 0, 0), lmAt('b', 100, 0), lmAt('c', 100, 100)];
+  const route = (ax, az, bx, bz) => (bx === 100 && bz === 0 ? [[ax, az], [50, 50], [bx, bz]] : null);
+  const len = tourLength(list, route);
+  assert.ok(Math.abs(len - (2 * Math.hypot(50, 50) + 130)) < 1e-9, `len=${len}`);
+});
+
+test('medalTimes・medalFor・nextMedal の境目', () => {
+  const t = medalTimes(7500);
+  assert.equal(t.gold, 1000);
+  assert.ok(Math.abs(t.silver - 7500 / 6.2) < 1e-9);
+  assert.equal(t.bronze, 7500 / 4.8);
+  assert.equal(medalFor(1000, t), 'gold');
+  assert.equal(medalFor(1000.01, t), 'silver');
+  assert.equal(medalFor(t.silver, t), 'silver');
+  assert.equal(medalFor(t.bronze, t), 'bronze');
+  assert.equal(medalFor(t.bronze + 0.01, t), null);
+  assert.equal(nextMedal(900, t), null);
+  assert.deepEqual(nextMedal(1100, t), { medal: 'gold', seconds: 100 });
+  assert.equal(nextMedal(t.bronze + 10, t).medal, 'bronze');
+});
+
+test('loadRecord: classique は旧版の鍵（数値だけ）も読む', () => {
+  const s = memoryStore({ 'tav-best-centre': 321.5 });
+  assert.deepEqual(loadRecord(s, 'centre', 'classique'), { best: 321.5, splits: null, medal: null });
+  assert.equal(loadRecord(s, 'centre', 'garonne'), null);
+  assert.equal(loadRecord(s, 'toulouse', 'classique'), null);
+});
+
+test('saveRecord: 遅い時間では best を上書きしない・classique は旧版の鍵にも書く', () => {
+  const s = memoryStore();
+  const r1 = saveRecord(s, 'centre', 'classique', 300, [100, 200, 300], 'silver');
+  assert.equal(r1.isBest, true);
+  assert.equal(s.get('tav-best-centre'), 300);
+  const r2 = saveRecord(s, 'centre', 'classique', 350, [90, 210, 350], 'bronze');
+  assert.equal(r2.isBest, false);
+  assert.deepEqual(loadRecord(s, 'centre', 'classique'), { best: 300, splits: [100, 200, 300], medal: 'silver' });
+  assert.equal(s.get('tav-best-centre'), 300);
+  const r3 = saveRecord(s, 'centre', 'garonne', 500, [250, 500], null);
+  assert.equal(r3.isBest, true);
+  assert.equal(s.get('tav-tour-centre-garonne').best, 500);
+  assert.equal(s.get('tav-best-centre'), 300); // 別のコースは旧版の鍵に書かない
+});
+
+test('splitDelta: 自己ベストの同じチェックポイントとの差', () => {
+  const rec = { best: 300, splits: [100, 200, 300] };
+  assert.equal(splitDelta(rec, 1, 195), -5);
+  assert.equal(splitDelta(rec, 0, 103.5), 3.5);
+  assert.equal(splitDelta(rec, 5, 10), null);
+  assert.equal(splitDelta(null, 0, 10), null);
+  assert.equal(splitDelta({ best: 300, splits: null }, 0, 10), null);
+});
+
+// 格子状の道（50 m ごと）の上の最も近い点。川（x < -400）の点は null
+const gridRoad = (x, z) => {
+  if (x < -400) return null;
+  const gx = Math.round(x / 50) * 50, gz = Math.round(z / 50) * 50;
+  return Math.abs(x - gx) < Math.abs(z - gz) ? { x: gx, z } : { x, z: gz };
+};
+const lms = [lmAt('capitole', 0, 0), lmAt('saint-sernin', 0, -500), lmAt('daurade', -380, 0)];
+
+test('planViolets: 同じ入力で同じ結果・名所から 35 m より遠い・花どうし 25 m より遠い', () => {
+  const a = planViolets(lms, gridRoad);
+  const b = planViolets(lms, gridRoad);
+  assert.deepEqual(a, b);
+  assert.ok(a.length >= 6, `花 ${a.length}`);
+  assert.ok(a.length <= 9);
+  for (const v of a) {
+    const lm = lms.find((l) => l.id === v.lm);
+    assert.ok(Math.hypot(v.x - lm.approach.x, v.z - lm.approach.z) > 35, v.id);
+    assert.ok(v.id.startsWith(`${v.lm}:`));
+    for (const w of a) if (w !== v) assert.ok(Math.hypot(v.x - w.x, v.z - w.z) > 25, `${v.id} と ${w.id}`);
+  }
+  assert.equal(new Set(a.map((v) => v.id)).size, a.length);
+});
+
+test('planViolets: nearestRideable が null を返す点は使わない', () => {
+  const calls = [];
+  const out = planViolets(lms, (x, z) => {
+    calls.push([x, z]);
+    return x < -400 ? null : gridRoad(x, z);
+  });
+  assert.ok(calls.some(([x]) => x < -400), '川の上の点も試した');
+  for (const v of out) assert.ok(v.x >= -400, v.id);
+  assert.deepEqual(planViolets(lms, () => null), []);
+});
