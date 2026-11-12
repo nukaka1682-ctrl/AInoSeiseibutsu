@@ -20,6 +20,8 @@ import { MapRenderer, drawFullMap, drawMinimap } from './ui/minimap.js';
 import { setupScene } from './world/scene.js';
 import { TIME_OF_DAY, TIME_ORDER } from './world/light.js';
 import { createPipeline } from './metro/render.js';
+import { facadeNight } from './world/facades.js';
+import { lampNight } from './world/furniture.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -73,6 +75,8 @@ function setTimeOfDay(id) {
   const look = TIME_OF_DAY[(state.timeOfDay = timeOfDay.id)];
   groundMats.water.envMapIntensity = look.water;
   Object.assign(bloomLook, look.bloom);
+  facadeNight.value = lampNight.value = look.night; // 窓・街灯の明かり
+  state.bike?.setHeadlight(look.night > 0);
   $('time-btn').textContent = `時間帯: ${look.name}`;
 }
 
@@ -284,6 +288,7 @@ function beginPlay() {
   const w = state.world;
   if (!state.bike) state.bike = new Bike();
   const bike = state.bike;
+  bike.setHeadlight(TIME_OF_DAY[state.timeOfDay].night > 0); // 夜の前照灯
   scene.add(bike.root);
   bike.odometer = 0;
   bike.topSpeed = 0;

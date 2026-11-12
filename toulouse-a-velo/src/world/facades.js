@@ -191,7 +191,17 @@ function surround(ctx, st, x, y, w, h, rnd, arched) {
   }
 }
 
+// 夜の窓の明かりのマスク: makeFacadeAtlases がアトラスを描くあいだだけ、ガラスの範囲を白で塗るもう 1 枚のキャンバス
+let litCtx = null;
+function litRect(ctx, x, y, w, h, color) {
+  if (!litCtx) return;
+  litCtx.setTransform(ctx.getTransform());
+  litCtx.fillStyle = color;
+  litCtx.fillRect(x, y, w, h);
+}
+
 function glass(ctx, x, y, w, h, rnd, curtains) {
+  litRect(ctx, x, y, w, h, '#fff');
   const g = ctx.createLinearGradient(x, y, x + w * 0.3, y + h);
   g.addColorStop(0, '#6d7f8c');
   g.addColorStop(0.45, '#33404b');
@@ -241,6 +251,7 @@ function shutters(ctx, x, y, w, h, color, closed, rnd) {
   if (closed) {
     leaf(x, w / 2);
     leaf(x + w / 2, w / 2);
+    litRect(ctx, x, y - 2, w, h + 4, '#000'); // 閉じた鎧戸の窓は光らない
   } else {
     leaf(x - w / 2 - 15, w / 2);
     leaf(x + w + 15, w / 2);
@@ -720,10 +731,15 @@ export function stylePlainColor(style) {
   return st && st.wall !== 'brick' ? st.plaster : null;
 }
 
-// 上の階用と 1 階用のアトラス（どちらも 1024 × 256·様式数）
+// 上の階用と 1 階用のアトラス（どちらも 1024 × 256·様式数）と、夜の窓の明かりのマスク（upperLit・groundLit。半分の解像度、
+// 白 = 明かりが透けるガラス）。マスクはアトラスのテクスチャの userData.lit にも入れる（useFacadeAtlas が読む）
 export function makeFacadeAtlases() {
   const make = (draw, seed) => {
     const [c, ctx] = canvas(W, CELL * FACADE_STYLES);
+    const [m, mctx] = canvas(W, CELL * FACADE_STYLES);
+    mctx.fillStyle = '#000';
+    mctx.fillRect(0, 0, W, CELL * FACADE_STYLES);
+    litCtx = mctx;
     STYLES.forEach((st, k) => {
       const rnd = mulberry32(seed + k * 101);
       const y0 = CELL * (FACADE_STYLES - 1 - k); // 画像は上下が反転して貼られる（v = 0 が画像の下端）
@@ -732,16 +748,49 @@ export function makeFacadeAtlases() {
       ctx.beginPath();
       ctx.rect(0, 0, W, CELL);
       ctx.clip();
+      mctx.save();
+      mctx.setTransform(ctx.getTransform());
+      mctx.beginPath();
+      mctx.rect(0, 0, W, CELL);
+      mctx.clip();
       draw(ctx, st, rnd);
+      mctx.restore();
       ctx.restore();
     });
+    litCtx = null;
     const t = new THREE.CanvasTexture(c);
     t.wrapS = THREE.RepeatWrapping;
     t.colorSpace = THREE.SRGBColorSpace;
     t.anisotropy = 8;
+    t.userData.lit = litMask(c, m);
     return t;
   };
-  return { upper: make(drawUpper, 17), ground: make(drawGround, 29) };
+  const upper = make(drawUpper, 17), ground = make(drawGround, 29);
+  upper.userData.litShare = 0.35; // 夜に明かりの点いている窓の割合（上の階）
+  ground.userData.litShare = 0.6; // 1 階（店）
+  return { upper, ground, upperLit: upper.userData.lit, groundLit: ground.userData.lit };
+}
+
+// 窓の明かりのマスクを仕上げる: ガラスの範囲（白）のうち、描き上がった絵がガラスの色（青灰色・暗い）のままの所だけを残す
+// （上に描いた白い窓枠・桟、アーチの窓の外のレンガ、明るい鎧戸を除く。カーテンは残す）。半分の解像度のテクスチャにする
+function litMask(atlas, mask) {
+  const w = atlas.width, h = atlas.height;
+  const a = atlas.getContext('2d').getImageData(0, 0, w, h).data;
+  const mctx = mask.getContext('2d');
+  const img = mctx.getImageData(0, 0, w, h), d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    if (!d[i]) continue;
+    const r = a[i], g = a[i + 1], b = a[i + 2];
+    const keep = b - r > -14 && r + g + b < 3 * 200;
+    d[i] = d[i + 1] = d[i + 2] = keep ? 255 : 0;
+  }
+  mctx.putImageData(img, 0, 0);
+  const [half, hctx] = canvas(w / 2, h / 2);
+  hctx.drawImage(mask, 0, 0, w / 2, h / 2);
+  const t = new THREE.CanvasTexture(half);
+  t.wrapS = THREE.RepeatWrapping;
+  t.colorSpace = THREE.NoColorSpace;
+  return t;
 }
 
 // 壁の足元の陰（地面に近いほど空が見えず暗い。世界座標の高さ vWallY で決める）
@@ -766,9 +815,28 @@ export function useContactShade(material) {
 // アトラスから様式のセルを選んで縦に繰り返すようにマテリアルを書き換える。
 // 頂点カラーには（明るさ, 暖かさ, 軒の高さ）を入れてある（buildings.js の facadeColor）: 軒下の 1 m は雨が当たらず
 // 汚れが残り、軒の陰にもなるので少し暗くする。足元の陰も付ける
+//
+// 夜の窓の明かり（facadeNight.value = 夜の割合。0 のときは足す光が 0 で、今と同じ色）: マスク（makeFacadeAtlases）のガラスの画素で、
+// 窓ごとの乱数がしきい値（上の階 35 %・1 階の店 60 %）より小さい窓だけ、暖色〜白の光（自分で光る色）を足す。
+// 窓ごとの乱数 = ハッシュ（ベイの番号〔facadeUv.x の 1/4 ごと〕, 階, 窓の中心の世界座標 xz を 40 m で切った番号）。
+// 窓の中心は、壁に沿った u の画面上の微分から壁の向きを求めて戻す（40 m の境で窓が半分だけ光らないように）。
+// 窓の中は上が少し明るく、カーテンの所は少しむらにする
+export const facadeNight = { value: 0 }; // 全部の壁の材料で共有する
 export function useFacadeAtlas(material) {
+  const lit = material.map?.userData.lit;
+  const litShare = material.map?.userData.litShare ?? 0.35;
   material.onBeforeCompile = (shader) => {
     addWallY(shader);
+    if (lit) {
+      Object.assign(shader.uniforms, { facadeLit: { value: lit }, uNight: facadeNight, uLitShare: { value: litShare } });
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying vec2 vFacadeXZ;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvFacadeXZ = (modelMatrix * vec4(transformed, 1.0)).xz;');
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', '#include <common>\nvarying vec2 vFacadeXZ;\nuniform sampler2D facadeLit;\nuniform float uNight, uLitShare;')
+        .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+          totalEmissiveRadiance += facadeLitColor;`);
+    }
     shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', `#ifdef USE_COLOR
         diffuseColor.rgb *= vColor.r * vec3(1.0, 1.0 - vColor.g * 0.5, 1.0 - vColor.g);
         diffuseColor.rgb *= mix(0.8, 1.0, smoothstep(0.0, 1.0, vColor.b - vWallY));
@@ -776,7 +844,8 @@ export function useFacadeAtlas(material) {
       ${CONTACT_SHADE}`);
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <map_fragment>',
-      `#ifdef USE_MAP
+      `${lit ? 'vec3 facadeLitColor = vec3(0.0);' : ''}
+      #ifdef USE_MAP
         float facadeStyle = floor((vMapUv.y + 100.0) / 1000.0);
         vec2 facadeUv = vec2(vMapUv.x, vMapUv.y - facadeStyle * 1000.0);
         float facadeFloor = floor(facadeUv.y);
@@ -786,10 +855,29 @@ export function useFacadeAtlas(material) {
         vec2 gScale = vec2(1.0, 0.97 / FN);
         vec4 sampledDiffuseColor = textureGrad(map, atlasUv, dFdx(facadeUv) * gScale, dFdy(facadeUv) * gScale);
         diffuseColor *= sampledDiffuseColor;
+        ${lit ? `
+        float litDux = dFdx(facadeUv.x), litDuy = dFdy(facadeUv.x);
+        vec2 litDWx = dFdx(vFacadeXZ), litDWy = dFdy(vFacadeXZ);
+        if (uNight > 0.0) {
+          float litM = textureGrad(facadeLit, atlasUv, dFdx(facadeUv) * gScale, dFdy(facadeUv) * gScale).r;
+          if (litM > 0.004) {
+            vec2 dWdu = abs(litDux) > abs(litDuy) ? litDWx / litDux : litDWy / litDuy; // 壁に沿った u の 1 あたりの世界座標（約 14 m）
+            if (!(length(dWdu) < 30.0)) dWdu = vec2(0.0);
+            float bay = floor(facadeUv.x * 4.0);
+            vec2 cell = floor((vFacadeXZ + ((bay + 0.5) * 0.25 - facadeUv.x) * dWdu) / 40.0);
+            float r = fract(sin(dot(vec4(bay, facadeFloor, cell), vec4(12.9898, 78.233, 37.719, 4.581))) * 43758.5453);
+            if (r < uLitShare) {
+              float r2 = fract(r * 173.31);
+              vec3 col = mix(vec3(1.0, 0.58, 0.25), vec3(1.0, 0.84, 0.64), r2);
+              float k = litM * uNight * (0.7 + 0.45 * fract(facadeUv.y)) * (0.85 + 0.5 * dot(sampledDiffuseColor.rgb, vec3(0.3, 0.59, 0.11)));
+              facadeLitColor = col * k * mix(0.55, 0.95, fract(r2 * 7.0));
+            }
+          }
+        }` : ''}
       #endif`,
     );
   };
-  material.customProgramCacheKey = () => 'facade-atlas';
+  material.customProgramCacheKey = () => (lit ? 'facade-atlas-lit' : 'facade-atlas');
   return material;
 }
 

@@ -10,6 +10,10 @@ import {
 import { facadeStyle } from '../../src/world/buildings.js';
 import { STYLE, stylePlainColor } from '../../src/world/facades.js';
 import { facingSquare } from '../../src/world/landmarkfacades.js';
+import {
+  FurnitureSet, LAMP_HEADS, binGeometry, candelabraGeometry, capitoleLampGeometry, discLampGeometry, furnitureMaterial, lampGeometry,
+  lampNight, mastLampGeometry, swanLampGeometry,
+} from '../../src/world/furniture.js';
 
 test('旧市街の範囲: 環状の大通りの内側と左岸のサン・シプリアン', () => {
   const proj = new LocalProjection(43.5994, 1.4395);
@@ -181,6 +185,28 @@ test('時間帯: 朝・午後・夕暮れ・夜がそろい、午後は較正し
   const g = shadowLook(TIME_OF_DAY.golden.sun.elevation);
   assert.ok(g.dist > 600 && g.normalBias > 1 && g.normalBias <= 3);
   assert.equal(TIME_OF_DAY.night.night, 1);
+});
+
+test('夜の街灯: 灯具の位置は模型のガラス・灯具の高さにあり、向きに合わせて世界座標に回る', () => {
+  for (const [name, geo] of [['lights', lampGeometry()], ['swan-lights', swanLampGeometry()], ['mast-lights', mastLampGeometry()], ['disc-lights', discLampGeometry()], ['candelabra', candelabraGeometry()], ['capitole-lights', capitoleLampGeometry()]]) {
+    geo.computeBoundingBox();
+    const bb = geo.boundingBox;
+    for (const [x, y, z] of LAMP_HEADS[name]) {
+      assert.ok(x >= bb.min.x && x <= bb.max.x && z >= bb.min.z && z <= bb.max.z, `${name} の灯具は模型の中`);
+      assert.ok(y > bb.max.y - 2 && y < bb.max.y, `${name} の灯具は上の方 (${y} / ${bb.max.y})`);
+    }
+  }
+  const fs = new FurnitureSet();
+  fs.add('lights', lampGeometry(), furnitureMaterial(), [{ x: 10, y: 2, z: 5, a: Math.PI / 2 }]);
+  fs.add('bins', binGeometry(), furnitureMaterial(), [{ x: 0, y: 0, z: 0 }]);
+  assert.equal(fs.lampHeads.length, 1, '街灯でない小物は数えない');
+  const [hx, hy, hz, gy, h] = fs.lampHeads[0];
+  // 向き a = 90°（three.js の Y 軸まわり）: 模型の +x（腕）は世界の −z へ
+  assert.ok(Math.abs(hx - 10) < 1e-9 && Math.abs(hz - (5 - 1.28)) < 1e-9);
+  assert.equal(hy, 2 + 6.8);
+  assert.equal(gy, 2);
+  assert.equal(h, 6.8);
+  assert.equal(lampNight.value, 0, '既定は夜でない');
 });
 
 test('時間帯: 太陽の高さ・方位から向きのベクトル', () => {
