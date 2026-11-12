@@ -98,6 +98,25 @@ export class AudioFx {
     });
   }
 
+  // スミレを集めた: 高い澄んだ 2 音（1320 Hz → 1760 Hz、0.25 秒）
+  collect() {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    [1320, 1760].forEach((f, i) => {
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      const t = ctx.currentTime + i * 0.09;
+      o.type = 'sine';
+      o.frequency.value = f;
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(0.16, t + 0.005);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + (i ? 0.16 : 0.12));
+      o.connect(g).connect(this.master);
+      o.start(t);
+      o.stop(t + 0.2);
+    });
+  }
+
   tick() {
     const ctx = this.ctx;
     const o = ctx.createOscillator();

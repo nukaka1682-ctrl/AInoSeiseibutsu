@@ -276,3 +276,55 @@ kbd {
 }
 
 .choice a { color: var(--rose-dark); }
+
+/* ---- コースの選択・結果（メダル） ---- */
+.tour-pick { display: flex; align-items: center; gap: 8px; margin: 8px 0 0 4px; color: var(--muted); }
+.tour-pick select { flex: 1; min-width: 0; font: inherit; padding: 6px 8px; border: 2px solid #ead8cc; border-radius: 10px; background: #fff; color: var(--ink); }
+.result-medal { margin: 4px 0 0; font-size: 26px; font-weight: 800; color: var(--rose-dark); }
+.result-medal small { display: block; font-size: 13px; font-weight: 600; color: var(--muted); }
+.result-splits { width: 100%; border-collapse: collapse; font-size: 13px; margin: 8px 0; }
+.result-splits th { text-align: left; font-weight: 600; color: var(--muted); border-bottom: 1px solid #ead8cc; padding: 4px 6px; }
+.result-splits td { padding: 4px 6px; border-bottom: 1px solid #f3e6dd; font-variant-numeric: tabular-nums; }
+.result-splits td:first-child { width: 45%; }
+.delta-good { color: #2e7d4f; font-weight: 700; }
+.delta-bad { color: #b0412e; }
+
+/* ---- 坂の表示（速度の横） ---- */
+#hud-grade { margin-left: 10px; font-size: 18px; font-weight: 700; }
+#hud-grade:empty { display: none; }
+
+/* ---- 旅の手帳 ---- */
+#carnet-screen { background: rgba(20, 16, 14, 0.55); align-items: flex-start; }
+.carnet-panel { max-width: 920px; }
+.carnet-panel h2 { margin-top: 0; font-size: 20px; }
+.carnet-panel h2 small { font-size: 13px; font-weight: 500; letter-spacing: 0; }
+.carnet-panel h3 { margin: 18px 0 8px; font-size: 15px; color: var(--rose-dark); }
+.carnet-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+.carnet-stats > div { background: #fff; border: 2px solid #ead8cc; border-radius: 12px; padding: 8px 10px; }
+.carnet-stats small { display: block; color: var(--muted); font-size: 12px; }
+.carnet-stats b { font-size: 18px; }
+.carnet-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+.carnet-card { background: #f5efe9; border: 2px dashed #ddcabd; border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; font-size: 13px; }
+.carnet-card.found { background: #fff; border: 2px solid #e2cdf0; }
+.carnet-card b { font-size: 15px; color: var(--violet); }
+.carnet-card i { color: var(--muted); font-size: 12px; }
+.carnet-card p { margin: 6px 0; line-height: 1.55; flex: 1; }
+.carnet-foot { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.carnet-foot button { margin: 0; padding: 6px 10px; font-size: 13px; }
+.carnet-foot button:disabled { opacity: 0.5; cursor: default; }
+.carnet-tours { list-style: none; padding: 0; margin: 0; }
+.carnet-tours li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; padding: 7px 4px; border-bottom: 1px solid #f0e2d8; font-size: 14px; }
+@media (max-width: 520px) {
+  .panel.carnet-panel { padding: 18px 14px; }
+  .carnet-grid { grid-template-columns: 1fr; }
+}
+
+/* ---- 写真モード ---- */
+#photo-ui { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 15; display: flex; flex-direction: column; align-items: center; gap: 8px; max-width: calc(100vw - 24px); pointer-events: none; }
+#photo-ui .photo-help { background: rgba(20, 20, 24, 0.6); color: #fff; border-radius: 10px; padding: 6px 12px; font-size: 12px; line-height: 1.9; text-align: center; }
+#photo-ui .photo-help kbd { color: var(--ink); }
+#photo-ui .photo-buttons { display: flex; gap: 8px; pointer-events: auto; }
+#photo-ui .photo-buttons button { background: rgba(255, 250, 244, 0.92); }
+#photo-ui .photo-buttons button.primary { background: var(--rose-dark); }
+#photo-ui .photo-msg { background: rgba(255, 250, 244, 0.96); border-radius: 10px; padding: 6px 14px; font-size: 14px; opacity: 0; transition: opacity 0.3s; }
+#photo-ui .photo-msg.show { opacity: 1; }

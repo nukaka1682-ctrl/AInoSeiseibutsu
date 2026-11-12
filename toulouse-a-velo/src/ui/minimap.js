@@ -142,6 +142,18 @@ export function drawMinimap(canvas, map, view) {
   }
   // 名所
   const s = map.scale / zoom;
+  // まだ集めていないスミレ（小さなスミレ色の点）
+  if (view.violets?.length) {
+    ctx.fillStyle = '#8a5cc9';
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1 * s;
+    for (const v of view.violets) {
+      ctx.beginPath();
+      ctx.arc(map.px(v.x), map.pz(v.z), 2.6 * s, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+  }
   for (const lm of view.landmarks) {
     const isTarget = view.target === lm;
     ctx.fillStyle = isTarget ? '#f5a623' : lm.discovered ? '#6b3fa0' : '#ffffff';
@@ -203,6 +215,18 @@ export function drawFullMap(canvas, map, view) {
     ctx.beginPath();
     view.route.forEach(([x, z], i) => (i ? ctx.lineTo(sx(x), sz(z)) : ctx.moveTo(sx(x), sz(z))));
     ctx.stroke();
+  }
+  // まだ集めていないスミレ
+  if (view.violets?.length) {
+    ctx.fillStyle = '#8a5cc9';
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1;
+    for (const v of view.violets) {
+      ctx.beginPath();
+      ctx.arc(sx(v.x), sz(v.z), 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
   }
   ctx.font = '600 13px system-ui, sans-serif';
   ctx.textAlign = 'left';

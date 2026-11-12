@@ -19,6 +19,34 @@ export class CameraRig {
     this.look = new THREE.Vector3();
     this.tmp = new THREE.Vector3();
     this.initialized = false;
+    // 見回す（右ドラッグ・右スティック）: 自転車の向きからのずれ（rad）。0 のときは今までと同じ動き
+    this.lookYaw = 0;
+    this.lookPitch = 0;
+  }
+
+  // 見回す操作を反映する（毎フレーム）。look: { x, y（右スティック）, dx, dy（マウスの移動 px）, held（右ボタンを押している）}。
+  // 左右 ±150°・上下少し。離すと 0.6 秒でなめらかに戻る
+  applyLook(dt, look) {
+    const max = (150 * Math.PI) / 180;
+    const stick = look && (Math.abs(look.x) > 0 || Math.abs(look.y) > 0);
+    if (look?.held) {
+      this.lookYaw -= look.dx * 0.006;
+      this.lookPitch -= look.dy * 0.004;
+    }
+    if (stick) {
+      const k = 1 - Math.exp(-dt * 10);
+      this.lookYaw += (look.x * max - this.lookYaw) * k;
+      this.lookPitch += (-look.y * 0.4 - this.lookPitch) * k;
+    }
+    if (!look?.held && !stick) {
+      const k = Math.exp(-dt * 8); // 0.6 秒でほぼ 0 に
+      this.lookYaw *= k;
+      this.lookPitch *= k;
+      if (Math.abs(this.lookYaw) < 1e-4) this.lookYaw = 0;
+      if (Math.abs(this.lookPitch) < 1e-4) this.lookPitch = 0;
+    }
+    this.lookYaw = Math.max(-max, Math.min(max, this.lookYaw));
+    this.lookPitch = Math.max(-0.3, Math.min(0.45, this.lookPitch));
   }
 
   cycle() {
@@ -40,7 +68,11 @@ export class CameraRig {
     if (!this.initialized) this.yaw = bike.heading;
 
     const fx = Math.sin(bike.heading), fz = -Math.cos(bike.heading);
-    const cx = Math.sin(this.yaw), cz = -Math.cos(this.yaw);
+    // 見回すのは追従カメラと上空カメラだけ
+    const ly = this.mode === 'chase' || this.mode === 'high' ? this.lookYaw : 0;
+    const lp = this.mode === 'chase' || this.mode === 'high' ? this.lookPitch : 0;
+    const cx = Math.sin(this.yaw + ly), cz = -Math.cos(this.yaw + ly);
+    const ax = ly ? Math.sin(bike.heading + ly) : fx, az = ly ? -Math.cos(bike.heading + ly) : fz;
 
     if (this.mode === 'fpv') {
       bike.headWorld(this.pos);
@@ -83,7 +115,8 @@ export class CameraRig {
         }
       }
       cam.position.copy(this.pos);
-      this.look.set(bike.x + fx * v.ahead, bike.y + v.lookY, bike.z + fz * v.ahead);
+      this.look.set(bike.x + ax * v.ahead, bike.y + v.lookY, bike.z + az * v.ahead);
+      if (lp) this.look.y += Math.tan(lp) * (dist + v.ahead); // 見上げる・見下ろす
       cam.lookAt(this.look);
     }
     if (this.shake > 0.001) {

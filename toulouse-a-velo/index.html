@@ -27,6 +27,7 @@
           <label class="choice"><input type="radio" name="mode" value="tour" />
             <span><b>名所めぐりタイムアタック</b><small>キャピトル → サン・セルナン → … 名所を順番に回るタイムを競う</small></span></label>
         </div>
+        <label id="tour-pick" class="tour-pick hidden">コース <select id="opt-tour"></select></label>
 
         <details class="settings">
           <summary>グラフィック設定</summary>
@@ -42,6 +43,7 @@
         <div class="controls-help">
           <div><kbd>W</kbd>/<kbd>↑</kbd> こぐ　<kbd>S</kbd>/<kbd>↓</kbd> ブレーキ・後退　<kbd>A</kbd><kbd>D</kbd>/<kbd>←</kbd><kbd>→</kbd> ハンドル</div>
           <div><kbd>Shift</kbd> 立ちこぎ　<kbd>Space</kbd> ベル　<kbd>C</kbd> カメラ　<kbd>M</kbd> 地図　<kbd>R</kbd> 道路に戻る　<kbd>Esc</kbd> ポーズ</div>
+          <div><kbd>J</kbd> 旅の手帳　<kbd>F</kbd> 写真モード　右ドラッグ 見回す</div>
           <div class="muted">ゲームパッド・スマホのタッチ操作にも対応</div>
         </div>
         <p class="credits">地図データ © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a>（ODbL）／ IGN BD TOPO®（Licence Ouverte / Etalab 2.0）<br />🚇 メトロに乗って駅から街へ出る <a href="./metro.html">Toulouse en métro</a> もあります</p>
@@ -71,7 +73,7 @@
 
     <!-- HUD -->
     <div id="hud" class="hidden">
-      <div id="hud-speed"><span id="speed-value">0</span><small>km/h</small></div>
+      <div id="hud-speed"><span id="speed-value">0</span><small>km/h</small><span id="hud-grade"></span></div>
       <div id="hud-stats"></div>
       <div id="hud-street"></div>
       <canvas id="minimap" width="220" height="220"></canvas>
@@ -87,6 +89,7 @@
         <button data-action="camera" title="カメラ切替 (C)">🎥</button>
         <button data-action="bell" title="ベル (Space)">🔔</button>
         <button data-action="pause" title="ポーズ (Esc)">⏸</button>
+        <button data-action="carnet" title="旅の手帳 (J)">📖</button>
       </div>
       <div id="touch-controls">
         <div class="touch-left">
@@ -123,6 +126,21 @@
         <button id="resume-btn" class="primary">再開 (Esc)</button>
         <button id="mute-btn">音: オン</button>
         <button id="title-btn">タイトルに戻る</button>
+        <button id="carnet-btn">📖 旅の手帳</button>
+        <button id="photo-btn">📷 写真モード</button>
+        <div class="controls-help">
+          <div><kbd>W</kbd>/<kbd>↑</kbd> こぐ　<kbd>S</kbd>/<kbd>↓</kbd> ブレーキ・後退　<kbd>A</kbd><kbd>D</kbd>/<kbd>←</kbd><kbd>→</kbd> ハンドル</div>
+          <div><kbd>Shift</kbd> 立ちこぎ　<kbd>Space</kbd> ベル　<kbd>C</kbd> カメラ　<kbd>M</kbd> 地図　<kbd>R</kbd> 道路に戻る　<kbd>Esc</kbd> ポーズ</div>
+          <div><kbd>J</kbd> 旅の手帳　<kbd>F</kbd> 写真モード　右ドラッグ（右スティック） 見回す</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 旅の手帳（J）。中身は開いたときに src/ui/carnet.js で組み立てる -->
+    <section id="carnet-screen" class="screen hidden">
+      <div class="panel carnet-panel">
+        <div id="carnet-body"></div>
+        <button id="close-carnet" class="primary">閉じる (J)</button>
       </div>
     </section>
 
