@@ -157,6 +157,35 @@ try {
   });
   check(vio.total > 0 && vio.after === vio.before + 1, `スミレを集める（${vio.before} → ${vio.after} / ${vio.total}、HUD「${vio.hud}」）`);
 
+  // 旅の手帳: J で開くと見つけた名所のカードがあり、閉じると走行に戻る
+  await page.keyboard.press('KeyJ');
+  await page.waitForTimeout(400);
+  const carnet = await page.evaluate(() => ({ phase: window.__tav.phase, found: document.querySelectorAll('#carnet-screen .carnet-card.found').length, all: document.querySelectorAll('#carnet-screen .carnet-card').length }));
+  await page.screenshot({ path: join(out, '13-carnet.png') });
+  await page.keyboard.press('KeyJ');
+  const afterCarnet = await page.evaluate(() => window.__tav.phase);
+  check(carnet.phase === 'carnet' && carnet.found >= 1 && afterCarnet === 'play', `旅の手帳（見つけた名所 ${carnet.found}/${carnet.all} 枚、閉じると ${afterCarnet}）`);
+  // スマホの大きさでも 1 列で読める
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.keyboard.press('KeyJ');
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: join(out, '13-carnet-mobile.png') });
+  await page.keyboard.press('KeyJ');
+  await page.setViewportSize({ width: 1280, height: 720 });
+
+  // 写真モード: 開いて PNG を作り、閉じると走行に戻る
+  await page.evaluate(() => window.__tav.photo.open());
+  await page.waitForTimeout(600);
+  await page.screenshot({ path: join(out, '14-photo.png') });
+  const photo = await page.evaluate(async () => {
+    const s = window.__tav;
+    const phase = s.phase;
+    const url = await s.photo.capture();
+    s.photo.close();
+    return { phase, head: String(url).slice(0, 22), len: String(url).length, after: s.phase, hud: !document.getElementById('hud').classList.contains('hidden') };
+  });
+  check(photo.phase === 'photo' && photo.head === 'data:image/png;base64,' && photo.len > 1000 && photo.after === 'play' && photo.hud,
+    `写真モード（${photo.head}… ${Math.round(photo.len / 1024)} KB、閉じると ${photo.after}）`);
   await page.close();
 
   // ---- タイムアタック ----

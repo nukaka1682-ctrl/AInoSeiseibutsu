@@ -3,6 +3,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { TOURS, availableTours, loadRecord, medalFor, medalTimes, nextMedal, pickTour, saveRecord, splitDelta, tourLength } from '../../src/game/tours.js';
 import { planViolets } from '../../src/game/violets.js';
+import { TravelStats, bearingLabel, stampDiscovery } from '../../src/ui/carnet.js';
+import { photoFileName } from '../../src/game/photomode.js';
 
 // localStorage の代わり（JSON で出し入れする）
 function memoryStore(init = {}) {
@@ -130,4 +132,36 @@ test('planViolets: nearestRideable が null を返す点は使わない', () => 
   assert.ok(calls.some(([x]) => x < -400), '川の上の点も試した');
   for (const v of out) assert.ok(v.x >= -400, v.id);
   assert.deepEqual(planViolets(lms, () => null), []);
+});
+
+test('bearingLabel: 8 方位（x = 東、z = 南）と距離', () => {
+  const cases = [[0, -1, '北'], [1, -1, '北東'], [1, 0, '東'], [1, 1, '南東'], [0, 1, '南'], [-1, 1, '南西'], [-1, 0, '西'], [-1, -1, '北西']];
+  for (const [dx, dz, dir] of cases) assert.equal(bearingLabel(dx * 1200, dz * 1200).split('へ')[0], dir, `${dx}, ${dz}`);
+  assert.equal(bearingLabel(848.5, -848.5), '北東へ 約 1.2 km');
+  assert.equal(bearingLabel(0, 347), '南へ 約 350 m');
+  assert.equal(bearingLabel(-20, -400), '北へ 約 400 m'); // 北から 3° ずれても北
+});
+
+test('TravelStats: odometer の差を足し、5 秒ごとに保存する・発見の日付', () => {
+  const s = memoryStore({ 'tav-stats': { distance: 1000, time: 60, topSpeed: 30 } });
+  const ts = new TravelStats(s);
+  const bike = { odometer: 0, speed: 5, topSpeed: 20 };
+  ts.reset(bike);
+  for (let i = 0; i < 60; i++) {
+    bike.odometer += 5 / 60;
+    ts.tick(1 / 60, bike);
+  }
+  assert.ok(Math.abs(ts.data.distance - 1005) < 1e-6);
+  assert.ok(Math.abs(ts.data.time - 61) < 1e-6);
+  assert.equal(s.get('tav-stats').distance, 1000); // まだ 5 秒たっていない
+  bike.topSpeed = 35;
+  for (let i = 0; i < 300; i++) ts.tick(1 / 60, bike);
+  assert.equal(s.get('tav-stats').topSpeed, 35);
+  stampDiscovery(s, 'capitole', new Date('2026-05-01T10:00:00Z'));
+  stampDiscovery(s, 'capitole', new Date('2026-06-01T10:00:00Z')); // 2 回目は上書きしない
+  assert.equal(s.get('tav-discovered-at').capitole, '2026-05-01T10:00:00.000Z');
+});
+
+test('写真モードのファイル名', () => {
+  assert.equal(photoFileName(new Date(2026, 10, 2, 9, 5, 7)), 'toulouse-a-velo-20261102-090507.png');
 });

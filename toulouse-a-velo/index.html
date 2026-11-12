@@ -87,6 +87,7 @@
         <button data-action="camera" title="カメラ切替 (C)">🎥</button>
         <button data-action="bell" title="ベル (Space)">🔔</button>
         <button data-action="pause" title="ポーズ (Esc)">⏸</button>
+        <button data-action="carnet" title="旅の手帳 (J)">📖</button>
       </div>
       <div id="touch-controls">
         <div class="touch-left">
@@ -123,6 +124,16 @@
         <button id="resume-btn" class="primary">再開 (Esc)</button>
         <button id="mute-btn">音: オン</button>
         <button id="title-btn">タイトルに戻る</button>
+        <button id="carnet-btn">📖 旅の手帳</button>
+        <button id="photo-btn">📷 写真モード</button>
+      </div>
+    </section>
+
+    <!-- 旅の手帳（J）。中身は開いたときに src/ui/carnet.js で組み立てる -->
+    <section id="carnet-screen" class="screen hidden">
+      <div class="panel carnet-panel">
+        <div id="carnet-body"></div>
+        <button id="close-carnet" class="primary">閉じる (J)</button>
       </div>
     </section>
 

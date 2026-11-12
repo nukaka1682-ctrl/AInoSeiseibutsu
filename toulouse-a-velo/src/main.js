@@ -20,6 +20,8 @@ import { MapRenderer, drawFullMap, drawMinimap } from './ui/minimap.js';
 import { setupScene } from './world/scene.js';
 import { MEDAL_ICON, TOURS, fmtDelta, medalFor, medalTimes, nextMedal, loadRecord, pickTour, saveRecord, splitDelta, tourLength } from './game/tours.js';
 import { Violets, planViolets } from './game/violets.js';
+import { TravelStats, renderCarnet, stampDiscovery } from './ui/carnet.js';
+import { PhotoMode } from './game/photomode.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -57,6 +59,7 @@ groundMats.water.envMapIntensity = 0.16;
 const input = new Input();
 const audio = new AudioFx();
 const rig = new CameraRig(camera);
+const travel = new TravelStats(store); // 旅の手帳の通算の記録
 
 // ---------------------------------------------------------------- ゲームの状態
 const state = {
@@ -271,6 +274,7 @@ function beginPlay() {
   scene.add(bike.root);
   bike.odometer = 0;
   bike.topSpeed = 0;
+  travel.reset(bike);
   state.playTime = 0;
   state.target = null;
   state.route = null;
@@ -503,6 +507,7 @@ function update(dt, forced) {
     });
   }
   state.playTime += dt;
+  travel.tick(dt, bike);
 
   for (const ev of bike.events.splice(0)) {
     if (ev.type === 'bump') {
@@ -526,6 +531,7 @@ function update(dt, forced) {
       lm.discovered = true;
       state.discovered.add(lm.id);
       store.set('tav-discovered', [...state.discovered]);
+      stampDiscovery(store, lm.id); // 旅の手帳の「見つけた日」
       audio.chime();
       toast(`<b>📍 ${lm.ja}</b>（${lm.name}）<br>${lm.text}`, 8);
       updateModeHud();
@@ -633,6 +639,7 @@ function togglePause(force) {
   const pause = force ?? state.phase === 'play';
   state.phase = pause ? 'paused' : 'play';
   input.enabled = !pause;
+  if (pause) travel.flush();
   if (pause && state.world.stream) {
     const s = state.world.stats, t = state.world.stream.totals;
     $('pause-info').innerHTML = `<p>トゥールーズ全体（${s.tiles} タイル）のうち、自転車の周りの ${state.world.stream.readyCount} タイルを表示中<br>
@@ -710,6 +717,61 @@ $('fullmap').addEventListener('click', (e) => {
   }
 });
 
+// ---------------------------------------------------------------- 旅の手帳（J）
+// 地図の画面と同じ扱い: 開いている間は操作を止める。ポーズ中に開いたらポーズを解いてから
+function openCarnet(open) {
+  if (open && state.phase === 'paused') togglePause(false);
+  if (open && state.phase !== 'play') return;
+  if (!open && state.phase !== 'carnet') return;
+  state.phase = open ? 'carnet' : 'play';
+  input.enabled = !open;
+  show('carnet-screen', open);
+  if (open) renderCarnetScreen();
+  else $('carnet-body').innerHTML = '';
+}
+
+function renderCarnetScreen() {
+  const w = state.world;
+  travel.flush();
+  const tours = TOURS.map((t) => {
+    const record = loadRecord(store, state.presetId, t.id);
+    return { ja: t.ja, fr: t.fr, record, icon: record?.medal ? MEDAL_ICON[record.medal] : '', available: pickTour(w.landmarks, t.id).tour === t };
+  });
+  renderCarnet($('carnet-body'), {
+    landmarks: w.landmarks, bike: state.bike, stats: travel.data, violets: w.violets, discoveredAt: store.get('tav-discovered-at', {}) || {},
+    tours, canGo: state.mode !== 'tour', fmtTime,
+  }, (lm) => {
+    setTarget(lm);
+    openCarnet(false);
+  });
+}
+
+// ---------------------------------------------------------------- 写真モード（F）
+const photo = new PhotoMode({
+  camera, canvas: renderer.domElement, keys: input.keys,
+  getWorld: () => state.world, getBike: () => state.bike,
+  render: () => renderFrame(0),
+  onOpen: () => {
+    state.phase = 'photo';
+    input.enabled = false;
+    show('hud', false);
+  },
+  onClose: () => {
+    state.phase = 'play';
+    input.enabled = true;
+    show('hud');
+    rig.initialized = false; // カメラの追従を元に戻す
+  },
+});
+function openPhoto(open) {
+  if (open) {
+    if (state.phase === 'paused') togglePause(false);
+    if (state.phase === 'play') photo.open();
+  } else if (state.phase === 'photo') photo.close();
+}
+// テスト用
+state.photo = { open: () => openPhoto(true), close: () => openPhoto(false), capture: () => photo.capture() };
+
 function respawn() {
   if (state.phase !== 'play') return;
   const w = state.world;
@@ -722,6 +784,7 @@ function respawn() {
 }
 
 function backToTitle() {
+  travel.flush();
   state.phase = 'title';
   input.enabled = true;
   for (const id of ['pause-screen', 'result-screen', 'map-screen', 'hud']) show(id, false);
@@ -730,7 +793,7 @@ function backToTitle() {
   show('title-screen');
 }
 
-input.on('Escape', () => (state.phase === 'map' ? openMap(false) : togglePause()));
+input.on('Escape', () => (state.phase === 'map' ? openMap(false) : state.phase === 'carnet' ? openCarnet(false) : state.phase === 'photo' ? openPhoto(false) : togglePause()));
 input.on('KeyP', () => togglePause());
 input.on('KeyC', () => state.phase === 'play' && rig.cycle());
 input.on('KeyV', () => state.phase === 'play' && rig.cycle());
@@ -741,6 +804,8 @@ input.on('Tab', (e) => {
   else openMap(true);
 });
 input.on('KeyR', respawn);
+input.on('KeyJ', () => openCarnet(state.phase !== 'carnet'));
+input.on('KeyF', () => openPhoto(state.phase !== 'photo'));
 input.on('Space', () => state.phase === 'play' && audio.bell());
 input.bindTouch($('touch-controls'));
 
@@ -751,6 +816,7 @@ for (const btn of document.querySelectorAll('#hud-buttons button')) {
     else if (a === 'camera') rig.cycle();
     else if (a === 'bell') audio.bell();
     else if (a === 'pause') togglePause(true);
+    else if (a === 'carnet') openCarnet(true);
     btn.blur();
   });
 }
@@ -761,6 +827,9 @@ $('clear-target').addEventListener('click', () => {
   renderFullMap();
 });
 $('resume-btn').addEventListener('click', () => togglePause(false));
+$('carnet-btn').addEventListener('click', () => openCarnet(true));
+$('photo-btn').addEventListener('click', () => openPhoto(true));
+$('close-carnet').addEventListener('click', () => openCarnet(false));
 $('title-btn').addEventListener('click', backToTitle);
 $('mute-btn').addEventListener('click', () => {
   audio.setMuted(!audio.muted);
@@ -805,11 +874,17 @@ function frame(now) {
     update(dt);
     drawHud();
   }
+  if (state.world && state.phase === 'photo') photo.update(dt);
   if (state.world) {
     fitSunShadow();
     sky.position.copy(camera.position); // 空の箱はカメラと一緒に動かす（5 km のエリアの端でも空が切れないように）
-    renderer.render(scene, camera);
+    renderFrame(dt);
   }
+}
+
+// 描画の入口（写真モードの保存もここを通す）
+function renderFrame(dt) {
+  renderer.render(scene, camera);
 }
 requestAnimationFrame(frame);
 
