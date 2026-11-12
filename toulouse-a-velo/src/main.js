@@ -18,6 +18,8 @@ import { AudioFx } from './game/audio.js';
 import { animateBeacon, createBeacon, distanceToLandmark } from './game/landmarks.js';
 import { MapRenderer, drawFullMap, drawMinimap } from './ui/minimap.js';
 import { setupScene } from './world/scene.js';
+import { TIME_OF_DAY, TIME_ORDER } from './world/light.js';
+import { createPipeline } from './metro/render.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -41,7 +43,7 @@ const store = {
 };
 
 // ---------------------------------------------------------------- レンダラーとシーン（world/scene.js）
-const { renderer, scene, camera, sky, sun, hemi, waterEnv, shadowFit, fitSunShadow: fitSunShadowAt } = setupScene($('app'));
+const { renderer, scene, camera, sky, sun, hemi, waterEnv, shadowFit, fitSunShadow: fitSunShadowAt, applyTimeOfDay, timeOfDay } = setupScene($('app'));
 const fitSunShadow = () => fitSunShadowAt(state.world?.terrain ? (x, z) => state.world.terrain.h(x, z) : null);
 
 const textures = makeTextures();
@@ -51,6 +53,28 @@ const groundMats = createGroundMaterials(textures);
 // 日なたの壁の 5〜10 倍あるので、そのまま映すと水が白く光る。写真の川（空の 1/4 ほどの明るさ）に合わせて弱める
 groundMats.water.envMap = waterEnv;
 groundMats.water.envMapIntensity = 0.16;
+
+// フォトリアルの後処理（metro/render.js: 物陰の暗さ・光のにじみ・なめらかな縁）。ソフトウェア描画（テスト・撮影）では既定で切る。
+// ?photo=1 / ?photo=0 が最優先。pipe.render は毎フレーム、にじみの閾値と強さを地下の割合（ここでは 0）から決め直すので、
+// 時間帯の値（夜は窓・街灯がにじむ）を読むように差し替える
+const pipe = createPipeline(renderer, scene, camera);
+const bloomLook = { ...TIME_OF_DAY.afternoon.bloom };
+for (const k of ['threshold', 'strength']) Object.defineProperty(pipe.bloom, k, { get: () => bloomLook[k], set() {} });
+{
+  const gl = renderer.getContext(), info = gl.getExtension('WEBGL_debug_renderer_info');
+  const software = /SwiftShader|llvmpipe|Software/i.test(info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : '');
+  $('opt-photo').checked = params.has('photo') ? params.get('photo') === '1' : !software;
+}
+const photoGuard = {};
+// 時間帯（world/light.js の TIME_OF_DAY）。?time=golden でも選べる
+if (TIME_OF_DAY[params.get('time')]) $('opt-time').value = params.get('time');
+function setTimeOfDay(id) {
+  if (TIME_OF_DAY[id] && id !== timeOfDay.id) groundMats.water.envMap = applyTimeOfDay(id).waterEnv;
+  const look = TIME_OF_DAY[(state.timeOfDay = timeOfDay.id)];
+  groundMats.water.envMapIntensity = look.water;
+  Object.assign(bloomLook, look.bloom);
+  $('time-btn').textContent = `時間帯: ${look.name}`;
+}
 
 const input = new Input();
 const audio = new AudioFx();
@@ -77,6 +101,8 @@ window.__tav = state; // デバッグ・テスト用
 state.rig = rig;
 window.__tavDebug = { THREE, scene, camera, renderer, sun, hemi, shadowFit };
 state.setTarget = (lm) => setTarget(lm);
+state.timeOfDay = timeOfDay.id;
+state.setTimeOfDay = (id) => setTimeOfDay(id); // テスト・撮影用
 // テスト用: 描画とは独立に物理を seconds 秒ぶん進める（遅い環境でも結果が変わらないように）
 window.__tavSimulate = (seconds, ctl) => {
   const c = { throttle: 0, brake: 0, steer: 0, sprint: false, ...ctl };
@@ -133,6 +159,10 @@ async function startGame() {
     sun.shadow.map = null;
     shadowFit.half = 0;
   }
+  pipe.enabled = $('opt-photo').checked;
+  pipe.setSize(innerWidth, innerHeight);
+  Object.assign(photoGuard, { t0: 0, t1: 0, frames: 0, done: params.get('photo') === '1' });
+  setTimeOfDay($('opt-time').value);
 
   show('title-screen', false);
   show('error-screen', false);
@@ -716,6 +746,7 @@ $('mute-btn').addEventListener('click', () => {
   audio.setMuted(!audio.muted);
   $('mute-btn').textContent = `音: ${audio.muted ? 'オフ' : 'オン'}`;
 });
+$('time-btn').addEventListener('click', () => setTimeOfDay(TIME_ORDER[(TIME_ORDER.indexOf(state.timeOfDay) + 1) % TIME_ORDER.length]));
 $('again-btn').addEventListener('click', () => {
   show('result-screen', false);
   input.enabled = true;
@@ -741,8 +772,25 @@ addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
+  pipe.setSize(innerWidth, innerHeight);
   if (state.phase === 'map') renderFullMap();
 });
+
+// 自動で軽くする: 遊び始めて 1〜6 秒（最初の 1 秒は読み込み直後で遅いので除く）の平均が 24 fps 未満なら、フォトリアルを切る（1 回だけ）
+function watchFps(now) {
+  const g = photoGuard;
+  if (g.done || !pipe.enabled) return;
+  g.t0 ||= now;
+  if (now - g.t0 < 1000) return;
+  if (!g.t1) g.t1 = now;
+  else g.frames++;
+  if (now - g.t0 < 6000) return;
+  g.done = true;
+  if (g.frames / ((now - g.t1) / 1000) < 24) {
+    pipe.enabled = false;
+    toast('描画を軽くしました（フォトリアルを切りました）', 4);
+  }
+}
 
 // ---------------------------------------------------------------- ループ
 let last = performance.now();
@@ -753,11 +801,12 @@ function frame(now) {
   if (state.world && state.phase === 'play') {
     update(dt);
     drawHud();
+    watchFps(now);
   }
   if (state.world) {
     fitSunShadow();
     sky.position.copy(camera.position); // 空の箱はカメラと一緒に動かす（5 km のエリアの端でも空が切れないように）
-    renderer.render(scene, camera);
+    pipe.render(dt); // フォトリアルを切っているときは中でそのまま描く
   }
 }
 requestAnimationFrame(frame);
