@@ -877,7 +877,9 @@ export function buildGroundBase(parsed, rect, mats, terrain = FLAT_TERRAIN, layo
     }
     const inCarriageway = (x, z) => carSegs.some(([ax, az, bx, bz, h]) => x > Math.min(ax, bx) - h && x < Math.max(ax, bx) + h && z > Math.min(az, bz) - h && z < Math.max(az, bz) + h && closestOnSegment(x, z, ax, az, bx, bz).d2 < h * h);
     // 代わりの出入口（data/metro.js の placeEntrance）は、メトロのゲーム（T.metroWalk）で本物の出入口が残らない駅にだけ使う
-    T.metro = chooseEntrances(projectEntrances(T.metroRaw, T.proj).filter((e) => !inWater(e.x, e.z) && !(e.kind === 'metro' && inCarriageway(e.x, e.z))), !!T.metroWalk);
+    // OpenStreetMap の階段から作った出入口（e.src。メトロのゲーム）は車道の判定をしない（LiDAR の見誤りではない）
+    T.metro = chooseEntrances(projectEntrances(T.metroRaw, T.proj).filter((e) => !inWater(e.x, e.z) && !(e.kind === 'metro' && !e.src && inCarriageway(e.x, e.z))), !!T.metroWalk);
+    T.metroPrepare?.(T.metro); // メトロのゲーム: ホームが浅い駅の出入口を長くする・反対側に足す
     orientRamps(T.metro, parsed.roads);
     fillMetroPits(T, T.metro);
     T.metroAdjust?.(T.metro); // メトロのゲーム: 出入口の階段の深さを駅の改札階にそろえる

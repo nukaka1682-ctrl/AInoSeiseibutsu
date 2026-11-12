@@ -22,6 +22,8 @@ model: opus
 - 実在のトゥールーズを再現する自転車ゲーム（Vite + three.js）。コードは `toulouse-a-velo/` の下。
 - 座標: x = 東、z = 南（m）。y = 標高 − 145（`DATUM`）。緯度経度とは `proj.project(lat, lon)` / `proj.unproject(x, z)` で変換。
 - `toulouse-a-velo/public/data/` の地図データは git に入っていない。消したり作り直したりしない（取り直しは時間がかかる）。
+  例外: `public/data/toulouse-metro-osm.json`（メトロの駅の中と出口。OpenStreetMap から `scripts/metro-osm.mjs` で作る）は git に入っている。駅の間取り（`src/metro/osmplan.js`）を変えたら、計画で指示があればこのスクリプトで作り直す（`npm test` の `metro-osm.test.mjs` が、データの印と間取りが合うかを調べる）。
+- メトロのゲーム（`metro.html`・`src/metro/`）の見た目の確認は、`npx vite build` のあと `CHROMIUM_PATH=/opt/pw-browsers/chromium node test/metro-shot.mjs <駅の id> platform walk`（ホームから地上まで歩いて撮影。画像は `test/output/metro-*.png`）。
 - コード中のコメントとコミットメッセージは日本語。既存のコメントの書き方（何を・なぜ、写真の番号など根拠）に合わせる。
 - 写真（`toulouse-a-velo/photos/`）に合わせた所は、根拠の写真の名前をコメントに書く。
 

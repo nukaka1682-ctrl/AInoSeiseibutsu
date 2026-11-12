@@ -3,6 +3,8 @@ dist/
 test/output/
 # 地図データ（npm run fetch-data で作成。大きいので Git には入れない）
 public/data/*.json
+# 駅の中と出入口（OpenStreetMap の屋内の地図。scripts/metro-osm.mjs で作る。小さいので Git に入れる）
+!public/data/toulouse-metro-osm.json
 public/data/*-tiles/
 public/data/*-terrain.bin
 .vite-cache/

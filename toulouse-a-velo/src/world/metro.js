@@ -52,6 +52,8 @@ export function projectEntrances(list, proj) {
     return {
       kind: parking ? 'parking' : 'metro', station: e.station, name: e.name, x, z, ang: e.ang, down: e.down >= 0 ? 1 : -1, synthetic: !!e.synthetic,
       len: Math.min(parking ? 40 : 30, Math.max(6, e.len)), wid: Math.min(parking ? 12 : 9, Math.max(2.8, e.wid)), depth: e.depth,
+      // OpenStreetMap から作った出入口（metro/osmentrances.js）: エスカレーターの有無・駅舎の中か・着く階・どこから作ったか
+      ...(e.esc != null ? { esc: e.esc } : {}), ...(e.covered ? { covered: true } : {}), ...(e.level != null ? { level: e.level } : {}), ...(e.src ? { src: e.src } : {}),
     };
   });
 }
@@ -397,7 +399,7 @@ export function buildMetroEntrances(list, mats, { open = false } = {}) {
     }
     // 階段（上の端から踊り場まで）。広い吹き抜けは片側をエスカレーター
     const run = Math.max(2, e.len - LANDING), drop = y0 - yb, n = Math.max(4, Math.round(drop / STEP_H)), tread = run / n, rise = drop / n;
-    const esc = e.wid >= 4.2;
+    const esc = (e.esc ?? e.wid >= 4.2) && e.wid >= 3.4;
     const vs = esc ? (hash01(seed, 1) < 0.5 ? 1 : -1) : 0; // エスカレーターの側
     const sv0 = esc && vs < 0 ? -W + ESCALATOR_W + 0.15 : -W, sv1 = esc && vs > 0 ? W - ESCALATOR_W - 0.15 : W;
     for (let i = 0; i < n; i++) {

@@ -30,6 +30,10 @@ export function stationCrowd(plan, nav, seed = 1) {
     nav.addWall(x + r, z + r, x - r, z + r, y - 0.2, y + 1.7);
     nav.addWall(x - r, z + r, x - r, z - r, y - 0.2, y + 1.7);
   };
+  if (plan.layout === 'osm') {
+    osmCrowd(plan, nav, rnd, place);
+    return finish(parts);
+  }
   const WT = wallT(), P = LAYOUT.psd;
   for (const L of plan.lines) {
     const f = L.frame;
@@ -78,11 +82,59 @@ export function stationCrowd(plan, nav, seed = 1) {
     place(x, plan.ym, z, rnd() * Math.PI * 2);
     want--;
   }
+  return finish(parts);
+}
+
+function finish(parts) {
   if (!parts.length) return null;
   const mesh = new THREE.Mesh(mergeGeometries(parts), crowdMaterial());
   mesh.name = 'crowd';
   for (const g of parts) g.dispose();
   return mesh;
+}
+
+// OSM の間取りの駅（osmplan.js）: ホームドアの脇で待つ人（島式のホームは軸の側）と、改札の階で立ち止まった人
+function osmCrowd(plan, nav, rnd, place) {
+  const floorKind = (x, z, y) => {
+    let k = null;
+    nav.floors(x, z, (fy, reg) => {
+      if (Math.abs(fy - y) < 0.05) k = reg.kind;
+    });
+    return k;
+  };
+  const clear = (x, z, y, kind) => [[0, 0], [0.6, 0], [-0.6, 0], [0, 0.6], [0, -0.6]].every(([dx, dz]) => floorKind(x + dx, z + dz, y) === kind);
+  for (const L of plan.lines) {
+    const f = L.frame;
+    for (const side of [1, -1]) {
+      const inward = L.island ? -side : side;
+      const n = 3 + Math.floor(rnd() * 5);
+      for (let i = 0, tries = 0; i < n && tries < 40; tries++) {
+        const sd = L.doorsS[Math.floor(rnd() * L.doorsS.length)] + (rnd() < 0.5 ? -1 : 1) * (1.0 + rnd() * 0.6);
+        const t = (L.P + inward * (0.7 + rnd() * 1.6) * side) * side;
+        const [x, z] = f.at(sd, t);
+        if (!clear(x, z, L.yp, 'platform')) continue;
+        place(x, L.yp, z, Math.atan2(-f.nx * inward, f.nz * inward) + (rnd() - 0.5) * 0.9);
+        i++;
+      }
+    }
+  }
+  const lv = plan.ticket != null ? plan.levels.get(plan.ticket) : null;
+  if (!lv || !lv.floor.length) return;
+  const pts = lv.floor.flatMap((pg) => pg[0]);
+  const x0 = Math.min(...pts.map((q) => q[0])), x1 = Math.max(...pts.map((q) => q[0])), z0 = Math.min(...pts.map((q) => q[1])), z1 = Math.max(...pts.map((q) => q[1]));
+  let want = 3 + Math.floor(rnd() * 3);
+  for (let tries = 0; want > 0 && tries < 120; tries++) {
+    const x = x0 + rnd() * (x1 - x0), z = z0 + rnd() * (z1 - z0);
+    if (!clear(x, z, lv.y, 'hall')) continue;
+    if (plan.pitInfo.some((p) => Math.hypot(x - p.d.x - p.d.dx * 1.5, z - p.d.z - p.d.dz * 1.5) < 2.8)) continue;
+    if (plan.gates.some((g) => Math.abs(g.frame.local(x, z)[0]) < 2.2)) continue;
+    if (plan.blocks.some((b) => {
+      const [s, t] = b.frame.local(x, z);
+      return Math.abs(t) < b.W / 2 + 1.5 && s > -4.5 && s < b.len + 4.5;
+    })) continue;
+    place(x, lv.y, z, rnd() * Math.PI * 2);
+    want--;
+  }
 }
 
 // 車両の座っている人（車体の局所座標。seats: [{ x, z, dir }]）
