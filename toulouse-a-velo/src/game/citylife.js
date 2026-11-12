@@ -566,6 +566,18 @@ export class CityLife {
     this.pigeons(dt, bike);
   }
 
+  // (x, z) から r m 以内の歩く人とテラスの客の数（街の音の人の声の強さ。客の位置は置いた行列から読む）
+  near(x, z, r) {
+    let n = 0;
+    const r2 = r * r;
+    for (const p of this.people) if (p.active && (p.x - x) ** 2 + (p.z - z) ** 2 <= r2) n++;
+    for (const m of this.seatMeshes) {
+      const a = m.instanceMatrix.array;
+      for (let i = 0; i < m.count; i++) if ((a[i * 16 + 12] - x) ** 2 + (a[i * 16 + 14] - z) ** 2 <= r2) n++;
+    }
+    return n;
+  }
+
   stats() {
     let birds = 0;
     for (const f of this.flocks.values()) birds += f.birds.length;

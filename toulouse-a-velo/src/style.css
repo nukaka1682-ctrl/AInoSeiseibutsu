@@ -57,6 +57,9 @@ html, body {
 
 .panel h2 { margin: 18px 0 8px; font-size: 15px; letter-spacing: 0.04em; color: var(--rose-dark); }
 .panel button { margin: 6px 6px 0 0; }
+/* ポーズ画面の音量のスライダー */
+.volume-row { display: inline-flex; align-items: center; gap: 8px; margin: 6px 6px 0 0; font-size: 13px; color: var(--muted); }
+.volume-row input[type=range] { width: 140px; accent-color: var(--rose-dark); }
 
 h1 {
   margin: 0;

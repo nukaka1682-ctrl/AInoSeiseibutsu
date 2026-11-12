@@ -14,7 +14,8 @@ import { fetchTerrainFile, loadTerrain } from './data/terrain.js';
 import { Bike } from './game/bike.js';
 import { CAMERA_LABELS, CameraRig } from './game/camera.js';
 import { Input } from './game/input.js';
-import { AudioFx } from './game/audio.js';
+import { AudioFx, audioTest } from './game/audio.js';
+import { ambientInfo } from './game/ambientinfo.js';
 import { CityLife } from './game/citylife.js';
 import { animateBeacon, createBeacon, distanceToLandmark } from './game/landmarks.js';
 import { MapRenderer, drawFullMap, drawMinimap } from './ui/minimap.js';
@@ -60,6 +61,8 @@ groundMats.water.envMapIntensity = 0.16;
 
 const input = new Input();
 const audio = new AudioFx();
+audio.restorePrefs(store); // 音量と消音（tav-audio）
+window.__tavAudioTest = audioTest; // 音の確認（test/audio-check.mjs）
 const rig = new CameraRig(camera);
 const travel = new TravelStats(store); // 旅の手帳の通算の記録
 
@@ -518,7 +521,10 @@ function update(dt, forced) {
   }
   state.playTime += dt;
   w.life?.update(dt, bike, camera);
-  for (const ev of w.life?.events.splice(0) || []) if (ev.type === 'person') audio.bump(0.25);
+  // 歩く人・ハト・ほかの自転車・トラムの出来事の音
+  for (const ev of w.life?.events.splice(0) || []) audio.event(ev, bike);
+  for (const ev of w.traffic?.events?.splice(0) || []) audio.event(ev, bike);
+  audio.bells(w.landmarks, bike, state.playTime, dt);
   travel.tick(dt, bike);
 
   for (const ev of bike.events.splice(0)) {
@@ -535,7 +541,11 @@ function update(dt, forced) {
 
   rig.applyLook(dt, ctl.look); // 右ドラッグ・右スティックで見回す
   rig.update(dt, bike, w.collision, w.groundAt ? (x, z) => w.groundAt(x, z, bike.y + 1) : null); // カメラが坂・河岸に潜らないように
-  audio.update(dt, bike.speed, ctl.throttle === 0);
+  audio.update(dt, { speed: bike.speed, coasting: ctl.throttle === 0, braking: ctl.brake > 0, pedaling: ctl.throttle > 0, surface: bike.surface, crank: bike.crank });
+  if ((state.ambientTimer = (state.ambientTimer || 0) - dt) <= 0) {
+    state.ambientTimer = 0.5; // 街の音の層（0.5 秒ごと）
+    audio.setAmbient(ambientInfo(w, bike, state));
+  }
 
   // 名所の発見
   for (const lm of w.landmarks) {
@@ -560,9 +570,9 @@ function update(dt, forced) {
     if (cur && distanceToLandmark(cur, bike.x, bike.z) < 22) {
       t.splits.push({ name: cur.ja, time: t.time });
       t.index++;
-      audio.chime();
-      if (t.index >= t.list.length) finishTour();
+      if (t.index >= t.list.length) finishTour(); // ゴールはメダルのファンファーレ
       else {
+        audio.chime();
         const delta = splitDelta(t.record, t.splits.length - 1, t.time); // 自己ベストとの差
         toast(`<b>✅ ${cur.ja}</b> ${fmtTime(t.time)}${delta == null ? '' : `（${fmtDelta(delta)}）`}<br>次は ${t.list[t.index].ja}`, 4, true);
         setTarget(t.list[t.index]);
@@ -635,6 +645,7 @@ function finishTour() {
   const { isBest, record } = saveRecord(store, state.presetId, t.id, t.time, t.splits.map((s) => s.time), medal);
   state.phase = 'result';
   input.enabled = false;
+  audio.fanfare(medal);
   const rows = t.splits.map((s, i) => {
     const lap = s.time - (i ? t.splits[i - 1].time : 0);
     const d = splitDelta(prev, i, s.time);
@@ -654,6 +665,7 @@ function togglePause(force) {
   const pause = force ?? state.phase === 'play';
   state.phase = pause ? 'paused' : 'play';
   input.enabled = !pause;
+  audio.ui();
   if (pause) travel.flush();
   if (pause && state.world.stream) {
     const s = state.world.stats, t = state.world.stream.totals;
@@ -674,6 +686,7 @@ function openMap(open) {
   if (open && state.phase !== 'play') return;
   if (!open && state.phase !== 'map') return;
   state.phase = open ? 'map' : 'play';
+  audio.ui();
   input.enabled = !open;
   show('map-screen', open);
   if (open) renderFullMap();
@@ -739,6 +752,7 @@ function openCarnet(open) {
   if (open && state.phase !== 'play') return;
   if (!open && state.phase !== 'carnet') return;
   state.phase = open ? 'carnet' : 'play';
+  audio.ui();
   input.enabled = !open;
   show('carnet-screen', open);
   if (open) renderCarnetScreen();
@@ -769,15 +783,23 @@ const photo = new PhotoMode({
   onOpen: () => {
     state.phase = 'photo';
     input.enabled = false;
+    audio.ui();
     show('hud', false);
   },
   onClose: () => {
     state.phase = 'play';
     input.enabled = true;
+    audio.ui();
     show('hud');
     rig.initialized = false; // カメラの追従を元に戻す
   },
 });
+// 保存のときにシャッター音（PhotoMode の保存は this.save() を通る）
+const photoSave = photo.save.bind(photo);
+photo.save = () => {
+  if (photo.active) audio.shutter();
+  photoSave();
+};
 function openPhoto(open) {
   if (open) {
     if (state.phase === 'paused') togglePause(false);
@@ -857,6 +879,13 @@ $('title-btn').addEventListener('click', backToTitle);
 $('mute-btn').addEventListener('click', () => {
   audio.setMuted(!audio.muted);
   $('mute-btn').textContent = `音: ${audio.muted ? 'オフ' : 'オン'}`;
+  audio.savePrefs(store);
+});
+$('mute-btn').textContent = `音: ${audio.muted ? 'オフ' : 'オン'}`;
+$('volume').value = String(Math.round(audio.volume * 100));
+$('volume').addEventListener('input', () => {
+  audio.setVolume(+$('volume').value / 100);
+  audio.savePrefs(store);
 });
 $('again-btn').addEventListener('click', () => {
   show('result-screen', false);
