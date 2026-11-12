@@ -400,6 +400,7 @@ export function planFurniture({ parsed, plan, clip, curbs = [], inOldTown = () =
             roll = Math.atan2(hs, 1.55) * (sideR ? -1 : 1);
             for (const t of [-1, 0, 1]) take(ix + hx * t * 0.8, iz + hz * t * 0.8, 0.5);
           }
+          if (solid(x, z)) continue; // 名所のまわりの置かない範囲（monuments.js の keepOut。サン・シプリアンの島のまわりの車道）
           out.cars.push({ x, z, y, a: yaw(p.ux * fwd, p.uz * fwd), roll, sx: sl, sy: 0.94 + hash01(h, 66) * 0.16, color: carColor(hash01(h, 67)) });
           boxC(x, z, p.ux, p.uz, (CAR_L / 2) * sl, CAR_W / 2);
         }

@@ -352,3 +352,28 @@ export function buildTrees(points, { isPlane = () => false, isMagnolia = () => f
   group.add(trunks, crowns);
   return group;
 }
+
+// 橋面の下（橋の幅の中）か。河岸から生えた木の幹が橋面を突き抜けて、橋の上の当たり判定になるのを防ぐ（Pont Saint-Pierre の
+// 西の端で、橋の下の木の幹に自転車が止められた）
+export function underDeck(terrain, x, z) {
+  return !!(terrain && !terrain.flat && terrain.deckGrid && terrain.deck(x, z) != null);
+}
+
+// 写真で決まる木（LiDAR で見つからなかった並木）。[緯度, 経度]、h: 高さ m、r: 樹冠の半径 m。
+// Place Intérieure Saint-Cyprien の南北の広場のプラタナス（航空写真 2024・利用者の Street View 210226）
+const PHOTO_TREES = [
+  { h: 12, r: 4, at: [[43.598133, 1.431365], [43.598149, 1.431449], [43.598158, 1.431527], [43.59817, 1.431594], [43.598101, 1.43146], [43.598085, 1.431382], [43.598113, 1.431544], [43.598141, 1.4317], [43.598202, 1.431761], [43.598222, 1.431834], [43.59819, 1.431672], [43.597822, 1.431477], [43.597786, 1.431583], [43.597802, 1.431655], [43.59781, 1.431728], [43.597879, 1.431789], [43.597838, 1.431895], [43.597855, 1.431973], [43.59791, 1.431956], [43.597762, 1.431499], [43.597826, 1.431817]] },
+];
+// treePts に、range(x, z) の中の写真の木を足す（すでに gap m 以内に木がある所は足さない）
+export function addPhotoTrees(treePts, proj, range = () => true, gap = 4) {
+  if (!proj) return treePts;
+  const out = treePts.slice();
+  for (const g of PHOTO_TREES) {
+    for (const ll of g.at) {
+      const [x, z] = proj.project(...ll);
+      if (!range(x, z) || out.some((t) => Math.hypot((t.x ?? t[0]) - x, (t.z ?? t[1]) - z) < gap)) continue;
+      out.push({ x, z, y: 0, h: g.h, r: g.r });
+    }
+  }
+  return out;
+}

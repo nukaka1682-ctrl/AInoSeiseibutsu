@@ -12,10 +12,10 @@
 import * as THREE from 'three';
 import { mulberry32 } from '../geo.js';
 
-export const FACADE_STYLES = 15;
+export const FACADE_STYLES = 16;
 // haussmann: 19 世紀末の切り石の建物（Rue d'Alsace-Lorraine・Rue de Metz）。2 階と 5 階（上の階の 2 段目と 5 段目）は
 // 通しのバルコニーのセル（haussmannFilant。シェーダーで差し替える。様式としては選ばない）
-export const STYLE = { brickStone: 0, brickShutters: 1, ochre: 2, taupe: 3, salmon: 4, cream: 5, modern: 6, rose: 7, arcade: 8, haussmann: 9, haussmannFilant: 10, residence: 11, whiteModern: 12, glass: 13, brickGrid: 14 };
+export const STYLE = { brickStone: 0, brickShutters: 1, ochre: 2, taupe: 3, salmon: 4, cream: 5, modern: 6, rose: 7, arcade: 8, haussmann: 9, haussmannFilant: 10, residence: 11, whiteModern: 12, glass: 13, brickGrid: 14, faubourg: 15 };
 
 const W = 1024, CELL = 256, BAYW = 256;
 
@@ -42,6 +42,9 @@ const STYLES = [
   // 打ち放しのコンクリートの格子にレンガの板の事務所・集合住宅（利用者の写真 210635・225323）: 淡い灰色の柱と階の帯、
   // あいだに大きな窓と赤いレンガの腰壁
   { wall: 'brick', bricks: ['#b8644a', '#c06d50', '#ad5d45', '#c47457', '#b5684d'], mortar: '#cdb59c', trim: 'none', shutters: null, panes: 1, balcony: [0, 0, 0, 0], band: 'concrete', modern: true, fins: true, shops: true, door: '#3c4246', shop: '#2e3438' },
+  // サン・シプリアンの通りの家（利用者の Street View 210954: Rue de la République）: クリーム色〜淡い黄色の漆喰に、弓形のアーチの
+  // レンガの窓枠、灰色〜灰茶色の板の鎧戸（開いて両脇に）、1 階は全部が店（鉄の手すりは monuments.js の shopstreet で立体に）
+  { wall: 'plaster', plaster: '#d9c39c', trim: 'brick', shutters: ['#8b857a', '#7c7970', '#968e81', '#717b80'], panes: 3, balcony: [0, 0, 0, 0], band: 'brick', shops: true, door: '#3a3530', shop: '#2c2a28' },
 ];
 
 function canvas(w, h) {

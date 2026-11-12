@@ -12,7 +12,7 @@
 //                     池の西の茶屋（深い軒の苔むした寄棟）、池の南の入り江に架かる朱色の太鼓橋、白い玉石の州浜と石灯籠、玉作りの松
 import * as THREE from 'three';
 import { MeshWriter, triangulate } from './meshwriter.js';
-import { centroid, hash01, mulberry32, pointInPolygon, pointInRing, signedArea } from '../geo.js';
+import { centroid, closestOnSegment, hash01, mulberry32, pointInPolygon, pointInRing, signedArea } from '../geo.js';
 import { ORDER } from './ground.js';
 import { TERRAIN_ORDER } from './terrainmesh.js';
 import { CAR_ROADS } from './parse.js';
@@ -32,8 +32,10 @@ export const MONUMENTS = [
   // パット・ドワのロータリーの島（利用者の Street View 210522）: 直径約 18 m の、ばら色のレンガの低い擁壁（0.6 m）に
   // 囲まれた植え込み（低木と小さな木）と、暗い青灰色の鋼の門の形の彫刻（高さ約 6 m・幅約 7 m）
   // サン・シプリアンの Place Intérieure（利用者の Street View 210226）: 2 本の車道のあいだの、ベージュの石灰岩の板の
-  // 一段高い歩行者の島（約 45 × 10 m、東の端は丸い）と淡い石の縁石、平らな暗い鉄の格子。line: 島の芯線の東端・西端
-  { id: 'st-cyprien-island', kind: 'island', line: [[43.598026, 1.432008], [43.597945, 1.431499]], half: 4.6 },
+  // 一段高い歩行者の島（東の端は丸い）と淡い石の縁石、平らな暗い鉄の格子、案内の柱。その西に続くのは、メトロの駅の
+  // 地上の明かり取り（航空写真 2024: 暗い青のガラスの格子の屋根 約 17 × 6 m と、その西の赤茶色と灰色の板の屋根 約 18 × 6 m）。
+  // まわりの 2 本の車道は 3 車線の通り抜けで、路上駐車はない。line: 芯線の東端・西端（島は東の 3 割）
+  { id: 'st-cyprien-island', kind: 'island', line: [[43.598026, 1.432008], [43.597927, 1.431340]], half: 4.6 },
   // サン・セルナン大聖堂（利用者の写真 NCM_0099）: 地図の外形を押し出しただけの箱の代わりに、身廊・側廊・袖廊の
   // 低い勾配の瓦屋根と、東の端の段々の後陣（放射状の 5 つの小礼拝堂 8 m → 周歩廊 13 m → 後陣の円筒 20 m、どれも
   // 半円錐の瓦屋根）。crossing: 交差部（八角形の鐘楼 towers.js）、apex: 東の端の方向
@@ -86,6 +88,17 @@ export const MONUMENTS = [
   // リケの像（Monument à Pierre-Paul Riquet。利用者の写真 212520）: ジャン・ジョレス通りの北東の端、運河の手前。
   // 淡い灰色の花崗岩の島に、2 段の台・石灰岩の台座（3 m 角・4.5 m）と白い大理石の立像（約 3.5 m）
   { id: 'riquet', kind: 'statue', lat: 43.60906, lon: 1.45389, facing: [43.6061, 1.4490] },
+  // Place de la Trinité の噴水（1826 年、Urbain Vitry。写真: Wikimedia Commons「Fontaine de la Trinité」、航空写真で位置）:
+  // 低い灰色の石の丸い水盤、白い大理石の 3 つの面が内へ反った台座（面ごとにライオンの口の吐水口）、背中合わせの 3 体の
+  // ブロンズの翼のあるセイレーンと真ん中の手すり子が、大きな白い大理石の水盤を支える。広場の石畳に淡い石の輪
+  // 自転車置き場（利用者の Street View 210226: Place Intérieure Saint-Cyprien の車道沿いに、逆 U 字の鉄の輪がずらりと並び、
+  // 自転車がたくさん止めてある）。line: 並びの両端。輪は線に直角で、1 m ごと
+  { id: 'velos-saint-cyprien-n', kind: 'bikeracks', line: [[43.598081, 1.431672], [43.598105, 1.431817]] },
+  { id: 'velos-saint-cyprien-s', kind: 'bikeracks', line: [[43.597905, 1.431760], [43.597928, 1.431905]] },
+  { id: 'fontaine-trinite', kind: 'trinite', lat: 43.599732, lon: 1.44408 },
+  // Rue de la République（サン・シプリアン。利用者の Street View 210954・211021）: 通りに面した建物の正面に、亜鉛の縦樋、
+  // 1 階の店の色とりどりの日よけ、壁から突き出た吊り看板、2 階の窓の鉄の手すり（窓の並びはファサードのテクスチャと同じ）
+  { id: 'republique-facades', kind: 'shopstreet', street: /^Rue de la R[ée]publique$/i, reach: 9 },
   // front: 道路の側（ガラスの面と看板が向く先）。pylon: 道端の看板塔。gravel: 白い砂利の植え込み、mulch: その中の木のチップの島
   // [緯度, 経度, 半径 m]（航空写真 2024 から）
   {
@@ -489,6 +502,10 @@ export function findMonuments(proj, { buildings = [], areas = [], facade = null,
       if (!inB((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)) continue;
       const water = areas.find((q) => q.type === 'water' && pointInPolygon((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, q));
       out.push({ spec, kind: 'lock', a, b, width: spec.width, from: spec.from, area: water || null, replaced: [] });
+    } else if (spec.kind === 'bikeracks') {
+      const P = spec.line.map((ll) => proj.project(...ll));
+      if (!inB((P[0][0] + P[1][0]) / 2, (P[0][1] + P[1][1]) / 2)) continue;
+      out.push({ spec, kind: 'bikeracks', a: P[0], b: P[1], replaced: [] });
     } else if (spec.kind === 'bollards') {
       const P = spec.line.map((ll) => proj.project(...ll));
       if (!P.some(([x, z]) => inB(x, z))) continue;
@@ -535,6 +552,34 @@ export function findMonuments(proj, { buildings = [], areas = [], facade = null,
     } else if (spec.kind === 'roundabout') {
       if (!inB(x, z)) continue;
       out.push({ spec, kind: 'roundabout', x, z, radius: spec.radius, replaced: [] });
+    } else if (spec.kind === 'shopstreet') {
+      // 通りに面した建物の正面の辺（通りに平行で、外向きの法線が通りを向くもの）
+      const segs = [];
+      for (const r of roads) if (!r.bridge && !r.tunnel && spec.street.test(r.name || '')) for (let i = 0; i + 1 < r.pts.length; i++) segs.push([r.pts[i], r.pts[i + 1], r.width / 2 + spec.reach]);
+      if (!segs.length) continue;
+      const fronts = [];
+      for (const b of buildings) {
+        if ((b.info.height || 0) < 6 || b.info.isChurch || b.info.area > 2500 || (b.info.minHeight || 0) > 0.5) continue;
+        const sg = signedArea(b.outer) > 0 ? 1 : -1;
+        for (let i = 0; i < b.outer.length; i++) {
+          const a = b.outer[i], c = b.outer[(i + 1) % b.outer.length], L = Math.hypot(c[0] - a[0], c[1] - a[1]);
+          const mx = (a[0] + c[0]) / 2, mz = (a[1] + c[1]) / 2;
+          if (L < 3 || !inB(mx, mz)) continue;
+          const n = [((c[1] - a[1]) / L) * sg, (-(c[0] - a[0]) / L) * sg];
+          for (const [p, q, reach] of segs) {
+            const sl = Math.hypot(q[0] - p[0], q[1] - p[1]) || 1;
+            if (Math.abs(((c[0] - a[0]) * (q[0] - p[0]) + (c[1] - a[1]) * (q[1] - p[1])) / (L * sl)) < 0.85) continue;
+            const h = closestOnSegment(mx, mz, p[0], p[1], q[0], q[1]);
+            if (h.d2 > reach * reach || n[0] * (h.x - mx) + n[1] * (h.z - mz) <= 0) continue;
+            fronts.push({ a, c, n, L, b, i });
+            break;
+          }
+        }
+      }
+      if (fronts.length) out.push({ spec, kind: 'shopstreet', fronts, replaced: [] });
+    } else if (spec.kind === 'trinite') {
+      if (!inB(x, z)) continue;
+      out.push({ spec, kind: 'trinite', x, z, replaced: [] });
     } else if (spec.kind === 'statue') {
       if (!inB(x, z)) continue;
       const [fx, fz] = proj.project(...spec.facing);
@@ -2568,17 +2613,19 @@ function writeWallFountain(m, W, groundAt, colliders) {
 }
 
 // ---- 歩行者の島: 東の端（a）が丸く、西の端（b）が四角い、高さ 0.2 m の石の板の島と縁石、鉄の格子 2 枚
-function writeIsland(m, W, groundAt) {
+function writeIsland(m, W, groundAt, colliders, onRoad, keepOut) {
   const { a, b, half } = m;
-  const L = Math.hypot(b[0] - a[0], b[1] - a[1]), u = [(b[0] - a[0]) / L, (b[1] - a[1]) / L], v = [-u[1], u[0]];
+  const LL = Math.hypot(b[0] - a[0], b[1] - a[1]), u = [(b[0] - a[0]) / LL, (b[1] - a[1]) / LL], v = [-u[1], u[0]];
+  const L = LL * 0.3; // 石の島は東の 3 割
+  const e = [a[0] + u[0] * L, a[1] + u[1] * L];
   const ring = [];
   for (let k = 0; k <= 12; k++) {
     const t = Math.PI / 2 + (k / 12) * Math.PI; // a の側の半円
     ring.push([a[0] + (u[0] * Math.cos(t) + v[0] * Math.sin(t)) * half, a[1] + (u[1] * Math.cos(t) + v[1] * Math.sin(t)) * half]);
   }
-  ring.push([b[0] - v[0] * half, b[1] - v[1] * half], [b[0] + v[0] * half, b[1] + v[1] * half]);
+  ring.push([e[0] - v[0] * half, e[1] - v[1] * half], [e[0] + v[0] * half, e[1] + v[1] * half]);
   const y0 = groundAt((a[0] + b[0]) / 2, (a[1] + b[1]) / 2), yt = y0 + 0.2;
-  const w = W.main, KERB = col('#ccb696'), TOP = col('#c5b9a6'), GRATE = col('#6f6e64');
+  const w = W.main, mt = W.metal, KERB = col('#ccb696'), TOP = col('#c5b9a6'), GRATE = col('#6f6e64');
   for (let i = 0; i < ring.length; i++) {
     const p = ring[i], q = ring[(i + 1) % ring.length], dx = q[0] - p[0], dz = q[1] - p[1], l = Math.hypot(dx, dz) || 1;
     const sg = signedArea(ring) > 0 ? 1 : -1;
@@ -2589,10 +2636,32 @@ function writeIsland(m, W, groundAt) {
     const [A, B, C] = [0, 1, 2].map((k) => tr.points[tr.indices[i + k]]).map((p) => [p[0], yt, p[1]]);
     w.tri(A, B, C, [0, 1, 0], PLAIN_UV, PLAIN_UV, PLAIN_UV, TOP);
   }
-  for (const f of [0.35, 0.65]) {
-    const c = [a[0] + u[0] * L * f, a[1] + u[1] * L * f];
-    box(w, [c[0], yt + 0.005, c[1]], [u[0] * 2, 0, u[1] * 2], [0, 0.005, 0], [v[0] * 1, 0, v[1] * 1], GRATE);
+  const P = (s, o, y) => [a[0] + u[0] * s + v[0] * o, y, a[1] + u[1] * s + v[1] * o];
+  const U = (h) => [u[0] * h, 0, u[1] * h], V = (h) => [v[0] * h, 0, v[1] * h], Y = (h) => [0, h, 0];
+  for (const f of [0.35, 0.72]) box(w, P(L * f, 0, yt + 0.005), U(1.8), Y(0.005), V(1), GRATE);
+  // 案内の柱（東の端の近く。白い板に暗い帯）
+  box(w, P(1.2, -1.2, yt + 1.05), U(0.08), Y(1.05), V(0.45), col('#e9e7e1'));
+  box(w, P(1.2, -1.2, yt + 1.95), U(0.085), Y(0.12), V(0.455), col('#3a4046'));
+  // 駅の明かり取り: 低い石の腰壁の上に、鋼の枠の格子の屋根（東: 暗い青のガラス、西: 赤茶色の板と灰色のガラスが交互）
+  const FRAME = col('#cfd2d2'), GLASS = col('#34465a'), GLASS2 = col('#5b6871'), RED = col('#8a4a3a'), WALL = col('#b9ab96');
+  const hw = half - 1.3, yw = y0 + 0.5;
+  for (const [f0, f1, kind] of [[0.32, 0.64, 'glass'], [0.66, 1.0, 'mixed']]) {
+    const s0 = LL * f0, s1 = LL * f1, sm = (s0 + s1) / 2, hl = (s1 - s0) / 2;
+    box(w, P(sm, 0, (y0 - 0.2 + yw) / 2), U(hl), Y((yw - y0 + 0.2) / 2), V(hw), WALL);
+    box(mt, P(sm, 0, yw + 0.04), U(hl + 0.06), Y(0.04), V(hw + 0.06), FRAME);
+    const nx = Math.max(3, Math.round((s1 - s0) / 2.9)), nz = 3;
+    for (let i = 0; i < nx; i++) {
+      for (let k = 0; k < nz; k++) {
+        const cs = s0 + ((i + 0.5) / nx) * (s1 - s0), co = -hw + ((k + 0.5) / nz) * 2 * hw;
+        const c = kind === 'glass' ? ((i + k) % 5 === 0 ? GLASS2 : GLASS) : (i + k) % 2 ? RED : GLASS2;
+        box(w, P(cs, co, yw + 0.1), U((s1 - s0) / nx / 2 - 0.09), Y(0.02), V(hw / nz - 0.09), c);
+      }
+    }
+    const C = [P(s0, -hw, 0), P(s1, -hw, 0), P(s1, hw, 0), P(s0, hw, 0)];
+    for (let i = 0; i < 4; i++) colliders.push([C[i][0], C[i][2], C[(i + 1) % 4][0], C[(i + 1) % 4][2]]);
   }
+  // まわりの車道に路上駐車の車を置かない
+  for (let s = 0; s <= LL + 1; s += 8) keepOut.push([a[0] + u[0] * s, a[1] + u[1] * s, half + 8.6]);
 }
 
 // ---- ロータリーの島: 白いコンクリートの縁石、ばら色のレンガの低い擁壁、盛り土の植え込み（低木・小さな木）、鋼の門の彫刻
@@ -2661,7 +2730,255 @@ function writeStatue(m, W, groundAt, colliders, onRoad, keepOut) {
   keepOut.push([x, z, 6]);
 }
 
-const WRITERS = { bollards: writeBollards, hgate: writeHospitalGate, lift: writeLift, pavilion: writePavilion, lock: writeLock, equestrian: writeEquestrian, wallFountain: writeWallFountain, capitainerie: writeCapitainerie, moorings: writeMoorings, riverfront: writeRiverfront, arcades: writeArcades, choir: writeChoir, ramblas: writeRamblas, basilica: writeBasilica, island: writeIsland, roundabout: writeRoundabout, portico: writePortico, donjon: writeDonjon, statue: writeStatue, dome: writeDome, chateau: writeChateau, stadium: writeStadium, cabanis: writeCabanis, coq: writeCoq, cross: writeCross, fastfood: writeFastfood, jgarden: writeJgarden, parterre: writeParterre };
+// ---- 店の並ぶ通りの建物の正面の飾り（Rue de la République）
+// 窓の並びは buildings.js の writeWalls と同じ: 辺の真ん中から FACADE_BAY m ごとの窓の列、1 階の高さは max(3.4, 階高 × 1.15)、
+// 上の階の窓は階の床から階高の 0.13〜0.83
+const FACADE_BAY = 3.5;
+const AWNING = ['#7b1f24', '#1f4a3a', '#2a3550', '#a8782a', '#5a2d42', '#8c3b1e', '#34312e', '#6e7f3a'];
+const SIGN = ['#b4242a', '#2a7a3a', '#d9b232', '#24508f', '#e8e6e0', '#c2571f', '#6a2a6e'];
+function writeShopstreet(m, W, groundAt) {
+  const w = W.main, mt = W.metal;
+  const IRON = col('#26272a'), ZINC = col('#8d9193'), SILL = col('#d8d0c2');
+  for (const f of m.fronts) {
+    const { a, n, L, b } = f;
+    const u = [(f.c[0] - a[0]) / L, (f.c[1] - a[1]) / L];
+    const base = b.terrainBase ?? groundAt(a[0] + n[0], a[1] + n[1]);
+    const H = b.info.height, fh = b.info.floorHeight, gh = Math.max(3.4, fh * 1.15);
+    // 建物と辺ごとの乱数（hash01 は整数の種。建物の id はタイルごとの番号なので、建物の中の点の位置から作る）
+    const seed = (Math.imul(Math.round(b.inside[0] * 10), 73856093) ^ Math.imul(Math.round(b.inside[1] * 10), 19349663) ^ Math.imul(f.i + 1, 83492791)) | 0;
+    const r = (k) => hash01(seed, k);
+    const P = (t, o, y) => [a[0] + u[0] * t + n[0] * o, y, a[1] + u[1] * t + n[1] * o];
+    const U = (h) => [u[0] * h, 0, u[1] * h], N = (h) => [n[0] * h, 0, n[1] * h], Y = (h) => [0, h, 0];
+    // 亜鉛の縦樋（正面の両端。軒の下の受け口から地面まで）
+    for (const t of [0.25, L - 0.25]) {
+      const p = P(t, 0.12, 0);
+      cylinder(mt, p[0], p[2], 0.05, 0.05, base, base + H - 0.35, { seg: 6, color: ZINC });
+      box(mt, P(t, 0.14, base + H - 0.25), U(0.12), Y(0.1), N(0.1), ZINC);
+    }
+    // 窓の列（辺の真ん中から FACADE_BAY m ごと。端から 0.9 m 以内は除く）
+    const bays = [];
+    for (let k = -Math.floor(L / 2 / FACADE_BAY); k <= Math.floor(L / 2 / FACADE_BAY); k++) {
+      const t = L / 2 + k * FACADE_BAY;
+      if (t > 0.9 && t < L - 0.9) bays.push(t);
+    }
+    if (!bays.length) continue;
+    const yb = base + gh;
+    // 1 階の店の日よけ（建物の 4 割。続いた 1〜3 列、布の色は建物ごと）。斜めの布と前の垂れ、両脇の三角
+    if (r(1) < 0.4) {
+      const color = col(AWNING[Math.floor(r(2) * AWNING.length)]);
+      const k0 = Math.floor(r(3) * bays.length), k1 = Math.min(bays.length, k0 + 1 + Math.floor(r(4) * 3));
+      for (let k = k0; k < k1; k++) {
+        const t = bays[k], hw = FACADE_BAY / 2 - 0.3, ya = yb - 0.35, yo = yb - 0.95, d = 1.15;
+        const q = [P(t - hw, 0.05, ya), P(t + hw, 0.05, ya), P(t + hw, d, yo), P(t - hw, d, yo)];
+        const ny = [n[0] * 0.5, 1, n[1] * 0.5];
+        w.quad(q[0], q[1], q[2], q[3], ny, PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, color);
+        w.quad(q[3], q[2], q[1], q[0], [-ny[0], -1, -ny[2]], PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, color);
+        const v = [P(t - hw, d, yo), P(t + hw, d, yo), P(t + hw, d, yo - 0.25), P(t - hw, d, yo - 0.25)];
+        w.quad(v[0], v[1], v[2], v[3], [n[0], 0, n[1]], PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, color);
+        w.quad(v[3], v[2], v[1], v[0], [-n[0], 0, -n[1]], PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, color);
+        for (const sd of [-1, 1]) {
+          const A = P(t + sd * hw, 0.05, ya), B = P(t + sd * hw, d, yo), C = P(t + sd * hw, d, yo - 0.25);
+          w.tri(A, B, C, [u[0] * sd, 0, u[1] * sd], PLAIN_UV, PLAIN_UV, PLAIN_UV, color);
+          w.tri(A, C, B, [-u[0] * sd, 0, -u[1] * sd], PLAIN_UV, PLAIN_UV, PLAIN_UV, color);
+        }
+      }
+    }
+    // 店の上の横長の看板（日よけのない建物の半分。1〜2 列にまたがる色の板と、白っぽい文字の帯）
+    if (r(1) >= 0.4 && r(11) < 0.55) {
+      const k0 = Math.floor(r(12) * bays.length), k1 = Math.min(bays.length - 1, k0 + (r(13) < 0.4 ? 1 : 0));
+      const t0 = bays[k0] - FACADE_BAY * 0.38, t1 = bays[k1] + FACADE_BAY * 0.38, tm = (t0 + t1) / 2, hl = (t1 - t0) / 2;
+      const color = col(SIGN[Math.floor(r(14) * SIGN.length)]);
+      box(w, P(tm, 0.06, yb - 0.32), U(hl), Y(0.24), N(0.05), color);
+      box(w, P(tm, 0.12, yb - 0.32), U(hl * 0.62), Y(0.07), N(0.01), r(15) < 0.5 ? col('#f4f1e8') : col('#2a2a2a'));
+    }
+    // 吊り看板（建物の 4 割。窓の列のあいだ、1 階の上）: 鉄の腕と、壁に直角な色の板（両面に白い文字の帯）
+    if (r(5) < 0.4) {
+      const t = Math.min(L - 0.6, Math.max(0.6, bays[Math.floor(r(6) * bays.length)] + FACADE_BAY / 2 * (r(7) < 0.5 ? -1 : 1)));
+      const y = yb + 0.55, color = col(SIGN[Math.floor(r(8) * SIGN.length)]);
+      box(mt, P(t, 0.45, y + 0.42), N(0.45), Y(0.025), U(0.025), IRON);
+      box(mt, P(t, 0.04, y + 0.3), N(0.04), Y(0.18), U(0.06), IRON);
+      const round = r(9) < 0.35;
+      if (round) {
+        // 丸い看板: 壁に直角な面の円（両面）
+        const o = P(t, 0, 0), disc = [];
+        for (let j = 0; j < 12; j++) disc.push([0.52 + Math.cos((j / 12) * Math.PI * 2) * 0.32, y + Math.sin((j / 12) * Math.PI * 2) * 0.32]);
+        for (const sd of [1, -1]) vpoly(w, [o[0] + u[0] * 0.03 * sd, o[2] + u[1] * 0.03 * sd], n, sd > 0 ? disc : disc.slice().reverse(), [u[0] * sd, 0, u[1] * sd], color);
+      } else box(w, P(t, 0.52, y), N(0.36), Y(0.3), U(0.035), color);
+      if (!round) box(w, P(t, 0.52, y - 0.05), N(0.26), Y(0.08), U(0.04), col('#f2efe6'));
+    }
+    // 2 階の窓の鉄の手すり（2 階建て以上の建物の 6 割）: 石の床板、上下の横桟、縦の桟 7 本と両端の柱
+    if (H > gh + fh * 1.5 && r(10) < 0.6) {
+      const y0 = yb + fh * 0.13 - 0.05;
+      for (const t of bays) {
+        const hw = 0.72, d = 0.22;
+        box(w, P(t, d / 2, y0 - 0.04), U(hw + 0.08), Y(0.04), N(d / 2 + 0.03), SILL);
+        for (const y of [y0 + 0.05, y0 + 0.92]) box(mt, P(t, d, y), U(hw), Y(0.025), N(0.02), IRON);
+        for (let j = 0; j <= 8; j++) {
+          const tt = t - hw + (2 * hw * j) / 8, th = j === 0 || j === 8 ? 0.025 : 0.012;
+          box(mt, P(tt, d, y0 + 0.48), U(th), Y(0.45), N(th), IRON);
+        }
+        for (const sd of [-1, 1]) box(mt, P(t + sd * hw, d / 2, y0 + 0.92), U(0.02), Y(0.02), N(d / 2), IRON);
+      }
+    }
+  }
+}
+
+// ---- Place de la Trinité の噴水（寸法は写真と航空写真から: 水盤の外径約 5.9 m・縁の高さ 0.72 m、台座 1.4 m、
+// セイレーン約 1.9 m、上の水盤の直径約 3.2 m、全体の高さ約 4.8 m）
+function writeTrinite(m, W, groundAt, colliders, onRoad, keepOut) {
+  const { x, z } = m;
+  const y0 = groundAt(x, z), w = W.main, mt = W.metal;
+  const STONE = col('#a29d95'), STONE_D = col('#8d8881'), MARBLE = col('#ebe6dc'), MARBLE_D = col('#d8d2c6');
+  const BRONZE = col('#3a3a33'), BRONZE_L = col('#4a4a41'), WATER = col('#58706f'), SPRAY = col('#dce8ea');
+  // 広場の石畳の淡い石の輪（航空写真: 噴水のまわりの直径約 14 m の輪と、水盤の足元の輪）
+  for (const [r0, r1] of [[6.6, 7.0], [3.05, 3.4]]) {
+    const n = 48;
+    for (let k = 0; k < n; k++) {
+      const a0 = (k / n) * Math.PI * 2, a1 = ((k + 1) / n) * Math.PI * 2;
+      const P = (a, r) => {
+        const px = x + Math.cos(a) * r, pz = z + Math.sin(a) * r;
+        return [px, groundAt(px, pz) + 0.05, pz];
+      };
+      W.inlay.quad(P(a0, r0), P(a1, r0), P(a1, r1), P(a0, r1), [0, 1, 0], PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, col('#cfc9bf'));
+    }
+  }
+  // 下の水盤: 外の壁・張り出した丸い縁・内の壁・水面
+  const RB = 2.8, yR = y0 + 0.72, yW = y0 + 0.52;
+  cylinder(w, x, z, RB, RB, y0 - 0.2, y0 + 0.58, { seg: 40, color: STONE });
+  cylinder(w, x, z, RB, RB + 0.15, y0 + 0.58, y0 + 0.66, { seg: 40, color: STONE });
+  cylinder(w, x, z, RB + 0.15, RB + 0.15, y0 + 0.66, yR, { seg: 40, color: STONE });
+  annulus(w, x, z, RB - 0.28, RB + 0.15, yR, 40, STONE_D);
+  cylinder(w, x, z, RB - 0.28, RB - 0.28, yW - 0.1, yR, { seg: 40, color: STONE_D, inward: true });
+  annulus(w, x, z, 0, RB - 0.28, yW, 40, WATER);
+  // 台座: 3 つの面が内へ反った三角形（角は面取り）。足元の段・本体・軒
+  const tri = (R, bow) => {
+    const C = [0, 1, 2].map((k) => [Math.cos((k / 3) * Math.PI * 2 + Math.PI / 2) * R, Math.sin((k / 3) * Math.PI * 2 + Math.PI / 2) * R]);
+    const pts = [];
+    for (let k = 0; k < 3; k++) {
+      const ca = C[k], cb = C[(k + 1) % 3];
+      // 角を面取りし（各辺の両端 8 %）、面は真ん中で bow m 内へ反らせる
+      for (let j = 0; j <= 6; j++) {
+        const t = 0.08 + (0.84 * j) / 6, mx = ca[0] + (cb[0] - ca[0]) * t, mz = ca[1] + (cb[1] - ca[1]) * t;
+        const ml = Math.hypot(mx, mz), dent = bow * Math.sin((Math.PI * j) / 6);
+        pts.push([x + mx - (mx / ml) * dent, z + mz - (mz / ml) * dent]);
+      }
+    }
+    return pts;
+  };
+  const prism = (ring, ya, yb, color, top = true) => {
+    for (let i = 0; i < ring.length; i++) {
+      const p = ring[i], q = ring[(i + 1) % ring.length], dx = q[0] - p[0], dz = q[1] - p[1], l = Math.hypot(dx, dz) || 1;
+      w.quad([p[0], ya, p[1]], [q[0], ya, q[1]], [q[0], yb, q[1]], [p[0], yb, p[1]], [dz / l, 0, -dx / l], PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, color);
+    }
+    if (!top) return;
+    const { points, indices } = triangulate(ring, []);
+    for (let i = 0; i < indices.length; i += 3) w.tri(...[0, 1, 2].map((k) => [points[indices[i + k]][0], yb, points[indices[i + k]][1]]), [0, 1, 0], PLAIN_UV, PLAIN_UV, PLAIN_UV, color);
+  };
+  const ringCW = (r) => (signedArea(r) > 0 ? r.slice().reverse() : r);
+  const yP = y0 + 1.95;
+  prism(ringCW(tri(1.25, 0.16)), yW - 0.1, y0 + 0.75, MARBLE_D);
+  prism(ringCW(tri(1.12, 0.18)), y0 + 0.75, yP - 0.18, MARBLE);
+  prism(ringCW(tri(1.22, 0.16)), yP - 0.18, yP, MARBLE_D);
+  // 面ごとのライオンの顔（ブロンズ）と、水盤へ弧を描いて落ちる吐水
+  for (let k = 0; k < 3; k++) {
+    const a = (k / 3) * Math.PI * 2 + Math.PI / 2 + Math.PI / 3, c = Math.cos(a), s = Math.sin(a);
+    const r = 1.12 * 0.5 - 0.18 + 0.02;
+    blob(mt, [x + c * r, y0 + 1.25, z + s * r], [0.17, 0.2, 0.17], -a, 8, 5, () => BRONZE_L);
+    let px = x + c * (r + 0.15), py = y0 + 1.18, pz = z + s * (r + 0.15);
+    for (let j = 1; j <= 6; j++) {
+      const d = r + 0.15 + j * 0.2, qy = y0 + 1.18 + 0.12 * j - 0.06 * j * j;
+      const qx = x + c * d, qz = z + s * d;
+      box(w, [(px + qx) / 2, (py + qy) / 2, (pz + qz) / 2], [(qx - px) / 2, (qy - py) / 2, (qz - pz) / 2], [-s * 0.025, 0, c * 0.025], [0, 0.025, 0], SPRAY);
+      px = qx; py = qy; pz = qz;
+      if (qy < yW) break;
+    }
+  }
+  // 真ん中の手すり子（ブロンズ。ふくらみのある柱）
+  for (const [ya, yb, ra, rb] of [[yP, yP + 0.25, 0.32, 0.26], [yP + 0.25, yP + 0.9, 0.26, 0.34], [yP + 0.9, yP + 1.7, 0.34, 0.2], [yP + 1.7, yP + 2.2, 0.2, 0.3]]) cylinder(mt, x, z, ra, rb, ya, yb, { seg: 12, color: BRONZE });
+  // 3 体のセイレーン: 外を向き、うずまきの尾の上に立ち、両の翼を上へ広げて上の水盤を支える
+  for (let k = 0; k < 3; k++) {
+    const a = (k / 3) * Math.PI * 2 + Math.PI / 2 + Math.PI / 3, c = Math.cos(a), s = Math.sin(a);
+    const at = (f, sd, y) => [x + c * f - s * sd, y, z + s * f + c * sd];
+    // うずまきの尾（外へ巻く 2 つの渦と、台座の上の塊）
+    blob(mt, at(0.5, 0, yP + 0.28), [0.38, 0.3, 0.3], -a, 10, 6, () => BRONZE);
+    for (const sd of [-0.32, 0.32]) {
+      for (let j = 0; j < 7; j++) {
+        const t = j / 7, ang = t * Math.PI * 1.6, rr = 0.24 * (1 - t * 0.6);
+        blob(mt, at(0.78 + Math.cos(ang) * rr * 0.6, sd * (1 + t * 0.3), yP + 0.3 + Math.sin(ang) * rr), [0.08, 0.08, 0.08], 0, 6, 4, () => BRONZE_L);
+      }
+    }
+    // 衣をまとった体・胸・頭（髪を結った頭）
+    blob(mt, at(0.52, 0, yP + 0.95), [0.2, 0.5, 0.18], -a, 10, 6, () => BRONZE);
+    blob(mt, at(0.55, 0, yP + 1.45), [0.19, 0.25, 0.16], -a, 10, 6, () => BRONZE);
+    blob(mt, at(0.56, 0, yP + 1.82), [0.11, 0.14, 0.11], 0, 8, 5, () => BRONZE);
+    blob(mt, at(0.54, 0, yP + 1.95), [0.09, 0.06, 0.09], 0, 6, 4, () => BRONZE_L);
+    for (const sd of [-0.17, 0.17]) blob(mt, at(0.56, sd, yP + 1.2), [0.06, 0.3, 0.06], -a, 6, 4, () => BRONZE); // 腕
+    // 翼（肩から外へ上へ広げ、先は上の水盤の下に届く）。両面を描く
+    for (const sg of [-1, 1]) {
+      const o = at(0.5, 0, 0), sx = -s * sg, sz = c * sg;
+      const shape = [[0.1, yP + 1.45], [0.62, yP + 1.62], [0.95, yP + 2.05], [1.02, yP + 2.32], [0.3, yP + 2.32], [0.12, yP + 1.8]];
+      for (const flip of [1, -1]) vpoly(mt, [o[0], o[2]], [sx, sz], shape, [c * flip, 0, s * flip], BRONZE_L);
+    }
+  }
+  // 上の水盤（白い大理石の浅い鉢）・水面・真ん中の噴き上げ
+  const yC = yP + 2.25, RC = 1.6;
+  for (const [ya, yb, ra, rb] of [[yC - 0.1, yC + 0.1, 0.3, 0.75], [yC + 0.1, yC + 0.35, 0.75, 1.35], [yC + 0.35, yC + 0.5, 1.35, RC], [yC + 0.5, yC + 0.6, RC, RC]]) cylinder(w, x, z, ra, rb, ya, yb, { seg: 32, color: MARBLE });
+  annulus(w, x, z, RC - 0.08, RC, yC + 0.6, 32, MARBLE_D);
+  cylinder(w, x, z, RC - 0.08, RC - 0.08, yC + 0.45, yC + 0.6, { seg: 32, color: MARBLE_D, inward: true });
+  annulus(w, x, z, 0, RC - 0.08, yC + 0.52, 32, WATER);
+  cylinder(w, x, z, 0.06, 0.03, yC + 0.52, yC + 1.5, { seg: 8, color: SPRAY });
+  blob(w, [x, yC + 1.5, z], [0.12, 0.1, 0.12], 0, 6, 4, () => SPRAY);
+  colliders.push([x, z, RB + 0.15]);
+  keepOut.push([x, z, RB + 1.2]);
+}
+
+// ---- 自転車置き場: 逆 U 字の輪（高さ 0.8 m・幅 0.7 m、線に直角）と、6 割ほどの輪に止めた自転車
+const BIKE_COLORS = ['#2c2f33', '#7a1f22', '#1f4d7a', '#3d6b3a', '#d8d5cc', '#c98a1e', '#4a4f55', '#16a0a0'];
+function writeBikeracks(m, W, groundAt, colliders) {
+  const { a, b } = m;
+  const L = Math.hypot(b[0] - a[0], b[1] - a[1]), u = [(b[0] - a[0]) / L, (b[1] - a[1]) / L], d = [-u[1], u[0]];
+  const mt = W.metal, w = W.main, IRON = col('#3b4045'), TIRE = col('#1c1c1d'), SEAT = col('#141414');
+  const n = Math.max(2, Math.floor(L / 1.0));
+  const seed0 = (Math.imul(Math.round(a[0] * 10), 73856093) ^ Math.imul(Math.round(a[1] * 10), 19349663)) | 0;
+  // 棒: p から q へ、太さ t
+  const bar = (wr, p, q, t, c) => {
+    const h = [(q[0] - p[0]) / 2, (q[1] - p[1]) / 2, (q[2] - p[2]) / 2], l = Math.hypot(...h) || 1;
+    const side = Math.abs(h[1]) / l > 0.95 ? [t, 0, 0] : [(-h[2] / Math.hypot(h[0], h[2])) * t, 0, (h[0] / Math.hypot(h[0], h[2])) * t];
+    const up = [(h[1] * side[2] - h[2] * side[1]) / l, (h[2] * side[0] - h[0] * side[2]) / l, (h[0] * side[1] - h[1] * side[0]) / l];
+    box(wr, [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2, (p[2] + q[2]) / 2], h, up, side, c);
+  };
+  for (let k = 0; k < n; k++) {
+    const t = ((k + 0.5) / n) * L, cx = a[0] + u[0] * t, cz = a[1] + u[1] * t, y0 = groundAt(cx, cz);
+    const at = (f, s, y) => [cx + d[0] * f + u[0] * s, y0 + y, cz + d[1] * f + u[1] * s]; // f: 輪の向き、s: 並びの向き
+    bar(mt, at(-0.35, 0, 0), at(-0.35, 0, 0.8), 0.022, IRON);
+    bar(mt, at(0.35, 0, 0), at(0.35, 0, 0.8), 0.022, IRON);
+    bar(mt, at(-0.35, 0, 0.8), at(0.35, 0, 0.8), 0.022, IRON);
+    if (hash01(seed0, k * 7 + 1) > 0.62) continue;
+    // 自転車: 輪の脇（並びの向きに 0.14 m）に、輪と同じ向きで。前後は自転車ごと
+    const sgn = hash01(seed0, k * 7 + 2) < 0.5 ? 1 : -1, so = hash01(seed0, k * 7 + 3) < 0.5 ? 0.14 : -0.14;
+    const c = col(BIKE_COLORS[Math.floor(hash01(seed0, k * 7 + 4) * BIKE_COLORS.length)]);
+    const B = (f, y) => at(f * sgn, so, y);
+    for (const hub of [-0.52, 0.52]) {
+      for (let j = 0; j < 10; j++) {
+        const t0 = (j / 10) * Math.PI * 2, t1 = ((j + 1) / 10) * Math.PI * 2;
+        bar(w, B(hub + Math.cos(t0) * 0.33, 0.34 + Math.sin(t0) * 0.33), B(hub + Math.cos(t1) * 0.33, 0.34 + Math.sin(t1) * 0.33), 0.018, TIRE);
+      }
+    }
+    const rear = B(-0.52, 0.34), front = B(0.52, 0.34), bb = B(-0.08, 0.3), seat = B(-0.2, 0.86), head = B(0.36, 0.84), bars = B(0.4, 0.98);
+    bar(w, rear, bb, 0.016, c);
+    bar(w, bb, seat, 0.016, c);
+    bar(w, rear, B(-0.17, 0.74), 0.014, c);
+    bar(w, seat, head, 0.016, c);
+    bar(w, bb, head, 0.018, c);
+    bar(w, head, front, 0.016, c);
+    bar(w, head, bars, 0.014, IRON);
+    bar(w, at(0.4 * sgn, so - 0.22, 0.98), at(0.4 * sgn, so + 0.22, 0.98), 0.014, IRON);
+    box(w, B(-0.22, 0.9), [d[0] * 0.12, 0, d[1] * 0.12], [0, 0.025, 0], [u[0] * 0.06, 0, u[1] * 0.06], SEAT);
+  }
+  colliders.push([a[0], a[1], b[0], b[1]]);
+}
+
+const WRITERS = { bikeracks: writeBikeracks, shopstreet: writeShopstreet, trinite: writeTrinite, bollards: writeBollards, hgate: writeHospitalGate, lift: writeLift, pavilion: writePavilion, lock: writeLock, equestrian: writeEquestrian, wallFountain: writeWallFountain, capitainerie: writeCapitainerie, moorings: writeMoorings, riverfront: writeRiverfront, arcades: writeArcades, choir: writeChoir, ramblas: writeRamblas, basilica: writeBasilica, island: writeIsland, roundabout: writeRoundabout, portico: writePortico, donjon: writeDonjon, statue: writeStatue, dome: writeDome, chateau: writeChateau, stadium: writeStadium, cabanis: writeCabanis, coq: writeCoq, cross: writeCross, fastfood: writeFastfood, jgarden: writeJgarden, parterre: writeParterre };
 
 // 名所のモデルを作る。colliders: 足す当たり判定の円 [x, z, r] か線分 [ax, az, bx, bz]、
 // keepOut: 街の小物を置かない円 [x, z, r]（像の台・シャトー・ドーの柵の内側。monumentSolid）
