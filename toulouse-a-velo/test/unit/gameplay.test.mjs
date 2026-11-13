@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { TOURS, availableTours, loadRecord, medalFor, medalTimes, nextMedal, pickTour, saveRecord, splitDelta, tourLength } from '../../src/game/tours.js';
-import { planViolets } from '../../src/game/violets.js';
+import { beamFade, planViolets } from '../../src/game/violets.js';
 import { TravelStats, bearingLabel, stampDiscovery } from '../../src/ui/carnet.js';
 import { photoFileName } from '../../src/game/photomode.js';
 import { applySettings, collectSettings, urlSkips } from '../../src/game/settings.js';
@@ -231,4 +231,12 @@ test('CameraRig.applyLook: ±150° に収まり、離すと 0.6 秒でほぼ戻�
 
 test('写真モードのファイル名', () => {
   assert.equal(photoFileName(new Date(2026, 10, 2, 9, 5, 7)), 'toulouse-a-velo-20261102-090507.png');
+});
+
+test('beamFade: 光の柱は 12 m 以内では薄く、20 m から先は 1', () => {
+  assert.equal(beamFade(0), 0.15);
+  assert.equal(beamFade(12), 0.15);
+  assert.ok(beamFade(16) > 0.15 && beamFade(16) < 1);
+  assert.equal(beamFade(20), 1);
+  assert.equal(beamFade(200), 1);
 });

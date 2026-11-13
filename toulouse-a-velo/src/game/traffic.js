@@ -452,6 +452,17 @@ export class Traffic {
     this.drawTrams(bike);
   }
 
+  // いちばん近いトラム（描いている編成の車体の真ん中）{ x, z, d, moving }。無ければ null（街の音のトラムの走行音に使う）
+  nearestTram(bike) {
+    let best = null;
+    for (const t of this.trams) {
+      if (!t.visible) continue;
+      const d = Math.hypot(t.cx - bike.x, t.cz - bike.z);
+      if (!best || d < best.d) best = { x: t.cx, z: t.cz, d, moving: t.v > 0.3 };
+    }
+    return best;
+  }
+
   stats() {
     return { cyclists: this.riders.filter((r) => r.active).length, trams: this.trams.length, tramPaths: this.paths.length };
   }

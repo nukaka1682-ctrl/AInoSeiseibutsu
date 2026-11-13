@@ -148,7 +148,7 @@ export class Soundscape {
   }
 
   // ---------------------------------------------------------------- 単発の音
-  // name: 下の SOUNDS の名前。opts: { gain, pan（−1〜1）, when（ctx の時刻）, freq, lowpass } ほか
+  // name: 下の SOUNDS の名前。opts: { gain, pan（−1〜1）, when（ctx の時刻）, freq, lowpass, dest（つなぐ先。無ければ destination）} ほか
   play(name, opts = {}) {
     const fn = SOUNDS[name];
     if (!fn) return;
@@ -157,8 +157,9 @@ export class Soundscape {
     const out = ctx.createGain();
     out.gain.value = opts.gain ?? 1;
     const pan = this.panner(opts.pan);
-    if (pan) out.connect(pan).connect(this.dest);
-    else out.connect(this.dest);
+    const dest = opts.dest || this.dest;
+    if (pan) out.connect(pan).connect(dest);
+    else out.connect(dest);
     const end = fn(this, out, when, opts);
     // 鳴り終わったら切り離す（終わりの時刻に鳴らす無音の目印で知る）
     const mark = ctx.createConstantSource ? ctx.createConstantSource() : ctx.createOscillator();

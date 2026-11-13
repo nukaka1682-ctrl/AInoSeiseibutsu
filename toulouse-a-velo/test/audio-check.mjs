@@ -16,6 +16,8 @@ const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PAT
 // 場面: name, scene（audio.js の audioTest の形）, 条件
 const quiet = { oldTown: true, nearWater: 0, people: 0, park: 0 };
 const one = (name, arg) => ({ ambient: quiet, shots: [{ at: 0.1, name, arg }] });
+// 走行中の場面（ポーズ中と比べる）
+const riding = { ambient: { ...quiet, oldTown: false, people: 1, nearWater: 1 }, bike: { speed: 6, surface: 'paving', pedaling: true } };
 const SCENES = [
   ['1 止まっている・昼の旧市街・人なし', { ambient: quiet, bike: { speed: 0 } }, { maxRms: 0.02 }],
   ['2 石畳を 6 m/s', { ambient: quiet, bike: { speed: 6, surface: 'paving', pedaling: true } }, { moreThan: 1 }],
@@ -39,6 +41,8 @@ const SCENES = [
     shots: [{ at: 0.4, name: 'bell' }, { at: 0.5, name: 'event', arg: { type: 'tram-bell' } }, { at: 0.6, name: 'event', arg: { type: 'pigeons' } },
       { at: 0.7, name: 'fanfare', arg: 'gold' }, { at: 0.8, name: 'collect' }, { at: 0.9, name: 'chime' }, { at: 1, name: 'bump', arg: 1 }],
   }, { audible: true }],
+  ['8 走行中（石畳 6 m/s・人の多い川のそば）', riding, { audible: true }],
+  ['9 同じ場面でポーズ中', { ...riding, paused: true }, { atMost: [8, 0.3] }],
 ];
 
 let failed = false;
@@ -64,6 +68,7 @@ try {
     if (cond.maxRms != null && !(m < cond.maxRms)) why.push(`RMS ≥ ${cond.maxRms}`);
     if ((cond.audible || cond.moreThan || cond.lessThan) && !(m > 0.001)) why.push('無音');
     if (cond.moreThan && !(m > rmsOf(res[cond.moreThan - 1].r))) why.push(`場面 ${cond.moreThan} 以下`);
+    if (cond.atMost && !(m <= rmsOf(res[cond.atMost[0] - 1].r) * cond.atMost[1])) why.push(`場面 ${cond.atMost[0]} の ${cond.atMost[1] * 10} 割より大きい`);
     if (cond.lessThan && !(m < rmsOf(res[cond.lessThan - 1].r))) why.push(`場面 ${cond.lessThan} 以上`);
     if (why.length) failed = true;
     console.log(`| ${name} | ${r.rms[0].toFixed(4)} | ${r.rms[1].toFixed(4)} | ${r.peak.toFixed(3)} | ${r.nan ? 'あり' : 'なし'} | ${why.length ? `✘ ${why.join('・')}` : '✔'} |`);

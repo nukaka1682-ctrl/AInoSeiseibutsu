@@ -41,6 +41,12 @@ export class AudioFx {
     this.master = ctx.createGain();
     this.master.gain.value = this.muted ? 0 : this.volume;
     this.master.connect(ctx.destination);
+    // ポーズ中などに小さくする 2 つの束（setPaused）: 街の音・出来事・鐘（duck）と、自転車の音（路面・風・ブレーキ・チェーン。bikeBus）
+    this.duck = ctx.createGain();
+    this.duck.connect(this.master);
+    this.bikeBus = ctx.createGain();
+    this.bikeBus.connect(this.master);
+    if (this.paused) this.setPaused(true, true);
     // 風切り音: ホワイトノイズ → バンドパス
     const len = ctx.sampleRate * 2;
     const buf = ctx.createBuffer(1, len, ctx.sampleRate);
@@ -56,10 +62,10 @@ export class AudioFx {
     this.windFilter.Q.value = 0.6;
     this.windGain = ctx.createGain();
     this.windGain.gain.value = 0;
-    src.connect(this.windFilter).connect(this.windGain).connect(this.master);
+    src.connect(this.windFilter).connect(this.windGain).connect(this.bikeBus);
     src.start();
     this.initBike(ctx);
-    this.scape = new Soundscape(ctx, this.master);
+    this.scape = new Soundscape(ctx, this.duck);
   }
 
   // ① 自転車の音（路面・ブレーキ・チェーン）の節点を 1 回だけ作る。強さだけを update で変える
@@ -90,7 +96,7 @@ export class AudioFx {
       makeup.gain.value = SURFACE_MAKEUP[kind];
       const g = ctx.createGain();
       g.gain.value = 0;
-      loop(0.2 + SURFACES.indexOf(kind) * 0.4).connect(f).connect(makeup).connect(am).connect(g).connect(this.master);
+      loop(0.2 + SURFACES.indexOf(kind) * 0.4).connect(f).connect(makeup).connect(am).connect(g).connect(this.bikeBus);
       const s = { filter: f, am, gain: g, last: -1, lastFreq: -1, lastRumble: -1 };
       if (kind === 'paving') {
         // 石の継ぎ目の周期の振幅の揺れ（0.1〜1.0）
@@ -112,7 +118,7 @@ export class AudioFx {
     // ブレーキ: かすかな「キー」（2050 Hz と 2110 Hz の正弦波）
     this.brakeGain = ctx.createGain();
     this.brakeGain.gain.value = 0;
-    this.brakeGain.connect(this.master);
+    this.brakeGain.connect(this.bikeBus);
     for (const f of [2050, 2110]) {
       const o = ctx.createOscillator();
       o.frequency.value = f;
@@ -126,7 +132,7 @@ export class AudioFx {
     hp.frequency.value = 3000;
     this.chainAm = ctx.createGain();
     this.chainAm.gain.value = 0;
-    loop(1.7).connect(hp).connect(this.chainAm).connect(this.master);
+    loop(1.7).connect(hp).connect(this.chainAm).connect(this.bikeBus);
     this.chainOsc = ctx.createOscillator();
     this.chainOsc.type = 'sawtooth';
     this.chainOsc.frequency.value = 4;
@@ -148,6 +154,22 @@ export class AudioFx {
   setMuted(m) {
     this.muted = m;
     if (this.master) this.master.gain.value = m ? 0 : this.volume;
+  }
+
+  // ポーズ・地図・手帳・写真モードの間: 街の音などは 0.4 秒かけて 0.2 倍に、自転車の音（路面・風・ブレーキ・チェーン）は 0 に。
+  // off で戻す。UI の音・シャッター音は小さくしない（master に直接つなぐ）。immediate: すぐに切り替える（音の確認用）
+  setPaused(on, immediate = false) {
+    this.paused = !!on;
+    if (!this.ctx || !this.duck) return;
+    const now = this.ctx.currentTime;
+    for (const [g, v] of [[this.duck.gain, on ? 0.2 : 1], [this.bikeBus.gain, on ? 0 : 1]]) {
+      g.cancelScheduledValues(now);
+      if (immediate) g.setValueAtTime(v, now);
+      else {
+        g.setValueAtTime(g.value, now);
+        g.setTargetAtTime(v, now, 0.4 / 3); // 時定数 0.133 秒: 0.4 秒で 95 %
+      }
+    }
   }
 
   // 音量（0〜1）
@@ -251,12 +273,12 @@ export class AudioFx {
 
   // 画面のボタン・地図・手帳・ポーズを開く / 閉じる: ごく小さな「コッ」
   ui() {
-    this.scape?.play('ui', { gain: 0.06 });
+    this.scape?.play('ui', { gain: 0.06, dest: this.master }); // ポーズ中も小さくしない
   }
 
   // 写真モードの保存: シャッター音
   shutter() {
-    this.scape?.play('shutter', { gain: 0.25 });
+    this.scape?.play('shutter', { gain: 0.25, dest: this.master });
   }
 
   tick() {
@@ -389,6 +411,7 @@ export async function audioTest(scene = {}) {
   fx.init(ctx);
   const bk = { x: 0, z: 0, heading: 0, crank: 0, ...(scene.bike || {}) };
   if (scene.ambient) fx.setAmbient({ heading: 0, ...scene.ambient }, true);
+  if (scene.paused) fx.setPaused(true, true);
   const lms = scene.bells ? [{ id: scene.bells.id, x: scene.bells.d ?? 100, z: 0 }] : null;
   const step = (128 * 12) / rate; // 更新の間隔（描く単位 128 サンプルの倍数）
   // 鐘の場面は、その教会の 1 回目の鳴り始めの 0.5 秒前から描く

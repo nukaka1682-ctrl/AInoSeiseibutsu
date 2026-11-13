@@ -156,3 +156,27 @@ test('stopsAlong: 450 m ごと（線の終わりのそばは除く）', () => {
   assert.deepEqual(stopsAlong(940), [450]);
   assert.deepEqual(stopsAlong(300), []);
 });
+
+test('Traffic.nearestTram: 描いている編成のいちばん近い車体の真ん中。止まっていれば moving: false。無ければ null', async () => {
+  const { Traffic } = await import('../../src/game/traffic.js');
+  const { ambientInfo } = await import('../../src/game/ambientinfo.js');
+  const { LocalProjection } = await import('../../src/geo.js');
+  const proj = new LocalProjection(43.6, 1.44);
+  const tr = new Traffic({ proj, parsed: { rails: [], roads: [] } }, { cyclists: 0 });
+  const bike = { x: 0, z: 0, heading: 0, speed: 0 };
+  assert.equal(tr.nearestTram(bike), null); // 線路なし
+  tr.trams = [
+    { visible: true, cx: 30, cz: 40, v: 6 },
+    { visible: true, cx: -6, cz: 8, v: 0 }, // 停留所で止まっている
+    { visible: false, cx: 1, cz: 1, v: 9 }, // 描いていない（遠い・タイルがまだ）
+  ];
+  assert.deepEqual(tr.nearestTram(bike), { x: -6, z: 8, d: 10, moving: false });
+  tr.trams[1].v = 2;
+  assert.equal(tr.nearestTram(bike).moving, true);
+  // 止まっているトラムでは街の音の走行音を鳴らさない
+  tr.trams[1].v = 0;
+  const world = { proj, landmarks: [], traffic: tr };
+  assert.equal(ambientInfo(world, bike).tram, null);
+  tr.trams[1].v = 5;
+  assert.equal(ambientInfo(world, bike).tram.d, 10);
+});

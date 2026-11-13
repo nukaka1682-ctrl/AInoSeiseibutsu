@@ -13,7 +13,8 @@ export function photoFileName(date = new Date()) {
 }
 
 export class PhotoMode {
-  // ctx: { camera, canvas, keys（押されているキーの Set）, getWorld(), getBike(), render()（1 回描く）, onOpen(), onClose() }
+  // ctx: { camera, canvas, keys（押されているキーの Set）, getWorld(), getBike(), render()（1 回描く）, onOpen(), onClose(),
+  //        onSave()（保存するとき。シャッター音など）}
   constructor(ctx) {
     this.ctx = ctx;
     this.active = false;
@@ -216,6 +217,7 @@ export class PhotoMode {
 
   save() {
     if (!this.active) return;
+    this.ctx.onSave?.();
     // toBlob は呼んだ時点の絵を写す（描いた直後に同じ呼び出しの中で呼ぶ）
     this.grab((c) => c.toBlob((blob) => {
       if (!blob) return;

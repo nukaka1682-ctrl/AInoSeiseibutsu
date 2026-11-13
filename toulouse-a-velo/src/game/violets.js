@@ -10,7 +10,14 @@ const TRIES = 8;
 const DRAW_RANGE = 220; // 自転車からこの距離までの花を描く
 const PICK_RADIUS = 2.4; // 集める距離（水平）
 const PICK_DY = 3; // 高さの差（橋の上と下を取り違えない）
-const FLOAT_Y = 1.0;
+const FLOAT_Y = 1.3; // 浮く高さ（m）
+// 花の大きさ: 形は直径 0.45 m で作り、0.8 m に拡大して描く（0.45 m では 8 m 先でやっと見えた: c-violet-near.jpg）
+const FLOWER_SCALE = 0.8 / 0.45;
+// 花の上の淡い光の柱（遠くから「あそこにある」と分かるように）: 高さ 9 m・幅 0.5 m の板 2 枚の十字
+const BEAM_H = 9, BEAM_W = 0.5;
+const BEAM_NEAR = 12; // 自転車からこの距離（m）より近いと柱を薄く（近くでは花そのものを見せる）
+const BEAM_PERIOD = 2.4; // 明滅の周期（秒）。明るさ 0.7〜1.0
+const POP_TIME = 0.35; // 集めたとき: この秒数で上へ 1 m 跳ね、回りながら小さくなって消える
 
 // 文字列 → 32 bit の種（FNV-1a）
 function hashString(s) {
@@ -94,10 +101,35 @@ function flowerGeometry() {
   return g;
 }
 
+// 光の柱の形: 縦長の板 2 枚の十字（下が濃いスミレ色、上へ黒 = 加算合成で見えなくなる）
+function beamGeometry() {
+  const pos = [], col = [];
+  const c = new THREE.Color('#a070e0');
+  for (const [ax, az] of [[1, 0], [0, 1]]) {
+    const w = BEAM_W / 2;
+    const v = [[-w * ax, 0, -w * az, 1], [w * ax, 0, w * az, 1], [w * ax, BEAM_H, w * az, 0], [-w * ax, 0, -w * az, 1], [w * ax, BEAM_H, w * az, 0], [-w * ax, BEAM_H, -w * az, 0]];
+    for (const [x, y, z, k] of v) {
+      pos.push(x, y, z);
+      col.push(c.r * k, c.g * k, c.b * k);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  return g;
+}
+
+// 自転車からの距離 d（m）での柱の濃さ: 12 m 以内は 0.15、そこから 8 m かけて 1 へ
+export function beamFade(d) {
+  return d <= BEAM_NEAR ? 0.15 : Math.min(1, 0.15 + ((d - BEAM_NEAR) / 8) * 0.85);
+}
+
 const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
 const _p = new THREE.Vector3();
 const _s = new THREE.Vector3(1, 1, 1);
+const _fs = new THREE.Vector3(FLOWER_SCALE, FLOWER_SCALE, FLOWER_SCALE);
+const _c = new THREE.Color();
 const _up = new THREE.Vector3(0, 1, 0);
 
 export class Violets {
@@ -110,18 +142,24 @@ export class Violets {
     this.collected = new Set([...collectedIds].filter((id) => valid.has(id)));
     this.pending = items.filter((v) => !this.collected.has(v.id)); // まだ集めていない花（地図にも描く）
     this.picked = []; // update の戻り値（使い回す）
+    this.popping = []; // 集めた直後に跳ねて消える花 { v, t }
     this.group = new THREE.Group();
     this.group.name = 'violets';
     const n = Math.max(1, items.length);
     // 日陰・夜でもはっきり見えるように光の影響を受けない材質
     this.flowers = new THREE.InstancedMesh(flowerGeometry(), new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide, fog: true }), n);
-    const ring = new THREE.RingGeometry(0.42, 0.6, 32);
+    const ring = new THREE.RingGeometry(0.66, 0.9, 32);
     ring.rotateX(-Math.PI / 2);
     this.rings = new THREE.InstancedMesh(ring, new THREE.MeshBasicMaterial({
       color: '#b48ce6', transparent: true, opacity: 0.45, depthWrite: false, side: THREE.DoubleSide, fog: true,
       polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4,
     }), n);
-    for (const m of [this.flowers, this.rings]) {
+    this.beams = new THREE.InstancedMesh(beamGeometry(), new THREE.MeshBasicMaterial({
+      vertexColors: true, transparent: true, opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: true,
+    }), n);
+    for (let i = 0; i < n; i++) this.beams.setColorAt(i, _c.setScalar(1)); // 花ごとの濃さ（近いと薄く）
+    this.beams.instanceColor.setUsage(THREE.DynamicDrawUsage);
+    for (const m of [this.flowers, this.rings, this.beams]) {
       m.frustumCulled = false; // 花は街じゅうに散らばるので、まとめた箱では切れない
       m.count = 0;
       m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -156,10 +194,12 @@ export class Violets {
       if (Math.abs(dx) > DRAW_RANGE || Math.abs(dz) > DRAW_RANGE || dx * dx + dz * dz > DRAW_RANGE * DRAW_RANGE) continue;
       const y = this.groundY(v);
       if (y == null) continue;
-      if (dx * dx + dz * dz < PICK_RADIUS * PICK_RADIUS && Math.abs(bike.y - y) < PICK_DY) {
+      const d2 = dx * dx + dz * dz;
+      if (d2 < PICK_RADIUS * PICK_RADIUS && Math.abs(bike.y - y) < PICK_DY) {
         this.collected.add(v.id);
         this.picked.push(v);
         this.pending.splice(i, 1);
+        this.popping.push({ v, t: 0 });
         i--;
         continue;
       }
@@ -167,16 +207,37 @@ export class Violets {
       const ph = (v.x * 0.37 + v.z * 0.71) % (Math.PI * 2);
       _q.setFromAxisAngle(_up, time * 0.8 + ph);
       _p.set(v.x, y + FLOAT_Y + Math.sin(time * 2 + ph) * 0.08, v.z);
-      this.flowers.setMatrixAt(n, _m.compose(_p, _q, _s));
+      this.flowers.setMatrixAt(n, _m.compose(_p, _q, _fs));
       _q.identity();
       _p.set(v.x, y + 0.04, v.z);
       this.rings.setMatrixAt(n, _m.compose(_p, _q, _s));
+      this.beams.setMatrixAt(n, _m);
+      this.beams.setColorAt(n, _c.setScalar(beamFade(Math.sqrt(d2))));
       n++;
     }
-    for (const m of [this.flowers, this.rings]) {
-      m.count = n;
-      m.instanceMatrix.needsUpdate = true;
+    const nb = n;
+    // 集めた花: 0.35 秒で上へ 1 m 跳ね、速く回りながら小さくなって消える（輪と柱はすぐ消す）
+    for (let i = 0; i < this.popping.length; i++) {
+      const p = this.popping[i];
+      p.t += dt;
+      const k = p.t / POP_TIME;
+      if (k >= 1 || p.v.y == null) {
+        this.popping.splice(i--, 1);
+        continue;
+      }
+      const ease = 1 - (1 - k) * (1 - k);
+      _q.setFromAxisAngle(_up, time * 0.8 + k * 9);
+      _p.set(p.v.x, p.v.y + FLOAT_Y + ease, p.v.z);
+      const sc = FLOWER_SCALE * (1 - k);
+      this.flowers.setMatrixAt(n++, _m.compose(_p, _q, _s.set(sc, sc, sc)));
+      _s.set(1, 1, 1);
     }
+    this.flowers.count = n;
+    this.rings.count = nb;
+    this.beams.count = nb;
+    for (const m of [this.flowers, this.rings, this.beams]) m.instanceMatrix.needsUpdate = true;
+    this.beams.instanceColor.needsUpdate = true;
+    this.beams.material.opacity = 0.85 + 0.15 * Math.sin((time * 2 * Math.PI) / BEAM_PERIOD); // 0.7〜1.0 でゆっくり明滅
     return this.picked;
   }
 

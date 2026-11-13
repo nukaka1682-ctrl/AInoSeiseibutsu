@@ -428,7 +428,7 @@ function updateModeHud() {
   const t = state.tour;
   if (state.mode === 'tour' && t) {
     const m = t.times && medalFor(t.time, t.times); // 今ねらえるメダル
-    $('hud-mode').innerHTML = `🏁 ${t.name || '名所めぐり'} ${t.index}/${t.list.length - 1}<br>⏱ ${fmtTime(t.time)}${m ? `　${MEDAL_ICON[m]} ${fmtClock(t.times[m])} まで` : ''}`;
+    $('hud-mode').innerHTML = `🏁 ${t.name || '名所めぐり'} ${Math.min(t.index, t.list.length - 1)}/${t.list.length - 1}<br>⏱ ${fmtTime(t.time)}${m ? `　${MEDAL_ICON[m]} ${fmtClock(t.times[m])} まで` : ''}`;
   } else {
     const n = state.world?.landmarks.length || 0;
     const d = state.world?.landmarks.filter((l) => l.discovered).length || 0;
@@ -836,13 +836,8 @@ const photo = new PhotoMode({
     show('hud');
     rig.initialized = false; // カメラの追従を元に戻す
   },
+  onSave: () => audio.shutter(), // 保存のときにシャッター音
 });
-// 保存のときにシャッター音（PhotoMode の保存は this.save() を通る）
-const photoSave = photo.save.bind(photo);
-photo.save = () => {
-  if (photo.active) audio.shutter();
-  photoSave();
-};
 function openPhoto(open) {
   if (open) {
     if (state.phase === 'paused') togglePause(false);
@@ -978,6 +973,7 @@ function watchFps(now) {
 }
 
 // ---------------------------------------------------------------- ループ
+const QUIET_PHASES = new Set(['paused', 'map', 'carnet', 'photo']);
 let last = performance.now();
 function frame(now) {
   requestAnimationFrame(frame);
@@ -989,6 +985,9 @@ function frame(now) {
     watchFps(now);
   }
   if (state.world && state.phase === 'photo') photo.update(dt);
+  // ポーズ・地図・手帳・写真モードの間は音を小さく（phase が変わったときだけ切り替える）
+  const quiet = QUIET_PHASES.has(state.phase);
+  if (quiet !== !!audio.paused) audio.setPaused(quiet);
   if (state.world) {
     fitSunShadow();
     sky.position.copy(camera.position); // 空の箱はカメラと一緒に動かす（5 km のエリアの端でも空が切れないように）

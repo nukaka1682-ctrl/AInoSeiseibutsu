@@ -48,10 +48,10 @@ export function ambientInfo(world, bike, state = {}) {
       }
     }
   }
-  // 近くのトラム（計画 D の world.traffic。無ければ鳴らさない）
+  // 近くのトラム（計画 D の world.traffic。無ければ鳴らさない。停留所・終点で止まっているトラムも走行音は鳴らさない）
   let tram = null;
   const t = world.traffic?.nearestTram?.(bike);
-  if (t && Number.isFinite(t.x) && Number.isFinite(t.z)) {
+  if (t && t.moving !== false && Number.isFinite(t.x) && Number.isFinite(t.z)) {
     const dx = t.x - x, dz = t.z - z;
     tram = { d: Number.isFinite(t.d) ? t.d : Math.hypot(dx, dz), dx, dz };
   }

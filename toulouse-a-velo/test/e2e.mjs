@@ -219,7 +219,8 @@ try {
   // ---- タイトル画面: コースの選択と設定の保存（読み込み直すと戻る。opt-refresh は戻さない）----
   const tp = await browser.newPage({ viewport: { width: 1280, height: 720 } });
   tp.on('pageerror', (e) => errors.push(String(e)));
-  await tp.goto('http://localhost:4179/?area=light');
+  // ページの読み込み（模様の生成）はソフトウェア描画の機械で 30 秒ほどかかるので、待つ時間を長めに
+  await tp.goto('http://localhost:4179/?area=light', { timeout: 120000 });
   await tp.check('input[name=mode][value=tour]');
   await tp.selectOption('#opt-tour', 'garonne');
   await tp.evaluate(() => {
@@ -230,7 +231,7 @@ try {
     }
   });
   await tp.screenshot({ path: join(out, '15-title-tour.png') });
-  await tp.reload();
+  await tp.reload({ timeout: 120000 });
   const restored = await tp.evaluate(() => ({
     shadows: document.getElementById('opt-shadows').checked,
     refresh: document.getElementById('opt-refresh').checked,

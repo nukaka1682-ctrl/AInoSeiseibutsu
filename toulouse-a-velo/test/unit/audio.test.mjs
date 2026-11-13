@@ -134,6 +134,14 @@ test('ambientInfo: 水・堰・人・芝・時間帯・トラムを調べる（�
   assert.deepEqual([bare.nearWater, bare.weir, bare.people, bare.park, bare.night, bare.morning, bare.tram], [0, false, 0, 0, false, false, null]);
 });
 
+test('AudioFx.setPaused: AudioContext が無くても例外なし。状態を覚えておく', () => {
+  const a = new AudioFx();
+  a.setPaused(true);
+  assert.equal(a.paused, true);
+  a.setPaused(false, true);
+  assert.equal(a.paused, false);
+});
+
 test('AudioFx: 音量と消音を tav-audio に保存し、復元する（AudioContext が無くても例外なし）', () => {
   const data = new Map();
   const store = { get: (k, d) => (data.has(k) ? JSON.parse(data.get(k)) : d), set: (k, v) => data.set(k, JSON.stringify(v)) };
