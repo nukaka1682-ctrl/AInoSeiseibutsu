@@ -87,6 +87,7 @@ h1 em { color: var(--violet); }
 .choice input { margin-top: 4px; accent-color: var(--rose-dark); }
 .choice small { display: block; color: var(--muted); margin-top: 2px; }
 
+#opt-time { font: inherit; padding: 8px 10px; border: 2px solid #ead8cc; border-radius: 12px; background: #fff; color: var(--ink); }
 .settings { margin-top: 14px; color: var(--muted); }
 .settings label { display: block; margin: 6px 0 0 4px; }
 

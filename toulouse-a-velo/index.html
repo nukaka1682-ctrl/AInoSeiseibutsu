@@ -29,11 +29,20 @@
         </div>
         <label id="tour-pick" class="tour-pick hidden">コース <select id="opt-tour"></select></label>
 
+        <h2>時間帯</h2>
+        <select id="opt-time">
+          <option value="morning">朝</option>
+          <option value="afternoon" selected>午後（標準）</option>
+          <option value="golden">夕暮れ</option>
+          <option value="night">夜</option>
+        </select>
+
         <details class="settings">
           <summary>グラフィック設定</summary>
           <label><input type="checkbox" id="opt-shadows" checked /> 影を描画する</label>
           <label><input type="checkbox" id="opt-hires" /> 高解像度（重い）</label>
           <label><input type="checkbox" id="opt-life" checked /> 街の人・ハト・自転車・トラムを出す</label>
+          <label><input type="checkbox" id="opt-photo" checked /> フォトリアル（物陰の暗さ・光のにじみ・なめらかな縁。重い）</label>
           <label><input type="checkbox" id="opt-refresh" /> 地図データを再ダウンロードする</label>
           <label><input type="checkbox" id="opt-ign" /> IGN（フランス国土地理院）の地図だけを使う<br /><small class="muted">　OpenStreetMap のサーバーが混んでいてつながらないときに。建物の高さ・屋根は最も正確ですが、街路樹は推定になります</small></label>
         </details>
@@ -126,6 +135,7 @@
         <button id="resume-btn" class="primary">再開 (Esc)</button>
         <button id="mute-btn">音: オン</button>
         <label class="volume-row">音量 <input type="range" id="volume" min="0" max="100" step="1" value="70" aria-label="音量" /></label>
+        <button id="time-btn">時間帯: 午後</button>
         <button id="title-btn">タイトルに戻る</button>
         <button id="carnet-btn">📖 旅の手帳</button>
         <button id="photo-btn">📷 写真モード</button>
