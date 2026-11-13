@@ -16,6 +16,7 @@ import { CAMERA_LABELS, CameraRig } from './game/camera.js';
 import { Input } from './game/input.js';
 import { AudioFx } from './game/audio.js';
 import { CityLife } from './game/citylife.js';
+import { Traffic } from './game/traffic.js';
 import { animateBeacon, createBeacon, distanceToLandmark } from './game/landmarks.js';
 import { MapRenderer, drawFullMap, drawMinimap } from './ui/minimap.js';
 import { setupScene } from './world/scene.js';
@@ -228,6 +229,9 @@ function finishWorld(world) {
   if ($('opt-life')?.checked !== false && params.get('life') !== '0') {
     world.life = new CityLife(world, { people: 70, radius: 110 });
     world.group.add(world.life.group);
+    // 走るもの（ほかの自転車乗り・トラム）。同じ設定で切る
+    world.traffic = new Traffic(world, { cyclists: 6 });
+    world.group.add(world.traffic.group);
   }
   // スミレ集め（自由走行のとき。集めた花はエリアごとに保存）
   const okPoint = (x, z) => !world.collision.blockedByWater(x, z) && !world.collision.outOfBounds(x, z);
@@ -519,6 +523,11 @@ function update(dt, forced) {
   state.playTime += dt;
   w.life?.update(dt, bike, camera);
   for (const ev of w.life?.events.splice(0) || []) if (ev.type === 'person') audio.bump(0.25);
+  if (w.traffic) {
+    w.traffic.night = state.timeOfDay === 'night';
+    w.traffic.update(dt, bike, camera);
+    w.traffic.events.splice(0); // ベル・トラムの音はまだ鳴らさない（音は別の作業で付ける）
+  }
   travel.tick(dt, bike);
 
   for (const ev of bike.events.splice(0)) {

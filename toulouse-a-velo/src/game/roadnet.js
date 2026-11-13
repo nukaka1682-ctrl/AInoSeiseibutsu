@@ -123,6 +123,20 @@ export class RoadNetwork {
     return i;
   }
 
+  // 節点 n（交差点・道の折れ点）につながる、自転車で走れる区間（ほかの自転車乗りが次の道を選ぶ。traffic.js）。
+  // 表は初めて呼ばれたときに作る
+  segsAt(n) {
+    if (!this.nodeSegs) {
+      this.nodeSegs = this.nx.map(() => []);
+      for (const s of this.segs) {
+        if (s.ia < 0) continue;
+        this.nodeSegs[s.ia].push(s);
+        this.nodeSegs[s.ib].push(s);
+      }
+    }
+    return this.nodeSegs[n] || [];
+  }
+
   // (x,z) に最も近い道路の線分
   nearestSegment(x, z, maxDist = 30, filter = null) {
     let best = null;
