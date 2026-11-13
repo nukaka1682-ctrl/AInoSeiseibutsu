@@ -238,3 +238,29 @@ test('バス停の待合所は旧市街の外の幹線道路の広い歩道に�
   assert.equal(old.shelters.length, 0, '旧市街に待合所はない');
   assert.ok(old.columns.length > 0, '旧市街のモリス柱');
 });
+
+test('旧市街の壁付けの角灯（夜の明かり）: 壁のある側だけ、22 m おきに左右交互、広場の中・旧市街の外には置かない', () => {
+  // 東西の通り（幅 8 m）の北側に建物の壁（z = -7 より北）。南側は建物なし
+  const solid = (x, z) => z < -7 && z > -40;
+  const out = planFurniture({ ...town(() => true).opts, solid });
+  const lamps = out.wallLamps.filter((l) => Math.abs(l.z) < 12);
+  assert.ok(lamps.length >= 3, `${lamps.length} 個`);
+  for (const l of lamps) {
+    assert.ok(l.z < -6.4 && l.z > -7.4, `壁の手前 ${l.z}`);
+    assert.ok(!(l.x < -30 && l.x > -90 && l.z > 4), '広場の中ではない');
+    // 位置は道の始点（x = -200）からの距離 22 × (k + 1/2) m で決まる。北側は k が奇数か偶数の片方だけ
+    const k = (l.x + 200) / 22 - 0.5;
+    assert.ok(Math.abs(k - Math.round(k)) < 1e-6, `位置 ${l.x}`);
+  }
+  assert.equal(new Set(lamps.map((l) => Math.round((l.x + 200) / 22 - 0.5) % 2)).size, 1, '左右交互（壁のある側は 1 つおき）');
+  assert.equal(planFurniture({ ...town(() => false).opts, solid }).wallLamps.length, 0, '旧市街の外にはない');
+  // FurnitureSet は灯具の位置（高さ 4 m）だけを覚え、模型は作らない
+  const fs = new FurnitureSet();
+  fs.addLamps('wall-lamps', [{ x: 1, y: 2, z: 3, a: 0 }]);
+  assert.deepEqual(fs.lampHeads[0].slice(0, 6), [1, 6, 3, 2, 4, 2]);
+  assert.equal(fs.group.children.length, 0);
+  // ポン・ヌフの街灯（橋が覚えた灯具の世界座標）。タイルの範囲の外の物は足さない
+  fs.addBridgeLamps([{ x: 10, z: 0, y: 5, head: 11.6 }, { x: 500, z: 0, y: 5, head: 11.6 }], { minX: 0, minZ: -10, maxX: 100, maxZ: 10 });
+  assert.equal(fs.lampHeads.length, 2);
+  assert.deepEqual(fs.lampHeads[1].slice(0, 5), [10, 11.6, 0, 5, 11.6 - 5]);
+});

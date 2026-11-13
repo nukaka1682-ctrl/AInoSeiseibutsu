@@ -177,6 +177,7 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
     curbs: ground.curbs, inOldTown: inCore, heightAt: liftAt, terrain, onRoad: (x, z, m) => roadnet.onRoad(x, z, m),
     solid: (x, z) => insideBuilding(x, z) || inWater(x, z) || onMonument(x, z), trunks: trees.userData.trunks,
   }, collision);
+  furniture.addBridgeLamps(ground.group.getObjectByName('bridges')?.userData.lamps); // ポン・ヌフの街灯の夜の明かり
   group.add(furniture.group);
 
   const surfaceAt = makeSurfaceAt(parsed, roadnet);

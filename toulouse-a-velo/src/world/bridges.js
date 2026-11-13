@@ -780,6 +780,7 @@ export function buildBridges(bridges, allRoads, mats, waterDepthAt, clipRect, te
     m.renderOrder = order; // 標示は橋面の後に描く（深度を書かない）
     g.add(m);
   }
+  g.userData.lamps = body.lampHeads || []; // ポン・ヌフの街灯の灯具（夜の明かり。assemble.js・stream.js が小物の明かりに足す）
   if (!body.empty) {
     const m = new THREE.Mesh(body.toGeometry(), mats.bridge);
     m.castShadow = true;
@@ -1542,6 +1543,9 @@ function writeLamp(w, x, z, [ux, uz], baseY, [ix, iz], stone = w) {
   box(lx, lz, ya - 0.64, ya - 0.6, 0.2, 0.2, COL.brass);
   box(lx, lz, ya - 0.76, ya - 0.64, 0.19, 0.19, COL.globe);
   box(lx, lz, ya - 0.84, ya - 0.76, 0.08, 0.08, COL.lamp);
+  // 夜の明かり（furniture.js の光の玉と光のたまり）のために、灯具のガラスの中心と足元の世界の高さを覚える（橋面に載せる w.map があれば通す）
+  const wy = (px, py, pz) => (w.map ? w.map(px, py, pz) : py);
+  (w.lampHeads ||= []).push({ x: lx, z: lz, y: wy(x, y0, z), head: wy(lx, ya - 0.5, lz) });
 }
 
 function writeGlobe(w, x, y, z, r, color) {
