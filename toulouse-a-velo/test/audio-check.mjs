@@ -68,7 +68,9 @@ try {
     if (cond.maxRms != null && !(m < cond.maxRms)) why.push(`RMS ≥ ${cond.maxRms}`);
     if ((cond.audible || cond.moreThan || cond.lessThan) && !(m > 0.001)) why.push('無音');
     if (cond.moreThan && !(m > rmsOf(res[cond.moreThan - 1].r))) why.push(`場面 ${cond.moreThan} 以下`);
-    if (cond.atMost && !(m <= rmsOf(res[cond.atMost[0] - 1].r) * cond.atMost[1])) why.push(`場面 ${cond.atMost[0]} の ${cond.atMost[1] * 10} 割より大きい`);
+    // atMost: [場面の番号, 割合]（場面の名前の先頭の番号で探す。6a〜6j があるので並びの位置とは違う）
+    const ref = cond.atMost && res.find((x) => x.name.startsWith(`${cond.atMost[0]} `));
+    if (cond.atMost && !(m <= rmsOf(ref.r) * cond.atMost[1])) why.push(`場面 ${cond.atMost[0]} の ${cond.atMost[1] * 10} 割より大きい`);
     if (cond.lessThan && !(m < rmsOf(res[cond.lessThan - 1].r))) why.push(`場面 ${cond.lessThan} 以上`);
     if (why.length) failed = true;
     console.log(`| ${name} | ${r.rms[0].toFixed(4)} | ${r.rms[1].toFixed(4)} | ${r.peak.toFixed(3)} | ${r.nan ? 'あり' : 'なし'} | ${why.length ? `✘ ${why.join('・')}` : '✔'} |`);

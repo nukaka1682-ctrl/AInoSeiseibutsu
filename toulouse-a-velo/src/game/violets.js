@@ -15,6 +15,7 @@ const FLOAT_Y = 1.3; // 浮く高さ（m）
 const FLOWER_SCALE = 0.8 / 0.45;
 // 花の上の淡い光の柱（遠くから「あそこにある」と分かるように）: 高さ 9 m・幅 0.5 m の板 2 枚の十字
 const BEAM_H = 9, BEAM_W = 0.5;
+const BEAM_BASE = 0.45; // 柱の根元: 花の真ん中からこれだけ上（花の上端のすぐ上）
 const BEAM_NEAR = 12; // 自転車からこの距離（m）より近いと柱を薄く（近くでは花そのものを見せる）
 const BEAM_PERIOD = 2.4; // 明滅の周期（秒）。明るさ 0.7〜1.0
 const POP_TIME = 0.35; // 集めたとき: この秒数で上へ 1 m 跳ね、回りながら小さくなって消える
@@ -211,7 +212,9 @@ export class Violets {
       _q.identity();
       _p.set(v.x, y + 0.04, v.z);
       this.rings.setMatrixAt(n, _m.compose(_p, _q, _s));
-      this.beams.setMatrixAt(n, _m);
+      // 柱は花の上から（地面から立てると、近くで花が光に埋もれる: f2-violet-8m.jpg）
+      _p.y = y + FLOAT_Y + BEAM_BASE;
+      this.beams.setMatrixAt(n, _m.compose(_p, _q, _s));
       this.beams.setColorAt(n, _c.setScalar(beamFade(Math.sqrt(d2))));
       n++;
     }
