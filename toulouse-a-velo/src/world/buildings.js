@@ -559,7 +559,7 @@ export function createBuildingMaterials(tex) {
     tower: useFloodlight(std(tex.tower), '0.55'), // サン・セルナン・ジャコバンの八角形の鐘楼（夜はライトアップ）
     // 名所の専用モデル（monuments.js）: レンガ・ルーバーなどの区画のテクスチャ、金属（ドーム・屋根・鉄柵・庇）、
     // 広場に埋め込んだブロンズ（地面より手前に出して描く。低い視点で暗い空を映して黒く見えないよう、金属感は控えめ）
-    monument: useFloodlight(std(tex.monument, { roughness: 0.88 }), '0.6'), // 夜はライトアップ（サン・セルナンなど）
+    monument: useFloodlight(std(tex.monument, { roughness: 0.88 }), '0.45'), // 夜はライトアップ（サン・セルナンなど）
     monumentMetal: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.42, metalness: 0.55 }),
     monumentInlay: new THREE.MeshStandardMaterial({
       vertexColors: true, roughness: 0.55, metalness: 0.25, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -8,
