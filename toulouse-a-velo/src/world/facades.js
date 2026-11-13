@@ -192,16 +192,37 @@ function surround(ctx, st, x, y, w, h, rnd, arched) {
 }
 
 // 夜の窓の明かりのマスク: makeFacadeAtlases がアトラスを描くあいだだけ、ガラスの範囲を白で塗るもう 1 枚のキャンバス
-let litCtx = null;
+// R: 明かりの強さ（ガラス = 255。店は上 2/3 が明るく下が暗い）、B: ガラスの種類（0 窓・128 店のショーウィンドウ・255 扉の上の明かり取り）。
+// litKind は描く側が店・扉の前に切り替える（アトラスの絵の乱数 rnd は使わない: 昼の絵を変えないように）
+let litCtx = null, litKind = 0;
+const litRnd = mulberry32(911);
 function litRect(ctx, x, y, w, h, color) {
   if (!litCtx) return;
   litCtx.setTransform(ctx.getTransform());
   litCtx.fillStyle = color;
   litCtx.fillRect(x, y, w, h);
 }
+function litGlass(ctx, x, y, w, h) {
+  if (!litCtx) return;
+  if (litKind !== 128) return litRect(ctx, x, y, w, h, `rgb(255,0,${litKind})`);
+  // 店: ガラスの上 2/3 を明るく、下へ暗く。商品の棚の影のような不規則な暗い帯
+  litCtx.setTransform(ctx.getTransform());
+  const g = litCtx.createLinearGradient(0, y, 0, y + h);
+  g.addColorStop(0, 'rgb(255,0,128)');
+  g.addColorStop(0.62, 'rgb(235,0,128)');
+  g.addColorStop(0.8, 'rgb(110,0,128)');
+  g.addColorStop(1, 'rgb(70,0,128)');
+  litCtx.fillStyle = g;
+  litCtx.fillRect(x, y, w, h);
+  for (let i = 0; i < 4; i++) {
+    const yy = y + h * (0.2 + 0.6 * litRnd()), xx = x + w * 0.6 * litRnd();
+    litCtx.fillStyle = `rgba(0,0,128,${0.25 + 0.3 * litRnd()})`;
+    litCtx.fillRect(xx, yy, w * (0.25 + 0.4 * litRnd()), 3 + 6 * litRnd());
+  }
+}
 
 function glass(ctx, x, y, w, h, rnd, curtains) {
-  litRect(ctx, x, y, w, h, '#fff');
+  litGlass(ctx, x, y, w, h);
   const g = ctx.createLinearGradient(x, y, x + w * 0.3, y + h);
   g.addColorStop(0, '#6d7f8c');
   g.addColorStop(0.45, '#33404b');
@@ -538,7 +559,9 @@ function arcade(ctx, st, rnd) {
     ctx.clip();
     ctx.fillStyle = '#2b2522';
     ctx.fillRect(cx - r, spring - r, r * 2, CELL);
+    litKind = 128; // アーケードの奥の店
     glass(ctx, cx - r * 0.62, spring - 22, r * 1.24, CELL - spring + 6, rnd, false);
+    litKind = 0;
     ctx.fillStyle = 'rgba(25,20,18,0.55)';
     ctx.fillRect(cx - r, spring - r, r * 2, CELL);
     const g = ctx.createLinearGradient(0, spring - r, 0, spring);
@@ -572,7 +595,9 @@ function shopRow(ctx, st, rnd) {
     ctx.fillRect(x, 18, w, CELL - 18);
     ctx.fillStyle = 'rgba(255,255,255,0.7)';
     for (let i = 0; i < 7; i++) ctx.fillRect(x + 30 + i * 18, 30, 12, 10);
+    litKind = 128;
     glass(ctx, x + 8, 56, w - 16, CELL - 56 - 6, rnd, false);
+    litKind = 0;
     ctx.fillStyle = 'rgba(240,225,190,0.22)';
     ctx.fillRect(x + 14, CELL - 100, w - 28, 60);
     ctx.fillStyle = st.shop;
@@ -666,7 +691,9 @@ function drawGround(ctx, st, rnd) {
     ctx.fillRect(x, 26, w, CELL - 26);
     ctx.fillStyle = 'rgba(255,255,255,0.75)';
     for (let i = 0; i < 9; i++) ctx.fillRect(x + 40 + i * 15, 38, 10, 10);
+    litKind = 128;
     glass(ctx, x + 12, 66, w - 24, CELL - 66 - 30, rnd, false);
+    litKind = 0;
     ctx.fillStyle = 'rgba(240,220,170,0.25)';
     ctx.fillRect(x + 20, CELL - 90, w - 40, 50);
     ctx.fillStyle = st.shop;
@@ -693,7 +720,9 @@ function drawGround(ctx, st, rnd) {
     ctx.fillRect(x - 16, y - 16, w + 32, h + 16);
     ctx.fillStyle = STONE;
     ctx.fillRect(x + w / 2 - 9, y - 18, 18, 22);
+    litKind = 255; // 扉の上の明かり取り（点ける割合を少なく）
     glass(ctx, x, y, w, 40, rnd, false);
+    litKind = 0;
     ctx.fillStyle = '#2a2a2a';
     for (let xx = x + 8; xx < x + w; xx += 12) ctx.fillRect(xx, y, 2, 40);
     ctx.fillStyle = st.door;
@@ -731,8 +760,8 @@ export function stylePlainColor(style) {
   return st && st.wall !== 'brick' ? st.plaster : null;
 }
 
-// 上の階用と 1 階用のアトラス（どちらも 1024 × 256·様式数）と、夜の窓の明かりのマスク（upperLit・groundLit。半分の解像度、
-// 白 = 明かりが透けるガラス）。マスクはアトラスのテクスチャの userData.lit にも入れる（useFacadeAtlas が読む）
+// 上の階用と 1 階用のアトラス（どちらも 1024 × 256·様式数）と、夜の窓の明かりのマスク（upperLit・groundLit。同じ解像度。
+// R = 明かりが透けるガラス、B = ガラスの種類）。マスクはアトラスのテクスチャの userData.lit にも入れる（useFacadeAtlas が読む）
 export function makeFacadeAtlases() {
   const make = (draw, seed) => {
     const [c, ctx] = canvas(W, CELL * FACADE_STYLES);
@@ -766,31 +795,27 @@ export function makeFacadeAtlases() {
     return t;
   };
   const upper = make(drawUpper, 17), ground = make(drawGround, 29);
-  upper.userData.litShare = 0.35; // 夜に明かりの点いている窓の割合（上の階）
-  ground.userData.litShare = 0.6; // 1 階（店）
+  // 夜に明かりの点いている窓の割合（窓。店のショーウィンドウ 45 %・扉の明かり取り 20 % はシェーダーでマスクの B から）
+  upper.userData.litShare = ground.userData.litShare = 0.35;
   return { upper, ground, upperLit: upper.userData.lit, groundLit: ground.userData.lit };
 }
 
-// 窓の明かりのマスクを仕上げる: ガラスの範囲（白）のうち、描き上がった絵がガラスの色（青灰色・暗い）のままの所だけを残す
-// （上に描いた白い窓枠・桟、アーチの窓の外のレンガ、明るい鎧戸を除く。カーテンは残す）。半分の解像度のテクスチャにする
-// （どちらも先に半分の解像度に縮めてから読み比べる。読み戻す画素を 1/4 にして、ページの読み込みを遅くしない）
+// 窓の明かりのマスクを仕上げる: ガラスの範囲のうち、描き上がった絵がガラスの色（青灰色）かカーテン（明るい灰白）のままの所だけを残す。
+// 上に描いた白い窓枠・桟、黒い鉄の手すり・格子、アーチの窓の外のレンガ、明るい鎧戸は除く（夜に、光る窓の前の黒い線として見える）。
+// 桟は 2〜4 画素と細いので、アトラスと同じ解像度のまま
 function litMask(atlas, mask) {
-  const w = atlas.width / 2, h = atlas.height / 2;
-  const [sa, actx] = canvas(w, h);
-  actx.drawImage(atlas, 0, 0, w, h);
-  const [half, hctx] = canvas(w, h);
-  hctx.drawImage(mask, 0, 0, w, h);
-  const a = actx.getImageData(0, 0, w, h).data;
-  const img = hctx.getImageData(0, 0, w, h), d = img.data;
+  const w = atlas.width, h = atlas.height;
+  const a = atlas.getContext('2d').getImageData(0, 0, w, h).data;
+  const mctx = mask.getContext('2d');
+  const img = mctx.getImageData(0, 0, w, h), d = img.data;
   for (let i = 0; i < d.length; i += 4) {
     if (!d[i]) continue;
-    const r = a[i], g = a[i + 1], b = a[i + 2];
-    const keep = b - r > -14 && r + g + b < 3 * 200;
-    if (!keep) d[i] = d[i + 1] = d[i + 2] = 0;
+    const r = a[i], g = a[i + 1], b = a[i + 2], sum = r + g + b;
+    const keep = b - r > 8 ? sum < 600 : b - r > -14 && sum > 250 && sum < 600; // ガラス（青み）か、カーテン（明るい灰白）
+    if (!keep) d[i] = 0;
   }
-  hctx.putImageData(img, 0, 0);
-  sa.width = 0; // 縮めたアトラスは捨てる
-  const t = new THREE.CanvasTexture(half);
+  mctx.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(mask);
   t.wrapS = THREE.RepeatWrapping;
   t.colorSpace = THREE.NoColorSpace;
   return t;
@@ -820,10 +845,10 @@ export function useContactShade(material) {
 // 汚れが残り、軒の陰にもなるので少し暗くする。足元の陰も付ける
 //
 // 夜の窓の明かり（facadeNight.value = 夜の割合。0 のときは足す光が 0 で、今と同じ色）: マスク（makeFacadeAtlases）のガラスの画素で、
-// 窓ごとの乱数がしきい値（上の階 35 %・1 階の店 60 %）より小さい窓だけ、暖色〜白の光（自分で光る色）を足す。
+// 窓ごとの乱数がしきい値（窓 35 %・店 45 %・扉の明かり取り 20 %）より小さい窓だけ、電球色・白・テレビの青白い光（自分で光る色）を足す。
 // 窓ごとの乱数 = ハッシュ（ベイの番号〔facadeUv.x の 1/4 ごと〕, 階, 窓の中心の世界座標 xz を 40 m で切った番号）。
 // 窓の中心は、壁に沿った u の画面上の微分から壁の向きを求めて戻す（40 m の境で窓が半分だけ光らないように）。
-// 窓の中は上が少し明るく、カーテンの所は少しむらにする
+// 光は窓の中の絵の明暗に合わせる（桟・枠・手すりはマスクにないので黒い線として残る）
 export const facadeNight = { value: 0 }; // 全部の壁の材料で共有する
 export function useFacadeAtlas(material) {
   const lit = material.map?.userData.lit;
@@ -862,18 +887,25 @@ export function useFacadeAtlas(material) {
         float litDux = dFdx(facadeUv.x), litDuy = dFdy(facadeUv.x);
         vec2 litDWx = dFdx(vFacadeXZ), litDWy = dFdy(vFacadeXZ);
         if (uNight > 0.0) {
-          float litM = textureGrad(facadeLit, atlasUv, dFdx(facadeUv) * gScale, dFdy(facadeUv) * gScale).r;
+          vec4 litS = textureGrad(facadeLit, atlasUv, dFdx(facadeUv) * gScale, dFdy(facadeUv) * gScale);
+          float litM = litS.r;
           if (litM > 0.004) {
             vec2 dWdu = abs(litDux) > abs(litDuy) ? litDWx / litDux : litDWy / litDuy; // 壁に沿った u の 1 あたりの世界座標（約 14 m）
             if (!(length(dWdu) < 30.0)) dWdu = vec2(0.0);
             float bay = floor(facadeUv.x * 4.0);
             vec2 cell = floor((vFacadeXZ + ((bay + 0.5) * 0.25 - facadeUv.x) * dWdu) / 40.0);
             float r = fract(sin(dot(vec4(bay, facadeFloor, cell), vec4(12.9898, 78.233, 37.719, 4.581))) * 43758.5453);
-            if (r < uLitShare) {
-              float r2 = fract(r * 173.31);
-              vec3 col = mix(vec3(1.0, 0.58, 0.25), vec3(1.0, 0.84, 0.64), r2);
-              float k = litM * uNight * (0.7 + 0.45 * fract(facadeUv.y)) * (0.85 + 0.5 * dot(sampledDiffuseColor.rgb, vec3(0.3, 0.59, 0.11)));
-              facadeLitColor = col * k * mix(0.3, 0.55, fract(r2 * 7.0));
+            // 点ける割合: 扉の明かり取り 20 %・店 45 %（夜は閉まっている店が多い）・窓 uLitShare
+            float share = litS.b > 0.75 ? 0.2 : litS.b > 0.25 ? 0.45 : uLitShare;
+            if (r < share) {
+              float r2 = fract(r * 173.31 + bay * 0.37);
+              // 色: 電球色 #ffb45e（6 割）・少し白い #ffd9a8（3 割）・テレビの青白い #a8c4ff（1 割、暗め）
+              vec3 col = r2 < 0.6 ? vec3(1.0, 0.456, 0.112) : r2 < 0.9 ? vec3(1.0, 0.693, 0.392) : vec3(0.392, 0.552, 1.0) * 0.55;
+              // 明るさに、窓の中の絵の明暗を掛ける（ガラスの絵は上が明るい紺、カーテンは明るい）。いちばん明るい所で
+              // トーンマッピングのあと #f0c890 前後（白に飛ばない）
+              float lum = dot(sampledDiffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722));
+              float k = litM * uNight * (0.35 + 0.9 * clamp(sqrt(lum) * 1.7, 0.0, 1.0)) * mix(0.55, 0.7, fract(r2 * 7.0));
+              facadeLitColor = col * k;
             }
           }
         }` : ''}
@@ -881,6 +913,29 @@ export function useFacadeAtlas(material) {
     );
   };
   material.customProgramCacheKey = () => (lit ? 'facade-atlas-lit' : 'facade-atlas');
+  return material;
+}
+
+// 名所の夜のライトアップ（キャピトルの正面・教会の壁・鐘楼）: 夜だけ、壁の色 × 暖色の光を自分で光る色として足す
+// （下から照らした感じに、下ほど明るく上へ弱く）。強さは、壁が昼の日陰くらいの明るさに見える程度。facadeNight が 0 なら足す光は 0。
+// fall: テクスチャの v から「上へ弱くなる割合」を決める GLSL の式（v は vMapUv.y）
+export function useFloodlight(material, fall = '0.7') {
+  const prev = material.onBeforeCompile, prevKey = material.customProgramCacheKey?.();
+  material.onBeforeCompile = (shader, r) => {
+    prev?.call(material, shader, r);
+    shader.uniforms.uNight = facadeNight;
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform float uNight;')
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+        if (uNight > 0.0) {
+          float v = 0.0;
+          #ifdef USE_MAP
+            v = vMapUv.y;
+          #endif
+          totalEmissiveRadiance += diffuseColor.rgb * vec3(1.0, 0.72, 0.42) * 0.42 * uNight * (${fall});
+        }`);
+  };
+  material.customProgramCacheKey = () => `${prevKey || ''}-floodlight`;
   return material;
 }
 

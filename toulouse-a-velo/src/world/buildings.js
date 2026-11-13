@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { MeshWriter, writeFlatPolygon } from './meshwriter.js';
 import { Grid, centroid, hash01, isConvex, pointInRing, signedArea } from '../geo.js';
 import { writeTower } from './towers.js';
-import { CHURCH_TILE, STYLE, stylePlainColor, useContactShade, useFacadeAtlas } from './facades.js';
+import { CHURCH_TILE, STYLE, stylePlainColor, useContactShade, useFacadeAtlas, useFloodlight } from './facades.js';
 import { ORDER } from './ground.js';
 import { facadeSpan } from './landmarkfacades.js';
 import { buildRoof, cleanRing, clipGable, ringsSimple, triangulate2 } from './roofs.js';
@@ -554,8 +554,9 @@ export function createBuildingMaterials(tex) {
     upper: useFacadeAtlas(std(tex.upper)),
     ground: useFacadeAtlas(std(tex.shopfront)),
     plain: useContactShade(std(tex.plain)),
-    capitole: std(tex.capitole, { alphaTest: 0.5 }), // キャピトルの正面（屋上の手すりの上は透明）
-    tower: std(tex.tower), // サン・セルナン・ジャコバンの八角形の鐘楼
+    // キャピトルの正面（屋上の手すりの上は透明）。夜はライトアップ（v = 0 が地面、1 が 24 m の軒）
+    capitole: useFloodlight(std(tex.capitole, { alphaTest: 0.5 }), 'mix(1.0, 0.4, clamp(v, 0.0, 1.0))'),
+    tower: useFloodlight(std(tex.tower), '0.55'), // サン・セルナン・ジャコバンの八角形の鐘楼（夜はライトアップ）
     // 名所の専用モデル（monuments.js）: レンガ・ルーバーなどの区画のテクスチャ、金属（ドーム・屋根・鉄柵・庇）、
     // 広場に埋め込んだブロンズ（地面より手前に出して描く。低い視点で暗い空を映して黒く見えないよう、金属感は控えめ）
     monument: std(tex.monument, { roughness: 0.88 }),
@@ -563,7 +564,8 @@ export function createBuildingMaterials(tex) {
     monumentInlay: new THREE.MeshStandardMaterial({
       vertexColors: true, roughness: 0.55, metalness: 0.25, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -8,
     }),
-    church: useContactShade(std(tex.church)), // 教会の壁（石の縞・控え壁・半円アーチの窓）
+    // 教会の壁（石の縞・控え壁・半円アーチの窓）。夜はライトアップ（v × 16 m が壁の足元からの高さ）
+    church: useFloodlight(useContactShade(std(tex.church)), 'mix(1.0, 0.35, smoothstep(0.0, 1.6, v))'),
     enclosureBrick: std(tex.enclosureBrick, { roughness: 0.95 }), // 敷地の塀（レンガ）
     enclosureRender: std(tex.enclosureRender, { roughness: 0.95 }), // 敷地の塀（漆喰）
     roof: std(tex.roof, { roughness: 0.85 }),

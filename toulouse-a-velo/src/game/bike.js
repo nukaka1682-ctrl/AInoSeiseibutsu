@@ -424,13 +424,15 @@ export class Bike {
     return this.head.getWorldPosition(target);
   }
 
-  // 夜の前照灯: ハンドルの前の暖かい白のスポットライト（前方やや下向き、28 m まで、影なし）。
+  // 夜の前照灯: ハンドルの前の暖かい白のスポットライト（影なし）。光の中心が 9 m 前の地面に当たり、3〜16 m 先を縦に長く照らす
+  // （高さ 1 m から地面をかすめるので、細い円錐 0.26 rad を前へ向け、距離による弱まりを小さく〔decay 0.4〕して遠くまで届かせる。
+  // 足元は円錐の外で、ほとんど照らさない）。届く距離 32 m、縁はやわらかく。
   // 夜でなければ外す（ライトの数が変わると材料のシェーダーが作り直されるので、付けっぱなしで強さ 0 にはしない）
   setHeadlight(on) {
     if (on && !this.headlight) {
-      const light = new THREE.SpotLight('#fff2dc', 12, 28, 0.55, 0.7, 1.6);
-      light.position.set(0, 0.95, -0.12); // ハンドルの前（steerGroup の中の位置）
-      light.target.position.set(0, -1.2, -12);
+      const light = new THREE.SpotLight('#fff2dc', 6, 32, 0.26, 0.85, 0.4);
+      light.position.set(0, 1.0, -0.15); // ハンドルの前（steerGroup の中の位置。steerGroup は自転車の中心の 0.45 m 前の地面の高さ）
+      light.target.position.set(0, 0, -8.55); // 自転車の 9 m 前の地面
       light.castShadow = false;
       this.headlight = light;
     }

@@ -123,7 +123,7 @@ export const TIME_OF_DAY = {
   golden: {
     name: '夕暮れ', sun: { elevation: 8, azimuth: 278, color: '#ffb070', intensity: 2.6 },
     hemi: { sky: '#b6c0e0', ground: '#b48a6c', intensity: 0.9 },
-    sky: { ...DAY_SKY, turbidity: 6, rayleigh: 2.4, mieCoefficient: 0.006 }, exposure: 1.15, fogTint: '#d8a890', fogMix: 0.45, night: 0, water: 0.16, bloom: DAY_BLOOM,
+    sky: { ...DAY_SKY, turbidity: 6, rayleigh: 2.4, mieCoefficient: 0.006 }, exposure: 1.15, fogTint: '#d8a890', fogMix: 0.45, night: 0, water: 0.55, bloom: DAY_BLOOM,
   },
   night: {
     name: '夜', sun: { elevation: 48, azimuth: 150, color: '#a9bde8', intensity: 0.45 },
