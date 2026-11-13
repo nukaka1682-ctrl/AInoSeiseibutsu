@@ -141,6 +141,7 @@ export class Traffic {
     const p = this.lanePoint(seg, dir, u, _P);
     if (Math.hypot(p.x - bike.x, p.z - bike.z) < inner * 0.8) return false;
     if (cam && Math.hypot(p.x - cam.x, p.z - cam.z) < clear) return false;
+    if (this.riders.some((o) => o !== r && o.active && Math.hypot(o.x - p.x, o.z - p.z) < 8)) return false; // 2 人を同じ所に重ねない
     if (w.collision.outOfBounds(p.x, p.z) || w.collision.blockedByWater(p.x, p.z)) return false;
     if (w.stream && !w.stream.readyAt(p.x, p.z)) return false;
     if (w.collision.resolve(p.x, p.z, 0.4).hit) return false;
