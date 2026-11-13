@@ -318,6 +318,7 @@ class TileStreamer {
       parsed: this.parsed, plan: planStreets(this.parsed, this.inCore), clip: B, curbs: ground.streetStats.curbs, inOldTown: this.inCore,
       heightAt: ground.heightAt, terrain: T, onRoad: (x, z, m) => this.roadnet.onRoad(x, z, m), solid: (x, z) => insideBuilding(x, z) || insideContext(x, z) || this.inWater(x, z) || onMonument(x, z), trunks: trees.userData.trunks,
     }, cw);
+    furniture.addBridgeLamps(ground.group.getObjectByName('bridges')?.userData.lamps, B); // ポン・ヌフの街灯の夜の明かり（このタイルの物だけ）
     furniture.cull(this.focus[0], this.focus[1], true);
     group.add(furniture.group);
 

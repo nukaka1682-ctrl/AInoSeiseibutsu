@@ -259,4 +259,8 @@ test('旧市街の壁付けの角灯（夜の明かり）: 壁のある側だけ
   fs.addLamps('wall-lamps', [{ x: 1, y: 2, z: 3, a: 0 }]);
   assert.deepEqual(fs.lampHeads[0].slice(0, 6), [1, 6, 3, 2, 4, 2]);
   assert.equal(fs.group.children.length, 0);
+  // ポン・ヌフの街灯（橋が覚えた灯具の世界座標）。タイルの範囲の外の物は足さない
+  fs.addBridgeLamps([{ x: 10, z: 0, y: 5, head: 11.6 }, { x: 500, z: 0, y: 5, head: 11.6 }], { minX: 0, minZ: -10, maxX: 100, maxZ: 10 });
+  assert.equal(fs.lampHeads.length, 2);
+  assert.deepEqual(fs.lampHeads[1].slice(0, 5), [10, 11.6, 0, 5, 11.6 - 5]);
 });

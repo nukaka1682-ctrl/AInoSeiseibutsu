@@ -1139,6 +1139,14 @@ export class FurnitureSet {
     for (const it of items) this.addLampHeads(name, it);
   }
 
+  // ポン・ヌフの街灯（bridges.js の writeLamp が覚えた灯具 { x, z, y: 足元, head: 灯具の高さ }）。clip の中の物だけ
+  addBridgeLamps(lamps, clip = null) {
+    for (const l of lamps || []) {
+      if (clip && !(l.x >= clip.minX && l.x < clip.maxX && l.z >= clip.minZ && l.z < clip.maxZ)) continue;
+      this.lampHeads.push([l.x, l.head, l.z, l.y, l.head - l.y, 0, [l.x, l.z]]);
+    }
+  }
+
   // (x, z) から FURNITURE_FAR m 以内の物だけを描く（REFILL m 動くまでは選び直さない）
   cull(x, z, force = false) {
     const night = lampNight.value > 0 && this.lampHeads.length > 0;
