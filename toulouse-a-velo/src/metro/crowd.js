@@ -30,6 +30,25 @@ export function stationCrowd(plan, nav, seed = 1) {
     nav.addWall(x + r, z + r, x - r, z + r, y - 0.2, y + 1.7);
     nav.addWall(x - r, z + r, x - r, z - r, y - 0.2, y + 1.7);
   };
+  if (plan.layout === 'aerial') {
+    // 高架の駅: ホームドアの脇で待つ人（階段の吹き抜けの内側の通り道）と、切符売り場の人
+    for (const L of plan.lines) {
+      const f = L.frame;
+      for (const side of [1, -1]) {
+        const n = 3 + Math.floor(rnd() * 4);
+        for (let i = 0; i < n; i++) {
+          const sd = L.doorsS[Math.floor(rnd() * L.doorsS.length)] + (rnd() < 0.5 ? -1 : 1) * (1.0 + rnd() * 0.6);
+          const [x, z] = f.at(sd, (LAYOUT.psd + 0.6 + rnd() * 0.9) * side);
+          place(x, L.yp, z, Math.atan2(-f.nx * side, f.nz * side) + (rnd() - 0.5) * 0.9);
+        }
+      }
+    }
+    for (let i = 0; i < 4; i++) {
+      const [x, z] = plan.U(-14 + rnd() * 7, (rnd() - 0.5) * 9);
+      place(x, plan.ym, z, rnd() * Math.PI * 2);
+    }
+    return finish(parts);
+  }
   if (plan.layout === 'osm') {
     osmCrowd(plan, nav, rnd, place);
     return finish(parts);

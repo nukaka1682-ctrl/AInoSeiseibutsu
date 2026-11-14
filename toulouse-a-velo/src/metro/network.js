@@ -1,7 +1,8 @@
 // トゥールーズのメトロ（A 線・B 線）の路線と駅、線路の線形（three.js を使わない。単体テストできる）。
 // - 駅の位置: IGN BD TOPO の equipement_de_transport（nature = 'Station de métro'、営業中。Licence Ouverte）。
 //   同梱の <エリア>-metro.json の駅があればそちらを使う（同じ名前の駅が 2 つあれば平均）
-// - 地下のトンネルの線形はオープンデータにないので、駅のホームを直線にして、駅と駅のあいだを 3 次のエルミート曲線でつなぐ
+// - 線路の線形: 駅のホームは直線、駅と駅のあいだは本物の線路（OpenStreetMap の線路と IGN の標高。toulouse-metro-tracks.json）に沿う。
+//   線路のデータがなければ、駅と駅のあいだを 3 次のエルミート曲線でつなぐ
 //   （ホームの向きは前後の駅を結ぶ向き。Jean Jaurès の B 線は A 線と直交させ、改札階を十字にする）
 // - 右側通行: 終点（A 線は Balma-Gramont、B 線は Ramonville）へ向かう電車は、進む向きの右の線路
 // 座標はゲームのローカル座標（x 東・z 南、m）。駅の局所座標は s（ホームの向き、終点へ向かう向きが +）と t（その右が +）
@@ -151,9 +152,97 @@ export function osmPlatformFrame(st, line, proj, hint) {
   return { center: [mx + (ax * (u0 + u1)) / 2, mz + (az * (u0 + u1)) / 2], axis: [ax, az], level: levels.length ? Math.min(...levels) : null, length: u1 - u0 };
 }
 
+// 本物の線路の線形（toulouse-metro-tracks.json の lines。scripts/metro-tracks.mjs）をローカル座標の折れ線にする。
+// 点 { x, z, k: 種類（t トンネル・c 覆い・b 橋・o 地上）, alt: 線路の面の標高（地上・高架だけ）, u: 道のり }
+export function projectTracks(tracks, proj) {
+  const out = {};
+  for (const [line, list] of Object.entries(tracks?.lines || {})) {
+    const pts = [];
+    for (const [lat, lon, k, alt] of list) {
+      const [x, z] = proj.project(lat, lon), last = pts[pts.length - 1];
+      pts.push({ x, z, k, alt: alt ?? null, u: last ? last.u + Math.hypot(x - last.x, z - last.z) : 0 });
+    }
+    // 標高をならす（BD TOPO の高さは ±1.5 m の誤差。±24 m の移動平均）
+    const alt = pts.map((p) => p.alt);
+    pts.forEach((p, i) => {
+      if (p.alt == null) return;
+      let sum = 0, n = 0;
+      for (let j = Math.max(0, i - 6); j <= Math.min(pts.length - 1, i + 6); j++) {
+        if (alt[j] == null) continue;
+        sum += alt[j];
+        n++;
+      }
+      p.alt = sum / n;
+    });
+    out[line] = { pts, length: pts[pts.length - 1].u };
+  }
+  return out;
+}
+
+// 線路の折れ線の上で (x, z) にいちばん近い所の道のり u と、そこまでの距離
+function trackProject(tr, x, z) {
+  let best = Infinity, u = 0;
+  const P = tr.pts;
+  for (let i = 0; i + 1 < P.length; i++) {
+    const a = P[i], b = P[i + 1], dx = b.x - a.x, dz = b.z - a.z, l2 = dx * dx + dz * dz || 1;
+    const t = Math.max(0, Math.min(1, ((x - a.x) * dx + (z - a.z) * dz) / l2));
+    const d = Math.hypot(a.x + dx * t - x, a.z + dz * t - z);
+    if (d < best) [best, u] = [d, a.u + (b.u - a.u) * t];
+  }
+  return { u, d: best };
+}
+
+// 線路の折れ線の道のり u の点 { x, z, hx, hz, k, alt }
+function trackPoint(tr, u) {
+  const P = tr.pts;
+  u = Math.max(0, Math.min(tr.length, u));
+  let lo = 0, hi = P.length - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (P[mid].u <= u) lo = mid;
+    else hi = mid;
+  }
+  const a = P[lo], b = P[hi], t = b.u > a.u ? (u - a.u) / (b.u - a.u) : 0;
+  const [hx, hz] = norm(b.x - a.x, b.z - a.z);
+  const near = t < 0.5 ? a : b;
+  return { x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t, hx, hz, k: near.k, alt: a.alt != null && b.alt != null ? a.alt + (b.alt - a.alt) * t : near.alt };
+}
+
+// 駅の線路の種類と標高（駅の中心で）。線路のデータがなければ null
+export function stationTrack(network, station, line) {
+  const tr = network.tracks?.[line];
+  if (!tr) return null;
+  const [cx, cz] = station.cx?.[line] || [station.x, station.z];
+  const q = trackProject(tr, cx, cz);
+  if (q.d > 60) return null;
+  // 駅の箱の中の標高の平均（橋の上の駅: Basso Cambo・Jolimont）
+  const L = boxHalf(line, station);
+  let sum = 0, n = 0, open = 0, all = 0;
+  for (let u = q.u - L; u <= q.u + L; u += 4) {
+    const p = trackPoint(tr, u);
+    all++;
+    if (p.k !== 't') open++;
+    if (p.alt != null) {
+      sum += p.alt;
+      n++;
+    }
+  }
+  const c = trackPoint(tr, q.u);
+  // 駅の箱のすぐ外（60 m 以内）から橋になる駅（Jolimont: 西の半分は丘の中、東の端から高架橋）
+  let near = null;
+  for (let d = L; d <= 60 && near == null; d += 4) {
+    for (const u of [q.u + d, q.u - d]) {
+      const p = trackPoint(tr, u);
+      if (u >= 0 && u <= tr.length && p.k !== 't' && p.alt != null) near ??= p.alt;
+    }
+  }
+  return { u: q.u, d: q.d, k: c.k, alt: n ? sum / n : near, open: n ? open / all : near != null ? 0.5 : 0 };
+}
+
 // 路線網。proj: LocalProjection、levelOf(station) → { ym, yp: { A, B } }（改札階・ホームの床の高さ。地形と出入口から決める。
-// 省略すると平らな地面の 6 m 下を改札階に）。osm: toulouse-metro-osm.json の stations（あれば駅のホームの位置と向きはこれから）
-export function buildNetwork(proj, { bdStations = null, levelOf = null, osm = null } = {}) {
+// 省略すると平らな地面の 6 m 下を改札階に）。osm: toulouse-metro-osm.json の stations（あれば駅のホームの位置と向きはこれから）。
+// tracks: toulouse-metro-tracks.json（あれば駅と駅のあいだは本物の線路の線形）
+export function buildNetwork(proj, { bdStations = null, levelOf = null, osm = null, tracks = null } = {}) {
   const stations = stationList(bdStations);
   const byId = new Map(stations.map((s) => [s.id, s]));
   for (const s of stations) [s.x, s.z] = proj.project(s.lat, s.lon);
@@ -193,13 +282,21 @@ export function buildNetwork(proj, { bdStations = null, levelOf = null, osm = nu
     const r = [-az, ax], side = r[0] * bx + r[1] * bz >= 0 ? 1 : -1;
     s.axis[s.lines[1]] = [r[0] * side, r[1] * side];
   }
-  const network = { stations, byId, lines: {} };
+  const network = { stations, byId, lines: {}, tracks: tracks ? projectTracks(tracks, proj) : null };
+  // 高架の駅（線路が橋の上にある駅: Basso Cambo・Jolimont）
+  for (const s of stations) {
+    for (const line of s.lines) {
+      const t = stationTrack(network, s, line);
+      if (t && t.alt != null && t.open > 0.3) (s.aerial ||= {})[line] = t.alt;
+    }
+  }
   relevelNetwork(network, levelOf);
   return network;
 }
 
 // 駅の高さを決め直して、線路の縦断面を作り直す（地形と出入口が分かってから。駅のオブジェクトはそのまま）
-export function relevelNetwork(network, levelOf = null) {
+// groundAt(x, z): 地面の高さ（あれば、地上の区間の線路を地面より下にしない）
+export function relevelNetwork(network, levelOf = null, groundAt = null) {
   for (const s of network.stations) {
     const lv = levelOf ? levelOf(s) : null;
     s.ym = lv?.ym ?? -6;
@@ -208,25 +305,62 @@ export function relevelNetwork(network, levelOf = null) {
       s.yp[l] = lv?.yp?.[l] ?? s.ym - LAYOUT.hallDrop - k * 7.5;
     });
   }
-  for (const [line, ids] of Object.entries(LINES)) network.lines[line] = buildLinePath(line, ids.map((id) => network.byId.get(id)));
+  for (const [line, ids] of Object.entries(LINES)) network.lines[line] = buildLinePath(line, ids.map((id) => network.byId.get(id)), network.tracks?.[line] || null, groundAt);
   return network;
 }
 
 // 線路の線形: 駅のホームは直線、駅のあいだは 3 次のエルミート曲線。2 m ごとの点 { S, x, z, y, hx, hz }
 // y はホームの床の高さ（車両の床）。駅の中心の S を station.S[line] に入れる
-export function buildLinePath(line, list) {
+// track: 本物の線路の折れ線（projectTracks）。あれば駅のあいだは線路に沿い、駅の箱の端から JOIN m でホームの直線へなめらかにつなぐ。
+// 点に k（種類）と、地上・高架の区間では yFix（線路の標高から決めたホームの床の高さ）を付け、縦断面はそれを通る
+export const RAIL_ALT_TO_FLOOR = 1.0 - 145; // 線路の面の標高 → 車両の床の y（DATUM = 145、床は走行路の 1 m 上）
+const JOIN = 70;
+export function buildLinePath(line, list, track = null, groundAt = null) {
   const pts = [];
-  const push = (x, z, y, hx, hz) => {
+  const push = (x, z, y, hx, hz, k = 't', alt = null) => {
     const last = pts[pts.length - 1];
     const S = last ? last.S + Math.hypot(x - last.x, z - last.z) : 0;
     if (last && S - last.S < 1e-6) return;
-    pts.push({ S, x, z, y, hx, hz });
+    pts.push({ S, x, z, y, hx, hz, k, alt });
+  };
+  const hermite = (x0, z0, px, pz, x1, z1, ax, az, n, each) => {
+    const chord = Math.hypot(x1 - x0, z1 - z0), m = chord * 0.45;
+    for (let k = 1; k < n; k++) {
+      const t = k / n, t2 = t * t, t3 = t2 * t;
+      const h00 = 2 * t3 - 3 * t2 + 1, h10 = t3 - 2 * t2 + t, h01 = -2 * t3 + 3 * t2, h11 = t3 - t2;
+      const x = h00 * x0 + h10 * m * px + h01 * x1 + h11 * m * ax, z = h00 * z0 + h10 * m * pz + h01 * z1 + h11 * m * az;
+      const d00 = 6 * t2 - 6 * t, d10 = 3 * t2 - 4 * t + 1, d01 = -6 * t2 + 6 * t, d11 = 3 * t2 - 2 * t;
+      const [hx, hz] = norm(d00 * x0 + d10 * m * px + d01 * x1 + d11 * m * ax, d00 * z0 + d10 * m * pz + d01 * z1 + d11 * m * az);
+      each(x, z, hx, hz, t);
+    }
   };
   const C = (s) => s.cx?.[line] || [s.x, s.z]; // 線のホームの中心
   list.forEach((s, i) => {
     const [ax, az] = s.axis[line], L = boxHalf(line, s), y = s.yp[line], [sx, sz] = C(s);
-    // 1 つ前の駅からの曲線
-    if (i > 0) {
+    const su = track ? trackProject(track, sx, sz) : null;
+    const sk = su && su.d < 60 ? trackPoint(track, su.u) : null;
+    // 1 つ前の駅から: 本物の線路に沿う（両方の駅が線路の近くにあるとき）
+    const prevU = i > 0 && track ? trackProject(track, ...C(list[i - 1])) : null;
+    if (i > 0 && su && prevU && su.d < 60 && prevU.d < 60 && su.u - prevU.u > boxHalf(line, list[i - 1]) + L + 2 * JOIN + 20) {
+      const p = list[i - 1], [px, pz] = p.axis[line], Lp = boxHalf(line, p), [qx, qz] = C(p);
+      const x0 = qx + px * Lp, z0 = qz + pz * Lp, x1 = sx - ax * L, z1 = sz - az * L;
+      const ua = prevU.u + Lp + JOIN, ub = su.u - L - JOIN;
+      const A = trackPoint(track, ua), B = trackPoint(track, ub);
+      const nj = Math.ceil(JOIN / 2);
+      hermite(x0, z0, px, pz, A.x, A.z, A.hx, A.hz, nj, (x, z, hx, hz, t) => {
+        const q = trackPoint(track, prevU.u + Lp + JOIN * t);
+        push(x, z, 0, hx, hz, q.k, q.alt);
+      });
+      const n = Math.max(1, Math.round((ub - ua) / 2));
+      for (let k = 0; k <= n; k++) {
+        const q = trackPoint(track, ua + ((ub - ua) * k) / n);
+        push(q.x, q.z, 0, q.hx, q.hz, q.k, q.alt);
+      }
+      hermite(B.x, B.z, B.hx, B.hz, x1, z1, ax, az, nj, (x, z, hx, hz, t) => {
+        const q = trackPoint(track, ub + JOIN * t);
+        push(x, z, 0, hx, hz, q.k, q.alt);
+      });
+    } else if (i > 0) {
       const p = list[i - 1], [px, pz] = p.axis[line], Lp = boxHalf(line, p), yp0 = p.yp[line], [qx, qz] = C(p);
       const x0 = qx + px * Lp, z0 = qz + pz * Lp, x1 = sx - ax * L, z1 = sz - az * L;
       const chord = Math.hypot(x1 - x0, z1 - z0), m = chord * 0.45;
@@ -245,9 +379,12 @@ export function buildLinePath(line, list) {
     const n = Math.ceil((2 * L) / 2);
     for (let k = 0; k <= n; k++) {
       const u = -L + (2 * L * k) / n;
-      push(sx + ax * u, sz + az * u, y, ax, az);
+      const q = sk ? trackPoint(track, su.u + u) : null;
+      push(sx + ax * u, sz + az * u, y, ax, az, s.aerial?.[line] != null ? 'b' : q ? q.k : 't', null);
+      pts[pts.length - 1].st = true;
     }
   });
+  if (track) levelPath(pts, groundAt);
   // 駅の中心の S（ホームの直線の上で駅の中心に最も近い点を、線分の上で正確に）
   for (const s of list) {
     const [sx, sz] = C(s);
@@ -275,6 +412,66 @@ export function buildLinePath(line, list) {
     }
   }
   return { line, stations: list, pts, length: pts[pts.length - 1].S };
+}
+
+// 縦断面: 駅のホーム（st）の高さと、地上・高架の区間の線路の標高（alt）を通る。あいだ（地下）はなめらかにつなぐ
+function levelPath(pts, groundAt) {
+  const fixed = pts.map((p) => {
+    if (p.st) return p.y;
+    if (p.alt == null) return null;
+    let y = p.alt + RAIL_ALT_TO_FLOOR;
+    // 地上の区間: 走行路の床（床の 1.3 m 下）を地面より下にしない
+    if (groundAt && p.k === 'o') y = Math.max(y, groundAt(p.x, p.z) + 1.35);
+    return y;
+  });
+  // 駅の箱の端から 40 m は、標高があっても駅の高さとなめらかにつなぐために空ける（高さの差が小さければそのまま）
+  for (let i = 0; i < pts.length; i++) {
+    if (!pts[i].st) continue;
+    for (const dir of [-1, 1]) {
+      if (pts[i + dir] && !pts[i + dir].st) {
+        for (let j = i + dir; pts[j] && !pts[j].st && Math.abs(pts[j].S - pts[i].S) < 40; j += dir) fixed[j] = null;
+      }
+    }
+  }
+  let a = -1;
+  for (let i = 0; i < pts.length; i++) {
+    if (fixed[i] == null) continue;
+    if (a >= 0 && i - a > 1) {
+      const S0 = pts[a].S, S1 = pts[i].S;
+      for (let j = a + 1; j < i; j++) {
+        const t = (pts[j].S - S0) / (S1 - S0);
+        pts[j].y = fixed[a] + (fixed[i] - fixed[a]) * t * t * (3 - 2 * t);
+      }
+    }
+    pts[i].y = fixed[i];
+    a = i;
+  }
+  // ならす（駅の外。±10 m の移動平均を 2 回）
+  for (let pass = 0; pass < 2; pass++) {
+    const y = pts.map((p) => p.y);
+    for (let i = 0; i < pts.length; i++) {
+      if (pts[i].st) continue;
+      let sum = 0, n = 0;
+      for (let j = Math.max(0, i - 5); j <= Math.min(pts.length - 1, i + 5); j++) {
+        sum += y[j];
+        n++;
+      }
+      pts[i].y = sum / n;
+    }
+  }
+}
+
+// 線形の上の点の種類（t トンネル・c 覆い・b 橋・o 地上）
+export function kindAt(path, S) {
+  const P = path.pts;
+  S = Math.max(0, Math.min(path.length, S));
+  let lo = 0, hi = P.length - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (P[mid].S <= S) lo = mid;
+    else hi = mid;
+  }
+  return (S - P[lo].S < P[hi].S - S ? P[lo] : P[hi]).k || 't';
 }
 
 // 線形の上の点（S で補間）。out: { x, z, y, hx, hz }

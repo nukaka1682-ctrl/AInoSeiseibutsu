@@ -166,7 +166,7 @@ IGN（フランス国土地理院）の BD TOPO は、建物の軒の高さ・�
 
 トゥールーズのメトロ（無人運転の VAL。A 線 18 駅・B 線 20 駅）に乗って、車内 → ホーム → 改札 → 通路 → 地上の出入口の階段と歩いて外へ出て、
 駅のまわり 100 m ほどを散歩できるゲームです（`metro.html`。GitHub Pages では `toulouse-a-velo/metro.html`）。一人称と三人称を切り替えられます。
-地上の街並み・地形は自転車のゲームと同じ実測データ、駅の中のつくりと出入口は OpenStreetMap の屋内の地図（© OpenStreetMap contributors、ODbL）、
+地上の街並み・地形は自転車のゲームと同じ実測データ、線路は OpenStreetMap の本物の線形（A 線は高架橋・地上の区間に出て、窓から街が見えます。終点 Basso Cambo と Jolimont は高架の駅）、駅の中のつくりと出入口は OpenStreetMap の屋内の地図（© OpenStreetMap contributors、ODbL）、
 見た目と車両は写真（Wikimedia Commons）を手本に作っています。
 
 | ![VAL 208 の車内](docs/metro-train.jpg) | ![キャピトルのホーム](docs/metro-platform.jpg) |
@@ -174,6 +174,10 @@ IGN（フランス国土地理院）の BD TOPO は、建物の軒の高さ・�
 | VAL 208 の車内（黄色の壁・赤い斑点の床・青紫の布の座席・路線図の照明・ステンレスの手すり）。窓の外はトンネル | キャピトル駅の島式のホーム（白いタイルのヴォールト・真ん中のベンチ・両側の全面ガラスのホームドア。奥にホームから上がる階段とエスカレーター〔OSM の位置〕） |
 | ![改札](docs/metro-gates.jpg) | ![カルムの出入口](docs/metro-street.jpg) |
 | 改札階（回転式の三脚の改札・方面の看板・出口の緑の看板）。駅には電車を待つ人や座っている人 | 地上へ出たところ（三人称）。出入口の吹き抜けの階段の下の扉から駅の通路へつながる |
+| ![高架橋の車窓](docs/metro-viaduc.jpg) | ![Basso Cambo](docs/metro-basso-cambo.jpg) |
+| A 線の環状道路を越える橋の上（Mirail-Université → Bagatelle）。線形と高さは実際の通りで、窓から本物の街並みが見える | 高架の終点 Basso Cambo（白い建物とかまぼこ形の屋根）へ着く電車と高架橋 |
+| ![Basso Cambo のホーム](docs/metro-basso-cambo-quai.jpg) | ![Basso Cambo の切符売り場](docs/metro-basso-cambo-hall.jpg) |
+| Basso Cambo の橋の上のホーム（横長の窓から街が見える） | Basso Cambo の地面の高さの切符売り場（改札・券売機・タイル張りの丸い柱） |
 | ![電車の到着](docs/metro-arrival.jpg) | ![ジャン・ジョレス](docs/metro-jean-jaures.jpg) |
 | ホームに着いた A 線の電車（屋根の縁が路線の色）。ホームドアと電車の扉が一緒に開く | A 線と B 線の乗り換え駅ジャン・ジョレスの間取り（デバッグのカメラで上から。天井を描かずに見える） |
 
@@ -199,9 +203,11 @@ IGN（フランス国土地理院）の BD TOPO は、建物の軒の高さ・�
 
 | 要素 | データ | 再現方法 |
 | --- | --- | --- |
-| 駅の位置・名前 | IGN BD TOPO（equipement_de_transport の 'Station de métro'、営業中の 37 駅）、OpenStreetMap のホーム（`railway=platform`・`public_transport=platform`。参照番号 4xxxx は A 線、5xxxx は B 線） | ホームの位置と向きは OSM のホームの形から（形ごとの長い辺の向きの平均。Esquirol・Balma-Gramont など、前後の駅を結ぶ向きと最大 70° 違った駅が直る）。Jean Jaurès の A 線と B 線のホームは別々の所。ホームの階は OSM の level（地下 1〜4 階。Basso Cambo・Jolimont は高架） |
-| 線路の線形 | （地下のトンネルの線形はオープンデータにない） | ホームは直線（向きは前後の駅を結ぶ向き）、駅と駅のあいだは 3 次のエルミート曲線でなめらかにつなぐ（2 m で 6° 以下の曲がり）。右側通行。駅間の距離と走る時間（最高 約 70 km/h・加速 1.1 m/s²・減速 1.2 m/s²）は実際の時刻表に近い（A 線の駅間 290 m〜1.05 km） |
-| 地上の出入口 | OpenStreetMap の地上へ出る階段・エスカレーター（`highway=steps` の `level="-1;0"` など）と出入口の印（`railway=subway_entrance`）、LiDAR HD の地形モデルの吹き抜けの穴（下記「メトロの駅の出入口」） | 出入口の印から 15 m 以内の、地上と地下をつなぐ階段を、並んだもの（階段とエスカレーター）ごとに 1 つの吹き抜けにする（上の端・下りる向き・幅・着く階は OSM から）。LiDAR の吹き抜けが同じ所・同じ向きにあれば、その形（長さ・幅・中心）。階段の地図のない出入口は LiDAR の吹き抜けか、印から駅の方へ下りる 11 m の吹き抜け。ホームが地下 1 階の駅（Bellefontaine・Mirail-Université・Argoulets・Ramonville）は、吹き抜けをホームまで届く長さにし、片側のホームにしか出入口がなければ反対側にも置く。高架の駅は LiDAR の吹き抜けのまま（`scripts/metro-osm.mjs`・`src/metro/osmentrances.js`） |
+| 駅の位置・名前 | IGN BD TOPO（equipement_de_transport の 'Station de métro'、営業中の 37 駅）、OpenStreetMap のホーム（`railway=platform`・`public_transport=platform`。参照番号 4xxxx は A 線、5xxxx は B 線） | ホームの位置と向きは OSM のホームの形から（形ごとの長い辺の向きの平均。Esquirol・Balma-Gramont など、前後の駅を結ぶ向きと最大 70° 違った駅が直る）。Jean Jaurès の A 線と B 線のホームは別々の所。ホームの階は OSM の level（地下 1〜4 階。Basso Cambo・Jolimont は高架の駅） |
+| 線路の線形 | OpenStreetMap の路線（`route=subway` の上りと下り、`railway=subway` の線。© OpenStreetMap contributors、ODbL）、IGN BD TOPO の線路（`troncon_de_voie_ferree` の 'Métro'。3 次元の点） | 本物の線形。上りと下りの線路の真ん中を中心線にし（点を通る Catmull-Rom 曲線にして軽くならす）、駅のあいだはそれに沿う（駅の箱の端から 70 m でホームの直線へなめらかにつなぐ）。右側通行。駅間の距離は実際のまま（A 線 約 12.0 km・B 線 約 15.4 km。Empalot → Saint-Agne の大回りは 1.27 km）。縦断面は、駅のホームの高さと、地上・高架の区間の線路の標高（BD TOPO。±24 m でならす）を通る（`scripts/metro-tracks.mjs` → `public/data/toulouse-metro-tracks.json`） |
+| 地上・高架の区間（A 線） | OSM の線の `tunnel`・`bridge`・`covered`、BD TOPO の線路の標高、写真（Wikimedia Commons） | A 線の 4 か所: Basso Cambo の高架橋（約 370 m）、Mirail-Université と Bagatelle のあいだの環状道路を越える橋、Jolimont から東へ下る高架橋（約 350 m）と地上の区間、Argoulets と Balma-Gramont のあいだのエール川を越える橋。高架橋は床版と側壁・箱桁・28 m ごとの橋脚、地上は床と側壁、覆いのある所は角の丸い箱、トンネルの口には壁。電車が地上に出ると太陽の光に切り替わり、窓から街並みが見える（街並みは電車のまわりを読み込む）。B 線は全部トンネル |
+| 高架の駅（Basso Cambo・Jolimont） | 線路の標高（BD TOPO）、LiDAR の地形、写真（Wikimedia Commons） | 橋の上の 2 つの相対式ホーム（外の壁は横長の窓、ホームドア）と、その下の地面の高さの切符売り場（券売機・回転式の改札・タイル張りの丸い柱）。改札の中から外の壁ぎわの階段と上りのエスカレーターでホームへ。街へは切符売り場のガラスの扉から直接出る（扉は外の地面が床に近い側に）。Basso Cambo は白い建物・白い丸い柱・ホームごとのかまぼこ形の金属の屋根、Jolimont は丘の斜面（西の半分は地面にもぐり、東の端から高架橋）で青い印の白い壁と平らな屋根。駅の建物の中は地面を描かず、もとの建物（BD TOPO）・木は置かない（`src/metro/aerial.js`） |
+| 地上の出入口 | OpenStreetMap の地上へ出る階段・エスカレーター（`highway=steps` の `level="-1;0"` など）と出入口の印（`railway=subway_entrance`）、LiDAR HD の地形モデルの吹き抜けの穴（下記「メトロの駅の出入口」） | 出入口の印から 15 m 以内の、地上と地下をつなぐ階段を、並んだもの（階段とエスカレーター）ごとに 1 つの吹き抜けにする（上の端・下りる向き・幅・着く階は OSM から）。LiDAR の吹き抜けが同じ所・同じ向きにあれば、その形（長さ・幅・中心）。階段の地図のない出入口は LiDAR の吹き抜けか、印から駅の方へ下りる 11 m の吹き抜け。ホームが地下 1 階の駅（Bellefontaine・Mirail-Université・Argoulets・Ramonville）は、吹き抜けをホームまで届く長さにし、片側のホームにしか出入口がなければ反対側にも置く。高架の駅（Basso Cambo・Jolimont）は切符売り場の扉から直接街へ（`scripts/metro-osm.mjs`・`src/metro/osmentrances.js`） |
 | 駅の深さ | 地形と出入口の深さ、OSM の階 | 地下 1 階（切符売り場の階）は駅のまわりの地面（駅の軸の ±40 m・横 ±20 m）から 4.2 m 以上、駅の中心の地面から 5 m 以上、出入口の吹き抜けの縁から 3.6 m 以上深い所。その下の階は 5 m ごと、ホームの階はその上の階の 5.5 m 下（ホームが地下 1 階の駅は地面の 6.2 m 下）。出入口の階段は、その階段が着く階の床まで下りる（短くて届かない吹き抜けは、扉の先に階段） |
 | 駅の間取り（OSM） | OpenStreetMap の屋内の地図（駅の中の階段・エスカレーター〔`level="-2;-1"` など〕、通路〔`footway`・`corridor` の level〕、広間〔`indoor`〕）、フランス語版ウィキペディア（島式のホーム） | 34 駅は OSM から組み立てる（`src/metro/osmplan.js`・`osmmesh.js`）。階ごとの床は OSM の通路（幅 3.2 m）と広間と、階段の上と下の踊り場・出入口の扉の前を合わせた形。階段とエスカレーターは OSM の位置と向き（並んだものは 1 つの吹き抜けに。長さは階の高さの差から）。ホームへ下りる階段はホームの軸にそろえ、相対式は奥の壁ぎわ（重なるものは壁から内へ並べ、奥の壁までの幅を広げる）、島式はホームの真ん中に並べる。折り返しの階段には広い踊り場、吹き抜けのまわりには通り道。切符売り場の階から下りる階段の手前に改札。床どうしのすき間・体の幅で通れない狭い所は通路でつなぎ、出入口をふさぐ階段は除く。**島式のホーム**（Capitole・Esquirol・Jean Jaurès の A 線。「un grand quai central」）は、線路がホームの両側にあり、駅の前後でトンネルが広がる。電車の扉は左側に開く。どの出入口からもどのホームへも体の幅で歩けることを単体テストで確かめる（`test/unit/metro-osm.test.mjs`）。OSM に駅の中の階段がない Compans-Caffarelli と高架の 2 駅は、下の「駅の間取り」 |
 | 駅の間取り | 写真（Capitole・Esquirol・Jean Jaurès・Marengo・Palais de Justice・Arènes・Mermoz・Carmes・François Verdier） | 地上の出入口の階段は、そのまま改札階（salle des billets）へ下りる（吹き抜けは改札階の中のタイル張りの囲いになり、下の端の扉からホールへ出る）。改札の外のホール（券売機）から 1 列の改札（回転式の三脚の改札が 6 通路、上に「← Direction 〜｜Direction 〜 →」の看板）を通ると、線路の上の改札の中。両側のホームへ下りる吹き抜け（A 線はタイル張りの腰壁、B 線はガラスの手すり）に階段と上りのエスカレーター。改札の外のホールは、片方の端・両端のどちらか、出入口の吹き抜けと扉の前が改札の中にかからず、出入口に近い置き方を選ぶ。ホールから遠い出入口だけ通路でつなぐ（駅の向きにそろえた 90° 以下の曲がり角、通路どうし・吹き抜けと重ならない道筋）。改札の中にかかってしまう出入口は「FERMÉ」の扉で閉める（François Verdier の 1 か所・Saouzelong の 2 か所）。2 つの線の Jean Jaurès は真ん中のコンコースから 4 方向の改札の中へ（十字）。相対式ホーム（幅 5 m、A 線 63 m・B 線 44 m）、全面ガラスのホームドア。どの出入口からも両方のホームへ歩けることを単体テストで確かめる |
@@ -215,8 +221,9 @@ IGN（フランス国土地理院）の BD TOPO は、建物の軒の高さ・�
 
 ### 実際と違う所
 
-- **高架の駅も地下の駅として作っています**: Basso Cambo・Jolimont は高架の駅ですが、このゲームでは地下の駅（今までの間取り）です。A 線の Mirail-Université と Bagatelle のあいだの環状道路を越える高架も地下のトンネルです。
-- 駅の中は OSM の屋内の地図の通りですが、地図にない所（壁の形・天井の高さ・階の高さ）は推定です。OSM の階段の線は短めに描かれていることが多く、このゲームでは階の高さの差に合う長さにしています。重なって置けない階段は除いています。Compans-Caffarelli は OSM に駅の中の階段がないので、写真から決めた共通の形です。駅ごとの芸術作品は一部だけです（ほかは壁画）。地下の線路の曲がり方も推定です。
+- 高架の駅（Basso Cambo・Jolimont）は、位置・高さ・ホームと切符売り場の階の関係は実際の通りですが、建物の細かい形（Basso Cambo の外のエスカレーターの筒・バスのりばの屋根、Jolimont の丘の上の出入口とレンガの建物・高架橋の緑の格子の覆い）は作っていません。Argoulets は実際には浅い半地下の駅ですが、地下の駅として作っています（東の口のすぐ先で地上に出ます）。
+- 線路の平面の線形は OpenStreetMap の通りですが、地下の区間の深さ（駅のあいだ）はデータがないので、駅の高さをなめらかにつないでいます。車庫への線・引き上げ線・A 線と B 線の連絡線は作っていません。
+- 駅の中は OSM の屋内の地図の通りですが、地図にない所（壁の形・天井の高さ・階の高さ）は推定です。OSM の階段の線は短めに描かれていることが多く、このゲームでは階の高さの差に合う長さにしています。重なって置けない階段は除いています。Compans-Caffarelli は OSM に駅の中の階段がないので、写真から決めた共通の形です。駅ごとの芸術作品は一部だけです（ほかは壁画）。
 - 地上の駅舎（Bellefontaine・Argoulets などの切符売り場の建物）の中の出入口は、建物のない吹き抜けとして作っています。エレベーターだけの出入口（OSM の 21 か所）は地上のガラスの小屋（Jean Jaurès と同じ形）として置いていますが、乗れません。建物の中の入口（Capitole の 2 か所・Marengo の 1 か所）は作っていません。
 - 人は動きません（ホームで待つ人・座っている人）。電車は歩いている駅にだけ来ます。
 
@@ -225,15 +232,17 @@ IGN（フランス国土地理院）の BD TOPO は、建物の軒の高さ・�
 ```
 metro.html             メトロのゲームのページ
 src/metro/main.js      ゲーム全体（読み込み・駅とトンネルの組み立てと破棄・電車の運行・光の切り替え・カメラ・HUD・路線図）
-src/metro/network.js   路線と駅（BD TOPO の位置）、線路の線形（ホームは直線、駅間はエルミート曲線）、電車の扉の位置
+src/metro/network.js   路線と駅（BD TOPO の位置）、線路の線形（ホームは直線、駅間は本物の線路。データがなければエルミート曲線）と縦断面、電車の扉の位置
 src/metro/stationplan.js 駅の間取り（改札階・改札・吹き抜けの階段とエスカレーター・ホーム・出入口からの通路の道筋）と歩ける所
 src/metro/stationmesh.js 駅のメッシュ（タイル・ホームドア・改札・券売機・看板）
 src/metro/osmentrances.js 出入口（OSM の地上へ出る階段から吹き抜けを作る。LiDAR の形と合わせる）と、駅のつくり（ウィキペディア）
 src/metro/osmplan.js   OSM の屋内の地図からの駅の間取り（階・階段とエスカレーター・床・改札・島式のホーム）と歩ける所
 src/metro/osmmesh.js   OSM の間取りの駅のメッシュ（床・天井・壁・吹き抜け・改札・ホーム・Capitole のヴォールト）
 scripts/metro-osm.mjs  OSM（Overpass API）から駅の中と出入口を取り、public/data/toulouse-metro-osm.json を作る（Git に入れている）
+src/metro/aerial.js    高架の駅（Basso Cambo・Jolimont）の間取り・歩ける所・メッシュ
+scripts/metro-tracks.mjs OSM の線路と IGN の標高から本物の線形 public/data/toulouse-metro-tracks.json を作る（Git に入れている）
 src/metro/train.js     VAL 208 の車両（車内・車外・扉）と車内の歩ける所
-src/metro/tunnel.js    駅と駅のあいだのトンネル
+src/metro/tunnel.js    駅と駅のあいだのトンネル・高架橋と橋脚・地上の線路・覆いのある箱・トンネルの口
 src/metro/nav.js       歩ける床と壁（地上・地下・動く電車の中を同じしくみで）
 src/metro/walker.js    歩く人（人形・歩く動き・段差・動く床に運ばれる）
 src/metro/crowd.js     駅と車内の人
@@ -242,8 +251,9 @@ src/metro/audio.js     走行音・扉の合図・足音・放送（音声合成
 src/world/scene.js     レンダラー・空・太陽・霧（自転車のゲームと共通）
 ```
 
-テスト: `npm test` に路線網（`test/unit/metro-network.test.mjs`）・駅の間取りと歩ける道（`metro-station.test.mjs`）・歩く人と電車の乗り降り（`metro-walk.test.mjs`）・OSM の駅（`metro-osm.test.mjs`。全駅のつながり・つなぎ目・体の幅で歩けるか・島式のホーム）が入っています。
-OSM の駅のデータを作り直すには `NODE_USE_ENV_PROXY=1 node scripts/metro-osm.mjs`（Overpass API に接続。LiDAR の吹き抜けと合わせるので、先に `npm run fetch-data -- toulouse`）。
+テスト: `npm test` に路線網（`test/unit/metro-network.test.mjs`）・駅の間取りと歩ける道（`metro-station.test.mjs`）・歩く人と電車の乗り降り（`metro-walk.test.mjs`）・OSM の駅（`metro-osm.test.mjs`。全駅のつながり・つなぎ目・体の幅で歩けるか・島式のホーム）・本物の線形と高架の駅（`metro-tracks.test.mjs`。駅の並び・曲がり・地上の区間・高架の駅を歩けるか）が入っています。
+OSM の駅のデータを作り直すには `NODE_USE_ENV_PROXY=1 node scripts/metro-osm.mjs`（Overpass API に接続。LiDAR の吹き抜けと合わせるので、先に `npm run fetch-data -- toulouse`）。線路の線形は `NODE_USE_ENV_PROXY=1 node scripts/metro-tracks.mjs`。
+`node test/metro-probe.mjs 'station=basso-cambo&start=train' '<手順>'` で、好きな駅・手順で撮影できます。
 同梱データ（`npm run fetch-data -- toulouse`）があれば、`npm run build && node test/metro-shot.mjs capitole platform walk` で、本物の地図の上でホームから地上まで歩いて撮影します（`test/output/metro-*.png`。`train ride` で電車に乗る、`street` で地上から）。
 
 ## 開発
