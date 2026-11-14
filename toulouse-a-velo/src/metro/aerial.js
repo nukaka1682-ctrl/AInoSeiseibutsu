@@ -105,7 +105,7 @@ export function buildAerialNav(plan) {
   const wall = (a, b, y0, y1) => nav.addWall(a[0], a[1], b[0], b[1], y0, y1);
   const yH = ym + plan.hallH + 2;
   // 切符売り場（外の壁から階段の吹き抜けを除く）
-  nav.addRegion(rectU(U, U0, U1, -WT, WT), ym, { kind: 'hall' });
+  nav.addRegion(rectU(U, U0, U1, -WT, WT), ym, { kind: 'hall', holes: [1, -1].map((k) => rectU(U, STAIR_U, U1 + 0.1, (WT - SHAFT_W) * k, WT * k * 1.01)) }); // 階段の所は階段の床だけ
   // 外の壁（扉の所はあける）
   const edges = [[U0, -WT, U1, -WT, 0, -1], [U0, WT, U1, WT, 0, 1], [U0, -WT, U0, WT, -1, 0], [U1, -WT, U1, WT, 1, 0]];
   for (const [u0, t0, u1, t1, nu, nt] of edges) {
@@ -230,7 +230,7 @@ export function buildAerialMesh(plan, { network = null, groundAt = () => plan.ym
     // ベンチ・駅名の板・看板・次の電車の表示
     for (const s of [-Lb + 5, Lb - 6]) {
       if (s > hs0 - 2.5 && s < hs1 + 2.5) continue;
-      bench(B, ...at(s, (WT - 0.35) * side), yp, f.ax, f.az);
+      bench(B, ...at(s, (WT - 0.35) * side), yp, f.ax * side, f.az * side);
     }
     for (const s of [-Lb + 9, 0, Lb - 9]) {
       const [x, z] = at(s, (WT - 0.02) * side);

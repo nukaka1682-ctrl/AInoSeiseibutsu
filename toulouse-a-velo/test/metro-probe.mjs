@@ -28,7 +28,7 @@ await page.waitForFunction(() => window.__metro?.phase === 'play' || !document.g
 const shot = async (name) => {
   await page.evaluate(() => document.getElementById('toast').classList.remove('show'));
   await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
-  await page.screenshot({ path: join(out, `probe-${name}.png`) });
+  await page.screenshot({ path: join(out, name.includes('.') ? name : `probe-${name}.png`) });
 };
 const sim = (s, ctl = { fwd: 0, side: 0 }) => page.evaluate(([s, ctl]) => window.__metroSimulate(s, ctl), [s, ctl]);
 const ev = (code) => page.evaluate(code);

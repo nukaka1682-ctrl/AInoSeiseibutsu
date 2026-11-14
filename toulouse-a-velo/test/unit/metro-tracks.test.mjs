@@ -55,3 +55,55 @@ test('本物の線形: A 線の地上・高架の区間（Basso Cambo・環状�
   // 高架橋の上の高さは線路の標高から（Jolimont の高架橋は東へ下る）
   assert.ok(pathAt(A, jo.S.A + 100).y > pathAt(A, jo.S.A + 300).y + 8);
 });
+
+// 床から床へ 0.4 m 刻みで歩いて広がる（metro-station.test.mjs の flood と同じ）
+function flood(nav, start, step = 0.4) {
+  const seen = new Set(), out = [];
+  const key = (x, z, y) => `${Math.round(x / step)},${Math.round(z / step)},${Math.round(y / 1.2)}`;
+  const f0 = nav.floorAt(start[0], start[1], start[2]);
+  if (!f0) return out;
+  const q = [[start[0], start[1], f0.y, f0.region]];
+  seen.add(key(start[0], start[1], f0.y));
+  while (q.length && out.length < 400000) {
+    const [x, z, y, region] = q.shift();
+    out.push({ x, z, y, region });
+    for (const [dx, dz] of [[step, 0], [-step, 0], [0, step], [0, -step]]) {
+      const f = nav.step(x, z, y, x + dx, z + dz);
+      if (!f) continue;
+      const k = key(x + dx, z + dz, f.y);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      q.push([x + dx, z + dz, f.y, f.region]);
+    }
+  }
+  return out;
+}
+
+test('高架の駅（Basso Cambo・Jolimont）: 街への扉から切符売り場・改札・階段を通って両方のホームへ歩ける', async () => {
+  const { RAIL_ALT_TO_FLOOR } = await import('../../src/metro/network.js');
+  const { aerialLevels, buildAerialNav, isAerial, planAerialStation, aerialFootprints } = await import('../../src/metro/aerial.js');
+  const { Nav } = await import('../../src/metro/nav.js');
+  const aerial = net.stations.filter(isAerial);
+  assert.deepEqual(aerial.map((s) => s.id), ['basso-cambo', 'jolimont']);
+  for (const s of aerial) {
+    const ground = () => s.aerial.A + RAIL_ALT_TO_FLOOR - 7; // 平らな地面（ホームの 7 m 下）
+    const lv = aerialLevels(s, RAIL_ALT_TO_FLOOR, ground);
+    s.ym = lv.ym;
+    s.yp = lv.yp;
+    assert.ok(Math.abs(s.yp.A - s.ym - 6.85) < 1e-6);
+    assert.equal(aerialFootprints(s, ground).length, 1);
+    const plan = planAerialStation(s, ground, net);
+    assert.equal(plan.doors.length, 3);
+    const nav = new Nav();
+    nav.add(buildAerialNav(plan));
+    for (const d of plan.doors) {
+      const got = flood(nav, [d.x + d.nx * 1.5, d.z + d.nz * 1.5, s.ym]);
+      for (const side of [1, -1]) {
+        assert.ok(got.some((p) => p.region?.kind === 'platform' && p.region.side === side && Math.abs(p.y - s.yp.A) < 0.01), `${s.id}: 扉から ${side > 0 ? '+' : '−'} のホームへ`);
+      }
+      // ホームから線路へは出られない（ホームドアは閉まっている）
+      const f = plan.frame;
+      assert.ok(!got.some((p) => Math.abs(p.y - s.yp.A) < 0.5 && Math.abs(f.local(p.x, p.z)[1]) < 3));
+    }
+  }
+});
