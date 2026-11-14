@@ -106,7 +106,8 @@ export function displayColor(linear, exposure = 1) {
 // 午後（標準）は写真に合わせて較正した値（太陽 38°・南西、LIGHT、空、霧、露出 1.1）。ほかの時間帯はそこからの出発点。
 //   sun: 太陽（夜は月）の高さ・方位（度。方位は北から時計回り）と色・強さ、hemi: 半球光（空 / 地面 / 強さ）、
 //   sky: 空のシェーダー（Sky）の uniform、exposure: 露出、fogTint / fogMix: 霧の色を地平線の空の色からこの色へ寄せる割合、
-//   night: 夜の割合（0〜1。空の星・窓と街灯の明かり）、water: 水面の映り込みの強さ、bloom: 光のにじみの閾値と強さ（フォトリアル）
+//   night: 夜の割合（0〜1。空の星・窓と街灯の明かり）、water: 水面の映り込みの強さ（waterClamp: 水面に映す空の明るさの上限。
+//   夕暮れは映り込みを強くして真上から見た川が黒くつぶれないようにし、低い角度で太陽のまわりが白く飛ばないように上限を付ける）、bloom: 光のにじみの閾値と強さ（フォトリアル）
 const DAY_SKY = { turbidity: 3.5, rayleigh: 1.4, mieCoefficient: 0.004, mieDirectionalG: 0.82 };
 const DAY_BLOOM = { threshold: 2.2, strength: 0.08 }; // メトロのゲームの地上（render.js の under = 0）と同じ
 export const TIME_OF_DAY = {
@@ -123,7 +124,7 @@ export const TIME_OF_DAY = {
   golden: {
     name: '夕暮れ', sun: { elevation: 8, azimuth: 278, color: '#ffb070', intensity: 2.6 },
     hemi: { sky: '#b6c0e0', ground: '#b48a6c', intensity: 0.9 },
-    sky: { ...DAY_SKY, turbidity: 6, rayleigh: 2.4, mieCoefficient: 0.006 }, exposure: 1.15, fogTint: '#d8a890', fogMix: 0.45, night: 0, water: 0.9, bloom: DAY_BLOOM,
+    sky: { ...DAY_SKY, turbidity: 6, rayleigh: 2.4, mieCoefficient: 0.006 }, exposure: 1.15, fogTint: '#d8a890', fogMix: 0.45, night: 0, water: 0.9, waterClamp: 1.2, bloom: DAY_BLOOM,
   },
   night: {
     name: '夜', sun: { elevation: 48, azimuth: 150, color: '#a9bde8', intensity: 0.45 },

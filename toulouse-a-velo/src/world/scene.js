@@ -110,6 +110,14 @@ export function setupScene(container) {
         skyClone.material.uniforms[k].value = v?.clone ? v.clone() : v;
       }
       skyClone.material.uniforms.showSunDisc.value = 0;
+      // 水面用の環境マップだけ、空のいちばん明るい所（低い太陽のまわりの輝き）を色合いを保ったまま抑える（look.waterClamp。
+      // 夕暮れに低い角度から太陽の方を見ると、水面が白く飛ぶため）。ふつうの環境マップでは抑えない（値が大きい）
+      skyClone.material.uniforms.uClamp = { value: 1e9 };
+      skyClone.material.fragmentShader = skyClone.material.fragmentShader
+        .replace('uniform float showSunDisc;', 'uniform float showSunDisc;\nuniform float uClamp;')
+        .replace('#include <tonemapping_fragment>', `float clampL = max(max(gl_FragColor.r, gl_FragColor.g), gl_FragColor.b);
+          if (clampL > uClamp) gl_FragColor.rgb *= uClamp / clampL;
+          #include <tonemapping_fragment>`);
       temp.push(skyClone);
     }
     envScene.add(...temp);
@@ -131,6 +139,7 @@ export function setupScene(container) {
     skyline.material.color.multiplyScalar(lit * 0.8);
     skyline.position.y = (46 * Math.tan(THREE.MathUtils.degToRad(7)) - 0.4) / 2;
     envScene.add(skyline);
+    if (look.waterClamp && temp[0].material.uniforms.uClamp) temp[0].material.uniforms.uClamp.value = look.waterClamp;
     const water = pmrem.fromScene(envScene, 0.04).texture;
     pmrem.dispose();
     for (const o of [...temp, ground, skyline]) {
