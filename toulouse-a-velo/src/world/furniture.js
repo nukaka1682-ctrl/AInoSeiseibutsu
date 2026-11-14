@@ -36,6 +36,8 @@ const PROMENADES = /^Promenade Henri[- ]Martin$/i; // 街灯を並べる河岸�
 const LIGHT_STEP = 27; // 横向きの灯具の街灯の間隔（片側だけの通り。左右交互の通りは片側でこの 2 倍）
 const DISC_STEP = 32; // 大通りの円盤形の街灯の間隔（両側に向かい合わせ）
 const BOULEVARD = new Set(['trunk', 'primary', 'secondary']);
+const WALL_LAMP_STEP = 22; // 旧市街の壁付けの角灯の間隔（通りに沿って、左右交互）
+const WALL_LAMP_TYPES = new Set([...CAR_ROADS, 'living_street', 'pedestrian']);
 export const CAR_L = 4.2, CAR_W = 1.8;
 const CAR_PITCH = 5.6; // 縦列駐車の 1 台分の長さ（車＋前後のすき間）
 const CURB_GAP = 0.15; // 縁石と駐車の車のすき間
@@ -628,6 +630,39 @@ export function planFurniture({ parsed, plan, clip, curbs = [], inOldTown = () =
       s0 += L;
     }
   }
+
+  // ---- 旧市街の壁付けの角灯（夜の明かりだけ。形はファサードのテクスチャの絵）: 歴史的な中心には柱の街灯がないので、
+  // 通りの中心線に沿って WALL_LAMP_STEP m おきに左右交互、道の端から外へ壁（solid）を探し、壁の 0.35 m 手前・高さ 4 m に灯具。
+  // 壁が見つからない側・広場の中・柱の街灯の近くには置かない。位置は道の始点からの距離で決める（タイルの境でずれない）
+  out.wallLamps = [];
+  const poles = [...out.lights, ...out.discs, ...out.candelabra];
+  for (const r of parsed.roads || []) {
+    if (!WALL_LAMP_TYPES.has(r.type) || r.bridge || r.tunnel || (r.layer || 0) !== 0 || r.pts.length < 2) continue;
+    let s0 = 0, k = 0;
+    for (let i = 0; i + 1 < r.pts.length; i++) {
+      const [ax, az] = r.pts[i], [bx, bz] = r.pts[i + 1], L = Math.hypot(bx - ax, bz - az);
+      const ux = (bx - ax) / (L || 1), uz = (bz - az) / (L || 1);
+      for (; WALL_LAMP_STEP * (k + 0.5) < s0 + L; k++) {
+        const t = WALL_LAMP_STEP * (k + 0.5) - s0;
+        const cx = ax + ux * t, cz = az + uz * t;
+        if (!inClip(cx, cz) || !inOldTown(cx, cz)) continue;
+        if (ctx.plazas.some((a) => cx >= a.bounds.minX && cx <= a.bounds.maxX && cz >= a.bounds.minZ && cz <= a.bounds.maxZ && pointInPolygon(cx, cz, a))) continue;
+        const sd = k % 2 ? 1 : -1, nx = -uz * sd, nz = ux * sd; // 左右交互
+        let wall = 0;
+        for (let d = (r.width || 4) / 2 + 0.5; d <= 9; d += 0.5) {
+          if (solid(cx + nx * d, cz + nz * d)) {
+            wall = d;
+            break;
+          }
+        }
+        if (!wall) continue;
+        const x = cx + nx * (wall - 0.35), z = cz + nz * (wall - 0.35);
+        if (poles.some((p) => Math.abs(p.x - x) < 14 && Math.abs(p.z - z) < 14)) continue;
+        out.wallLamps.push({ x, z, y: heightAt(x, z), a: yaw(-nx, -nz) });
+      }
+      s0 += L;
+    }
+  }
   return out;
 }
 
@@ -1003,6 +1038,41 @@ export function furnitureMaterial() {
   return m;
 }
 
+// ---------------------------------------------------------------- 夜の街灯の明かり
+// 街灯の種類ごとの灯具（光る所）の位置（模型の局所座標。x は腕の向き。それぞれの …Geometry() の灯具・角灯のガラスの中心）
+export const LAMP_HEADS = {
+  lights: [[1.28, 6.8, 0]], // lampGeometry: 灯具の下面
+  'swan-lights': [[1.22, 6.3, 0]], // swanLampGeometry: 吊り下げの角灯のガラス
+  'mast-lights': [[1.58, 9.2, 0]], // mastLampGeometry: 平たい灯具の下面
+  'disc-lights': [[0, 9.85, 0]], // discLampGeometry: 円盤の下面
+  candelabra: [[-0.6, 4.15, 0], [0.6, 4.15, 0], [0, 4.2, 0]], // candelabraGeometry: 提灯 3 つ
+  'capitole-lights': [[0.95, 7.83, 0], [-0.95, 7.83, 0], [0, 7.83, 0.95], [0, 7.83, -0.95], [0, 8.67, 0]], // capitoleLampGeometry: 角灯 5 つ
+  'wall-lamps': [[0, 4.0, 0]], // 旧市街の壁付けの角灯（模型はなく、ファサードの絵。planFurniture の wallLamps）
+};
+const LAMP_WALL = 'wall-lamps'; // 壁付けの角灯: 色 #ffc070、光のたまりの半径 6 m
+const LAMP_WHITE = new Set(['mast-lights', 'disc-lights']); // 大通りの鋼の柱・円盤は白っぽい光
+// 明かりの色（種類 0 暖色・1 白っぽい・2 壁付けの角灯）: 光の玉の RGB と、光のたまりの RGB（材料の色 #ffd9a0 に掛ける）
+const LAMP_COLORS = [[1.0, 0.7, 0.36, 0.24, 0.2, 0.16], [1.0, 0.95, 0.88, 0.2, 0.21, 0.22], [1.0, 0.62, 0.26, 0.26, 0.19, 0.12]];
+export const lampNight = { value: 0 }; // 夜の割合（使う側が時間帯で入れる。0 のときは明かりを描かない）
+
+// やわらかい丸（中心が明るい）のテクスチャ。光の玉と地面の光のたまりで共有する（夜になって初めて作る）
+let glowTexture = null;
+function lampGlowTexture() {
+  if (glowTexture) return glowTexture;
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const ctx = c.getContext('2d');
+  const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.25, 'rgba(255,255,255,0.55)');
+  g.addColorStop(0.6, 'rgba(255,255,255,0.14)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 64, 64);
+  glowTexture = new THREE.CanvasTexture(c);
+  return glowTexture;
+}
+
 // ---------------------------------------------------------------- タイルの小物（種類ごとに 1 つの InstancedMesh）
 export class FurnitureSet {
   constructor() {
@@ -1011,10 +1081,15 @@ export class FurnitureSet {
     this.parts = [];
     this.at = null;
     this.count = 0;
+    this.items = {}; // 種類ごとの置いた物 { x, y, z, a, ... }（街のにぎわい: テラスの客・ハトの場所に使う）
+    this.lampHeads = []; // 夜の明かり: 灯具ごとに [x, y, z, 地面の高さ, 灯具の高さ, 色の種類（LAMP_COLORS）, 光のたまりの中心 [x, z]（街灯の 1 つ目の灯具だけ）]
+    this.glow = null; // 光の玉（Points）と地面の光のたまり（InstancedMesh）。夜になって初めて作る
+    this.lampsOn = false;
   }
 
   // items: { x, y, z, a, sx, sy, color } の列。全部の行列を覚えておき、cull で近い物だけを前に詰めて描く
   add(name, geometry, material, items, { shadow = false } = {}) {
+    this.items[name] = items;
     if (!items.length) {
       geometry.dispose();
       return;
@@ -1033,6 +1108,7 @@ export class FurnitureSet {
       xz[2 * i + 1] = it.z;
       ys[i] = it.y || 0;
       if (cols) c.set(it.color).toArray(cols, i * 3);
+      this.addLampHeads(name, it);
     });
     if (cols) mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3);
     mesh.castShadow = shadow;
@@ -1046,9 +1122,38 @@ export class FurnitureSet {
     this.count += n;
   }
 
+  // 街灯の灯具の世界座標（Y 軸まわりの向き a だけ。街灯は傾けない）。光のたまりは街灯ごとに 1 つ（灯具が 1 つならその真下、
+  // いくつもある燭台形は柱の足元）
+  addLampHeads(name, it) {
+    const heads = LAMP_HEADS[name] || [];
+    heads.forEach(([hx, hy, hz], j) => {
+      const ca = Math.cos(it.a || 0), sa = Math.sin(it.a || 0);
+      const x = it.x + hx * ca + hz * sa, z = it.z - hx * sa + hz * ca;
+      const kind = name === LAMP_WALL ? 2 : LAMP_WHITE.has(name) ? 1 : 0;
+      this.lampHeads.push([x, (it.y || 0) + hy, z, it.y || 0, hy, kind, j ? null : heads.length > 1 ? [it.x, it.z] : [x, z]]);
+    });
+  }
+
+  // 模型のない明かりだけ（旧市街の壁付けの角灯）
+  addLamps(name, items) {
+    for (const it of items) this.addLampHeads(name, it);
+  }
+
+  // ポン・ヌフの街灯（bridges.js の writeLamp が覚えた灯具 { x, z, y: 足元, head: 灯具の高さ }）。clip の中の物だけ
+  addBridgeLamps(lamps, clip = null) {
+    for (const l of lamps || []) {
+      if (clip && !(l.x >= clip.minX && l.x < clip.maxX && l.z >= clip.minZ && l.z < clip.maxZ)) continue;
+      this.lampHeads.push([l.x, l.head, l.z, l.y, l.head - l.y, 0, [l.x, l.z]]);
+    }
+  }
+
   // (x, z) から FURNITURE_FAR m 以内の物だけを描く（REFILL m 動くまでは選び直さない）
   cull(x, z, force = false) {
+    const night = lampNight.value > 0 && this.lampHeads.length > 0;
+    if (night !== this.lampsOn) force = true; // 夜になった・明けた: すぐに明かりを付け外しする
+    this.lampsOn = night;
     if (!force && this.at && Math.hypot(x - this.at[0], z - this.at[1]) < REFILL) return;
+    this.cullLamps(x, z, night);
     this.at = [x, z];
     const r2 = FURNITURE_FAR * FURNITURE_FAR;
     for (const P of this.parts) {
@@ -1072,6 +1177,79 @@ export class FurnitureSet {
       // （坂の上下に並ぶ物も囲むように、高さの幅も入れる）
       if (k) P.mesh.boundingSphere.set(P.mesh.boundingSphere.center.set((x0 + x1) / 2, (y0 + y1) / 2 + 5, (z0 + z1) / 2), Math.hypot(x1 - x0, z1 - z0, y1 - y0) / 2 + 12);
     }
+  }
+
+  // 夜の街灯の明かり: 灯具ごとの光の玉（加算合成の点、直径約 2 m）と、足元の地面の光のたまり（半径 = 灯具の高さ × 1.3 の
+  // 水平の四角に丸いグラデーション）。どちらも小物と同じく (x, z) から FURNITURE_FAR m 以内だけ。夜でなければ描かない
+  // （描画コールを増やさない）。タイル（または街）ごとに描画コール 2 つ
+  cullLamps(x, z, night) {
+    if (!night) {
+      if (this.glow) this.glow.points.visible = this.glow.pools.visible = false;
+      return;
+    }
+    const L = this.lampHeads, n = L.length;
+    if (!this.glow) {
+      const tex = lampGlowTexture();
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
+      geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
+      // size: 点の大きさは size × 画面の高さの半分 / 奥行き（視野 62° では、見かけの直径はおよそ size × 0.6 m）
+      const points = new THREE.Points(geo, new THREE.PointsMaterial({
+        map: tex, size: 3.2, sizeAttenuation: true, vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
+      }));
+      const plane = new THREE.PlaneGeometry(2, 2).rotateX(-Math.PI / 2);
+      const pools = new THREE.InstancedMesh(plane, new THREE.MeshBasicMaterial({
+        map: tex, color: '#ffd9a0', transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
+        polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -8,
+      }), n);
+      pools.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3);
+      for (const o of [points, pools]) {
+        o.name = 'lamp-glow';
+        o.frustumCulled = false;
+        o.matrixAutoUpdate = false;
+        o.renderOrder = 2; // 地面・壁の後に（加算合成で重ねる）
+        this.group.add(o);
+      }
+      this.glow = { points, pools };
+    }
+    const { points, pools } = this.glow;
+    const pos = points.geometry.getAttribute('position'), col = points.geometry.getAttribute('color');
+    const mats = pools.instanceMatrix.array, pc = pools.instanceColor.array;
+    const r2 = FURNITURE_FAR * FURNITURE_FAR;
+    let k = 0, kp = 0;
+    const P = pos.array, C = col.array;
+    for (let i = 0; i < n; i++) {
+      const [hx, hy, hz, gy, h, kind, pool] = L[i];
+      if ((hx - x) ** 2 + (hz - z) ** 2 > r2) continue;
+      // 光の玉: 暖色 #ffd9a0（大通りの鋼の柱・円盤は白っぽく、壁付けの角灯は #ffc070）
+      const c = LAMP_COLORS[kind];
+      P[k * 3] = hx;
+      P[k * 3 + 1] = hy - 0.05;
+      P[k * 3 + 2] = hz;
+      C[k * 3] = c[0];
+      C[k * 3 + 1] = c[1];
+      C[k * 3 + 2] = c[2];
+      k++;
+      if (!pool) continue;
+      // 光のたまり: 同じ色で弱く（色は材料の色 × これ）。半径 = 灯具の高さ × 1.3（壁付けの角灯は 6 m）
+      pc[kp * 3] = c[3];
+      pc[kp * 3 + 1] = c[4];
+      pc[kp * 3 + 2] = c[5];
+      const s = kind === 2 ? 6 : h * 1.3, o = kp * 16;
+      mats.fill(0, o, o + 16);
+      mats[o] = mats[o + 10] = s;
+      mats[o + 5] = mats[o + 15] = 1;
+      mats[o + 12] = pool[0];
+      mats[o + 13] = gy + 0.06;
+      mats[o + 14] = pool[1];
+      kp++;
+    }
+    points.geometry.setDrawRange(0, k);
+    pos.needsUpdate = col.needsUpdate = true;
+    pools.count = kp;
+    pools.instanceMatrix.needsUpdate = pools.instanceColor.needsUpdate = true;
+    points.visible = k > 0;
+    pools.visible = kp > 0;
   }
 }
 
@@ -1115,6 +1293,7 @@ export function buildFurniture(opts, cw = null) {
   set.add('containers', containerGeometry(), mat, items.containers, { shadow: true });
   set.add('shelters', shelterGeometry(), mat, items.shelters, { shadow: true });
   set.add('morris', morrisGeometry(), mat, items.columns, { shadow: true });
+  set.addLamps(LAMP_WALL, items.wallLamps || []);
   if (cw) {
     for (const c of items.colliders) {
       if (c.r) cw.addCircle(c.x, c.z, c.r);

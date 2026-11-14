@@ -4,11 +4,16 @@ import { LocalProjection } from '../../src/geo.js';
 import { OLD_TOWN, oldTownTest } from '../../src/config.js';
 import { CROWN_ASPECT, crownLimit, shapeTrees } from '../../src/world/trees.js';
 import {
-  TONE_MAPPING_GLSL, displayColor, environmentIntensity, linearToSrgb, neutralToneMap, probeEnvironment, toneMap,
+  TIME_OF_DAY, TIME_ORDER, TONE_MAPPING_GLSL, displayColor, environmentIntensity, linearToSrgb, neutralToneMap, probeEnvironment,
+  shadowLook, sunDirection, toneMap,
 } from '../../src/world/light.js';
 import { facadeStyle } from '../../src/world/buildings.js';
 import { STYLE, stylePlainColor } from '../../src/world/facades.js';
 import { facingSquare } from '../../src/world/landmarkfacades.js';
+import {
+  FurnitureSet, LAMP_HEADS, binGeometry, candelabraGeometry, capitoleLampGeometry, discLampGeometry, furnitureMaterial, lampGeometry,
+  lampNight, mastLampGeometry, swanLampGeometry,
+} from '../../src/world/furniture.js';
 
 test('旧市街の範囲: 環状の大通りの内側と左岸のサン・シプリアン', () => {
   const proj = new LocalProjection(43.5994, 1.4395);
@@ -154,4 +159,69 @@ test('ファサード: 旧市街のレンガ・材料不明の建物は 8 割が
   const back = box(2, 5, -40, 30, -25); // 通りをはさんだ向こう
   const side = box(3, 42, 5, 60, 25); // 東側（2 m 離れている）
   assert.deepEqual(facingSquare(square, [front, back, side]).map((b) => b.id), [1, 3]);
+});
+
+test('時間帯: 朝・午後・夕暮れ・夜がそろい、午後は較正した今の値のまま', () => {
+  assert.deepEqual(TIME_ORDER, ['morning', 'afternoon', 'golden', 'night']);
+  for (const id of TIME_ORDER) {
+    const t = TIME_OF_DAY[id];
+    assert.ok(t, id);
+    assert.ok(t.name && t.sun && t.hemi && t.sky && t.bloom, id);
+    assert.ok(t.night >= 0 && t.night <= 1);
+    assert.ok(t.fogMix >= 0 && t.fogMix <= 1);
+  }
+  // 午後（scene.js の LIGHT・空の uniform・霧・露出。写真に合わせて較正した値）
+  const a = TIME_OF_DAY.afternoon;
+  assert.deepEqual(a.sun, { elevation: 38, azimuth: 225, color: '#fff0d8', intensity: 2.8 });
+  assert.deepEqual(a.hemi, { sky: '#cfdcef', ground: '#a48a76', intensity: 1.3 });
+  assert.deepEqual(a.sky, { turbidity: 3.5, rayleigh: 1.4, mieCoefficient: 0.004, mieDirectionalG: 0.82 });
+  assert.equal(a.exposure, 1.1);
+  assert.equal(a.fogTint, '#bdb5b2');
+  assert.equal(a.fogMix, 0.35);
+  assert.equal(a.night, 0);
+  assert.equal(a.water, 0.16);
+  assert.deepEqual(shadowLook(38), { dist: 600, normalBias: 1 }, '午後の影の箱は今のまま');
+  // 夕暮れは影の箱を深く、ずらしを大きく
+  const g = shadowLook(TIME_OF_DAY.golden.sun.elevation);
+  assert.ok(g.dist > 600 && g.normalBias > 1 && g.normalBias <= 3);
+  assert.equal(TIME_OF_DAY.night.night, 1);
+});
+
+test('夜の街灯: 灯具の位置は模型のガラス・灯具の高さにあり、向きに合わせて世界座標に回る', () => {
+  for (const [name, geo] of [['lights', lampGeometry()], ['swan-lights', swanLampGeometry()], ['mast-lights', mastLampGeometry()], ['disc-lights', discLampGeometry()], ['candelabra', candelabraGeometry()], ['capitole-lights', capitoleLampGeometry()]]) {
+    geo.computeBoundingBox();
+    const bb = geo.boundingBox;
+    for (const [x, y, z] of LAMP_HEADS[name]) {
+      assert.ok(x >= bb.min.x && x <= bb.max.x && z >= bb.min.z && z <= bb.max.z, `${name} の灯具は模型の中`);
+      assert.ok(y > bb.max.y - 2 && y < bb.max.y, `${name} の灯具は上の方 (${y} / ${bb.max.y})`);
+    }
+  }
+  const fs = new FurnitureSet();
+  fs.add('lights', lampGeometry(), furnitureMaterial(), [{ x: 10, y: 2, z: 5, a: Math.PI / 2 }]);
+  fs.add('bins', binGeometry(), furnitureMaterial(), [{ x: 0, y: 0, z: 0 }]);
+  assert.equal(fs.lampHeads.length, 1, '街灯でない小物は数えない');
+  const [hx, hy, hz, gy, h] = fs.lampHeads[0];
+  // 向き a = 90°（three.js の Y 軸まわり）: 模型の +x（腕）は世界の −z へ
+  assert.ok(Math.abs(hx - 10) < 1e-9 && Math.abs(hz - (5 - 1.28)) < 1e-9);
+  assert.equal(hy, 2 + 6.8);
+  assert.equal(gy, 2);
+  assert.equal(h, 6.8);
+  assert.equal(lampNight.value, 0, '既定は夜でない');
+});
+
+test('時間帯: 太陽の高さ・方位から向きのベクトル', () => {
+  const D = Math.PI / 180;
+  for (const id of TIME_ORDER) {
+    const { elevation, azimuth } = TIME_OF_DAY[id].sun;
+    const v = sunDirection(elevation, azimuth);
+    assert.ok(Math.abs(Math.hypot(...v) - 1) < 1e-12, '単位ベクトル');
+    assert.ok(Math.abs(v[1] - Math.sin(elevation * D)) < 1e-12, 'y = sin(高さ)');
+  }
+  const morning = sunDirection(22, 105), golden = sunDirection(8, 278), afternoon = sunDirection(38, 225);
+  assert.ok(morning[0] > 0.85, '朝は東（+x）');
+  assert.ok(golden[0] < -0.95, '夕暮れは西（−x）');
+  assert.ok(afternoon[0] < 0 && afternoon[2] > 0, '午後は南西（−x・+z）');
+  assert.ok(Math.abs(afternoon[0] + afternoon[2]) < 1e-12);
+  // 北（方位 0）は −z、南（180）は +z
+  assert.ok(sunDirection(30, 0)[2] < 0 && sunDirection(30, 180)[2] > 0);
 });

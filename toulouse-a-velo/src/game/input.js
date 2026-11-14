@@ -7,6 +7,9 @@ export class Input {
     this.touch = { left: false, right: false, pedal: false, brake: false };
     this.enabled = true;
     this.prevPad = [];
+    // 見回す: 右スティック（軸 2・3）と、キャンバスの上の右ボタン（中ボタン）のドラッグ（bindLook）
+    this.look = { x: 0, y: 0, dx: 0, dy: 0, held: false };
+    this.lookDrag = { dx: 0, dy: 0, held: false };
     addEventListener('keydown', (e) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
       if (!e.repeat) this.handlers.get(e.code)?.(e);
@@ -36,6 +39,25 @@ export class Input {
     }
   }
 
+  // キャンバスの上の右（中）ボタンのドラッグで見回す。右クリックのメニューはキャンバスの上では出さない
+  bindLook(el) {
+    el.addEventListener('contextmenu', (e) => e.preventDefault());
+    el.addEventListener('pointerdown', (e) => {
+      if (e.button !== 2 && e.button !== 1) return;
+      e.preventDefault();
+      this.lookDrag.held = true;
+    });
+    addEventListener('pointermove', (e) => {
+      if (!this.lookDrag.held) return;
+      this.lookDrag.dx += e.movementX || 0;
+      this.lookDrag.dy += e.movementY || 0;
+    });
+    addEventListener('pointerup', (e) => {
+      if (e.button === 2 || e.button === 1 || e.buttons === 0) this.lookDrag.held = false;
+    });
+    addEventListener('blur', () => (this.lookDrag.held = false));
+  }
+
   pad() {
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
     for (const p of pads) if (p && p.connected) return p;
@@ -58,8 +80,17 @@ export class Input {
     this.steerAxis += Math.sign(diff) * Math.min(Math.abs(diff), rate * dt);
     let steer = this.steerAxis;
 
+    const lk = this.look;
+    lk.x = lk.y = 0;
+    lk.dx = this.lookDrag.dx;
+    lk.dy = this.lookDrag.dy;
+    lk.held = this.lookDrag.held;
+    this.lookDrag.dx = this.lookDrag.dy = 0;
     const p = this.pad();
     if (p) {
+      const dz = (v) => (Math.abs(v) > 0.15 ? Math.sign(v) * ((Math.abs(v) - 0.15) / 0.85) : 0);
+      lk.x = dz(p.axes[2] || 0);
+      lk.y = dz(p.axes[3] || 0);
       const ax = p.axes[0] || 0;
       if (Math.abs(ax) > 0.12) steer = Math.sign(ax) * ((Math.abs(ax) - 0.12) / 0.88) ** 1.4;
       const rt = p.buttons[7]?.value || 0, lt = p.buttons[6]?.value || 0;
@@ -76,6 +107,6 @@ export class Input {
       }
     }
     if (!this.enabled) return { throttle: 0, brake: 1, steer: 0, sprint: false };
-    return { throttle, brake, steer, sprint };
+    return { throttle, brake, steer, sprint, look: lk };
   }
 }

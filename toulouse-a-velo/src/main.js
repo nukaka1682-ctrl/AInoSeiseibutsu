@@ -14,10 +14,22 @@ import { fetchTerrainFile, loadTerrain } from './data/terrain.js';
 import { Bike } from './game/bike.js';
 import { CAMERA_LABELS, CameraRig } from './game/camera.js';
 import { Input } from './game/input.js';
-import { AudioFx } from './game/audio.js';
+import { AudioFx, audioTest } from './game/audio.js';
+import { ambientInfo } from './game/ambientinfo.js';
+import { CityLife } from './game/citylife.js';
+import { Traffic } from './game/traffic.js';
 import { animateBeacon, createBeacon, distanceToLandmark } from './game/landmarks.js';
 import { MapRenderer, drawFullMap, drawMinimap } from './ui/minimap.js';
 import { setupScene } from './world/scene.js';
+import { MEDAL_ICON, TOURS, fmtDelta, medalFor, medalTimes, nextMedal, loadRecord, pickTour, saveRecord, splitDelta, tourLength } from './game/tours.js';
+import { Violets, planViolets } from './game/violets.js';
+import { TravelStats, renderCarnet, stampDiscovery } from './ui/carnet.js';
+import { PhotoMode } from './game/photomode.js';
+import { restoreTitleSettings, saveTitleSettings } from './game/settings.js';
+import { TIME_OF_DAY, TIME_ORDER } from './world/light.js';
+import { createPipeline } from './metro/render.js';
+import { facadeNight } from './world/facades.js';
+import { lampNight } from './world/furniture.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -41,7 +53,7 @@ const store = {
 };
 
 // ---------------------------------------------------------------- レンダラーとシーン（world/scene.js）
-const { renderer, scene, camera, sky, sun, hemi, waterEnv, shadowFit, fitSunShadow: fitSunShadowAt } = setupScene($('app'));
+const { renderer, scene, camera, sky, sun, hemi, waterEnv, shadowFit, fitSunShadow: fitSunShadowAt, applyTimeOfDay, timeOfDay } = setupScene($('app'));
 const fitSunShadow = () => fitSunShadowAt(state.world?.terrain ? (x, z) => state.world.terrain.h(x, z) : null);
 
 const textures = makeTextures();
@@ -52,9 +64,36 @@ const groundMats = createGroundMaterials(textures);
 groundMats.water.envMap = waterEnv;
 groundMats.water.envMapIntensity = 0.16;
 
+// フォトリアルの後処理（metro/render.js: 物陰の暗さ・光のにじみ・なめらかな縁）。ソフトウェア描画（テスト・撮影）では既定で切る。
+// ?photo=1 / ?photo=0 が最優先。pipe.render は毎フレーム、にじみの閾値と強さを地下の割合（ここでは 0）から決め直すので、
+// 時間帯の値（夜は窓・街灯がにじむ）を読むように差し替える
+const pipe = createPipeline(renderer, scene, camera);
+const bloomLook = { ...TIME_OF_DAY.afternoon.bloom };
+for (const k of ['threshold', 'strength']) Object.defineProperty(pipe.bloom, k, { get: () => bloomLook[k], set() {} });
+{
+  const gl = renderer.getContext(), info = gl.getExtension('WEBGL_debug_renderer_info');
+  const software = /SwiftShader|llvmpipe|Software/i.test(info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : '');
+  $('opt-photo').checked = params.has('photo') ? params.get('photo') === '1' : !software;
+}
+const photoGuard = {};
+// 時間帯（world/light.js の TIME_OF_DAY）。?time=golden でも選べる
+if (TIME_OF_DAY[params.get('time')]) $('opt-time').value = params.get('time');
+function setTimeOfDay(id) {
+  if (TIME_OF_DAY[id] && id !== timeOfDay.id) groundMats.water.envMap = applyTimeOfDay(id).waterEnv;
+  const look = TIME_OF_DAY[(state.timeOfDay = timeOfDay.id)];
+  groundMats.water.envMapIntensity = look.water;
+  Object.assign(bloomLook, look.bloom);
+  facadeNight.value = lampNight.value = look.night; // 窓・街灯の明かり
+  state.bike?.setHeadlight(look.night > 0);
+  $('time-btn').textContent = `時間帯: ${look.name}`;
+}
+
 const input = new Input();
 const audio = new AudioFx();
+audio.restorePrefs(store); // 音量と消音（tav-audio）
+window.__tavAudioTest = audioTest; // 音の確認（test/audio-check.mjs）
 const rig = new CameraRig(camera);
+const travel = new TravelStats(store); // 旅の手帳の通算の記録
 
 // ---------------------------------------------------------------- ゲームの状態
 const state = {
@@ -72,11 +111,14 @@ const state = {
   toastTimer: 0,
   lastWarn: 0,
   discovered: new Set(store.get('tav-discovered', [])),
+  tourId: 'classique', // タイムアタックのコース（game/tours.js の TOURS）
 };
 window.__tav = state; // デバッグ・テスト用
 state.rig = rig;
 window.__tavDebug = { THREE, scene, camera, renderer, sun, hemi, shadowFit };
 state.setTarget = (lm) => setTarget(lm);
+state.timeOfDay = timeOfDay.id;
+state.setTimeOfDay = (id) => setTimeOfDay(id); // テスト・撮影用
 // テスト用: 描画とは独立に物理を seconds 秒ぶん進める（遅い環境でも結果が変わらないように）
 window.__tavSimulate = (seconds, ctl) => {
   const c = { throttle: 0, brake: 0, steer: 0, sprint: false, ...ctl };
@@ -102,6 +144,15 @@ const areas = { ...(customArea ? { custom: customArea } : {}), ...AREA_PRESETS }
   if (params.get('mode') === 'tour') document.querySelector('input[name=mode][value=tour]').checked = true;
   if (params.get('refresh') === '1') $('opt-refresh').checked = true; // 同梱データ・キャッシュを使わずに取得する
 }
+// タイムアタックのコースの選択（モードでタイムアタックを選んだときだけ見せる。?tour=garonne でも選べる）
+for (const t of TOURS) $('opt-tour').add(new Option(`${t.ja}（${t.fr}）`, t.id));
+if (TOURS.some((t) => t.id === params.get('tour'))) $('opt-tour').value = params.get('tour');
+const showTourPick = () => show('tour-pick', document.querySelector('input[name=mode]:checked')?.value === 'tour');
+for (const r of document.querySelectorAll('input[name=mode]')) r.addEventListener('change', showTourPick);
+// タイトルの設定を前回のとおりに戻す（URL で指定した項目は URL を優先）。変えるたびに保存（opt-refresh は保存しない）
+restoreTitleSettings($('title-screen'), store, params);
+$('title-screen').addEventListener('change', () => saveTitleSettings($('title-screen'), store));
+showTourPick();
 
 function show(id, on = true) {
   $(id).classList.toggle('hidden', !on);
@@ -120,6 +171,7 @@ async function startGame() {
   audio.resume();
   state.presetId = document.querySelector('input[name=area]:checked')?.value || DEFAULT_AREA;
   state.mode = document.querySelector('input[name=mode]:checked')?.value || 'free';
+  state.tourId = $('opt-tour').value || 'classique';
   const area = areas[state.presetId];
   const shadows = $('opt-shadows').checked;
   renderer.shadowMap.enabled = shadows;
@@ -133,6 +185,10 @@ async function startGame() {
     sun.shadow.map = null;
     shadowFit.half = 0;
   }
+  pipe.enabled = $('opt-photo').checked;
+  pipe.setSize(innerWidth, innerHeight);
+  Object.assign(photoGuard, { t0: 0, t1: 0, frames: 0, done: params.get('photo') === '1' });
+  setTimeOfDay($('opt-time').value);
 
   show('title-screen', false);
   show('error-screen', false);
@@ -206,6 +262,18 @@ function finishWorld(world) {
   world.routeMesh.renderOrder = ORDER.route;
   world.routeMesh.frustumCulled = false;
   world.group.add(world.routeMesh);
+  // 街のにぎわい（歩く人・カフェの客・ハト）。設定で外したとき・?life=0 では出さない
+  if ($('opt-life')?.checked !== false && params.get('life') !== '0') {
+    world.life = new CityLife(world, { people: 70, radius: 110 });
+    world.group.add(world.life.group);
+    // 走るもの（ほかの自転車乗り・トラム）。同じ設定で切る
+    world.traffic = new Traffic(world, { cyclists: 6 });
+    world.group.add(world.traffic.group);
+  }
+  // スミレ集め（自由走行のとき。集めた花はエリアごとに保存）
+  const okPoint = (x, z) => !world.collision.blockedByWater(x, z) && !world.collision.outOfBounds(x, z);
+  world.violets = new Violets(world, planViolets(world.landmarks, (x, z) => world.roadnet.nearestRideablePoint(x, z, okPoint)), store.get(`tav-violets-${state.presetId}`, []));
+  world.group.add(world.violets.group);
   scene.add(world.group);
   return world;
 }
@@ -227,7 +295,7 @@ function disposeWorld() {
 function spawnPoint(w) {
   let at = null;
   if (state.mode === 'tour') {
-    const first = w.landmarks.find((l) => l.id === TOUR_ROUTE[0]);
+    const first = pickTour(w.landmarks, state.tourId).list[0] || w.landmarks.find((l) => l.id === TOUR_ROUTE[0]);
     if (first) at = first.approach;
   }
   if (!at) at = (w.landmarks.find((l) => l.id === 'place-capitole') || w.landmarks.find((l) => l.id === 'capitole'))?.approach;
@@ -254,9 +322,11 @@ function beginPlay() {
   const w = state.world;
   if (!state.bike) state.bike = new Bike();
   const bike = state.bike;
+  bike.setHeadlight(TIME_OF_DAY[state.timeOfDay].night > 0); // 夜の前照灯
   scene.add(bike.root);
   bike.odometer = 0;
   bike.topSpeed = 0;
+  travel.reset(bike);
   state.playTime = 0;
   state.target = null;
   state.route = null;
@@ -265,15 +335,21 @@ function beginPlay() {
   state.toastTimer = 0;
 
   if (state.mode === 'tour') {
-    const list = TOUR_ROUTE.map((id) => w.landmarks.find((l) => l.id === id)).filter(Boolean);
-    if (list.length >= 3) {
-      state.tour = { list, index: 1, started: false, time: 0, splits: [] };
+    // 選んだコースが走れなければ classique（それも無理なら自由走行）
+    const { tour: def, list, fellBack } = pickTour(w.landmarks, state.tourId);
+    if (def) {
+      const length = tourLength(list, (ax, az, bx, bz) => w.roadnet.route(ax, az, bx, bz));
+      const times = medalTimes(length);
+      state.tour = { list, index: 1, started: false, time: 0, splits: [], id: def.id, name: def.ja, length, times, record: loadRecord(store, state.presetId, def.id) };
       setTarget(list[1]);
+      if (fellBack) toast(`このエリアには選んだコースの名所が足りないため、「${def.ja}」で走ります`, 4);
+      toast(`🏁 <b>${def.ja}</b>（約 ${(length / 1000).toFixed(1)} km）<br>🥇 ${fmtClock(times.gold)}　🥈 ${fmtClock(times.silver)}　🥉 ${fmtClock(times.bronze)}`, 6);
     } else {
       state.mode = 'free';
       toast('このエリアにはタイムアタックの名所が足りないため、自由走行で始めます');
     }
   }
+  if (w.violets) w.violets.group.visible = state.mode !== 'tour'; // タイムアタック中は集められない
   const p = spawnPoint(w);
   bike.place(p.x, p.z, p.heading, groundForTeleport(p.x, p.z, p.road));
   if (!w.stream) w.furniture?.cull(p.x, p.z, true); // 一度に作る街: 始まる前から近くの小物を描く（遊んでいる間は update で）
@@ -338,6 +414,12 @@ function fmtTime(s) {
   return `${m}:${r.toFixed(1).padStart(4, '0')}`;
 }
 
+// メダルの時間（m:ss）
+function fmtClock(s) {
+  const m = Math.floor(s / 60);
+  return `${m}:${String(Math.floor(s - m * 60)).padStart(2, '0')}`;
+}
+
 function fmtDist(m) {
   return m >= 1000 ? `${(m / 1000).toFixed(2)} km` : `${Math.round(m)} m`;
 }
@@ -345,11 +427,13 @@ function fmtDist(m) {
 function updateModeHud() {
   const t = state.tour;
   if (state.mode === 'tour' && t) {
-    $('hud-mode').innerHTML = `🏁 名所めぐり ${t.index}/${t.list.length - 1}<br>⏱ ${fmtTime(t.time)}`;
+    const m = t.times && medalFor(t.time, t.times); // 今ねらえるメダル
+    $('hud-mode').innerHTML = `🏁 ${t.name || '名所めぐり'} ${Math.min(t.index, t.list.length - 1)}/${t.list.length - 1}<br>⏱ ${fmtTime(t.time)}${m ? `　${MEDAL_ICON[m]} ${fmtClock(t.times[m])} まで` : ''}`;
   } else {
     const n = state.world?.landmarks.length || 0;
     const d = state.world?.landmarks.filter((l) => l.discovered).length || 0;
-    $('hud-mode').innerHTML = `🗺️ 発見した名所 ${d}/${n}`;
+    const v = state.world?.violets;
+    $('hud-mode').innerHTML = `🗺️ 発見した名所 ${d}/${n}${v?.total ? `<br>💜 ${v.collected.size}/${v.total}` : ''}`;
   }
 }
 
@@ -475,6 +559,16 @@ function update(dt, forced) {
     });
   }
   state.playTime += dt;
+  w.life?.update(dt, bike, camera);
+  if (w.traffic) {
+    w.traffic.night = state.timeOfDay === 'night';
+    w.traffic.update(dt, bike, camera);
+  }
+  // 歩く人・ハト・ほかの自転車・トラムの出来事の音
+  for (const ev of w.life?.events.splice(0) || []) audio.event(ev, bike);
+  for (const ev of w.traffic?.events?.splice(0) || []) audio.event(ev, bike);
+  audio.bells(w.landmarks, bike, state.playTime, dt);
+  travel.tick(dt, bike);
 
   for (const ev of bike.events.splice(0)) {
     if (ev.type === 'bump') {
@@ -488,8 +582,13 @@ function update(dt, forced) {
 
   groundMats.water.userData.time.value = state.playTime; // 水面の波を流す
 
+  rig.applyLook(dt, ctl.look); // 右ドラッグ・右スティックで見回す
   rig.update(dt, bike, w.collision, w.groundAt ? (x, z) => w.groundAt(x, z, bike.y + 1) : null); // カメラが坂・河岸に潜らないように
-  audio.update(dt, bike.speed, ctl.throttle === 0);
+  audio.update(dt, { speed: bike.speed, coasting: ctl.throttle === 0, braking: ctl.brake > 0, pedaling: ctl.throttle > 0, surface: bike.surface, crank: bike.crank });
+  if ((state.ambientTimer = (state.ambientTimer || 0) - dt) <= 0) {
+    state.ambientTimer = 0.5; // 街の音の層（0.5 秒ごと）
+    audio.setAmbient(ambientInfo(w, bike, state));
+  }
 
   // 名所の発見
   for (const lm of w.landmarks) {
@@ -498,6 +597,7 @@ function update(dt, forced) {
       lm.discovered = true;
       state.discovered.add(lm.id);
       store.set('tav-discovered', [...state.discovered]);
+      stampDiscovery(store, lm.id); // 旅の手帳の「見つけた日」
       audio.chime();
       toast(`<b>📍 ${lm.ja}</b>（${lm.name}）<br>${lm.text}`, 8);
       updateModeHud();
@@ -513,14 +613,18 @@ function update(dt, forced) {
     if (cur && distanceToLandmark(cur, bike.x, bike.z) < 22) {
       t.splits.push({ name: cur.ja, time: t.time });
       t.index++;
-      audio.chime();
-      if (t.index >= t.list.length) finishTour();
+      if (t.index >= t.list.length) finishTour(); // ゴールはメダルのファンファーレ
       else {
-        toast(`<b>✅ ${cur.ja}</b> ${fmtTime(t.time)}<br>次は ${t.list[t.index].ja}`, 4, true);
+        audio.chime();
+        const delta = splitDelta(t.record, t.splits.length - 1, t.time); // 自己ベストとの差
+        toast(`<b>✅ ${cur.ja}</b> ${fmtTime(t.time)}${delta == null ? '' : `（${fmtDelta(delta)}）`}<br>次は ${t.list[t.index].ja}`, 4, true);
         setTarget(t.list[t.index]);
       }
     }
   }
+
+  // スミレ集め
+  if (w.violets) for (const v of w.violets.update(dt, bike, state.playTime)) collectViolet(v);
 
   // ナビ
   if (state.target) {
@@ -546,10 +650,23 @@ function update(dt, forced) {
     state.streetTimer = 0.3;
     const road = w.roadnet.streetNameAt(bike.x, bike.z);
     $('hud-street').textContent = road ? road.name : '';
+    // 坂の表示（勾配が ±1.5 % 以上のとき）
+    $('hud-grade').textContent = Math.abs(bike.grade) >= 0.015 ? `${bike.grade > 0 ? '▲' : '▼'} ${Math.round(Math.abs(bike.grade) * 100)}%` : '';
     $('hud-stats').innerHTML = `走行距離 ${fmtDist(bike.odometer)} · 最高 ${Math.round(bike.topSpeed)} km/h<br>${CAMERA_LABELS[rig.mode]}`;
     updateModeHud();
   }
   tickToast(dt);
+}
+
+function collectViolet(v) {
+  const vs = state.world.violets;
+  store.set(`tav-violets-${state.presetId}`, [...vs.collected]);
+  audio.collect();
+  toast(`💜 スミレ ${vs.collected.size} / ${vs.total}`, 2.5, true);
+  const lm = state.world.landmarks.find((l) => l.id === v.lm);
+  if (lm && vs.bouquetDone(lm.id)) toast(`💐 <b>${lm.ja}</b> のスミレの花束がそろいました`, 4);
+  if (vs.remaining === 0) toast('👑 <b>トゥールーズのスミレを全部集めました！</b>', 6);
+  updateModeHud();
 }
 
 // ミニマップと名所ラベル（描画フレームごと。テスト用のシミュレーションでは呼ばない）
@@ -558,21 +675,29 @@ function drawHud() {
   const bike = state.bike;
   drawMinimap($('minimap'), w.map, {
     x: bike.x, z: bike.z, heading: bike.heading, zoom: 0.9, route: state.route, landmarks: w.landmarks, target: state.target,
+    violets: w.violets?.group.visible ? w.violets.pending : null,
   });
   updateLabels();
 }
 
 function finishTour() {
   const t = state.tour;
-  const key = `tav-best-${state.presetId}`;
-  const best = store.get(key, null);
-  const isBest = best == null || t.time < best;
-  if (isBest) store.set(key, t.time);
+  const medal = medalFor(t.time, t.times);
+  const next = nextMedal(t.time, t.times);
+  const prev = t.record; // 走る前の自己ベスト（区間の差を比べる）
+  const { isBest, record } = saveRecord(store, state.presetId, t.id, t.time, t.splits.map((s) => s.time), medal);
   state.phase = 'result';
   input.enabled = false;
-  $('result-text').innerHTML = `<p style="font-size:32px;font-weight:800;margin:8px 0">${fmtTime(t.time)}</p>
-    <p>${isBest ? '🎉 自己ベスト更新！' : `自己ベスト: ${fmtTime(best)}`}</p>
-    <ol>${t.splits.map((s) => `<li>${s.name} — ${fmtTime(s.time)}</li>`).join('')}</ol>
+  audio.fanfare(medal);
+  const rows = t.splits.map((s, i) => {
+    const lap = s.time - (i ? t.splits[i - 1].time : 0);
+    const d = splitDelta(prev, i, s.time);
+    return `<tr><td>${s.name}</td><td>${fmtTime(lap)}</td><td>${fmtTime(s.time)}</td><td class="${d == null ? '' : d < 0 ? 'delta-good' : 'delta-bad'}">${d == null ? '' : fmtDelta(d)}</td></tr>`;
+  }).join('');
+  $('result-text').innerHTML = `<p class="result-medal">${medal ? `${MEDAL_ICON[medal]} ${{ gold: '金', silver: '銀', bronze: '銅' }[medal]}メダル` : '完走'}<small>${t.name}（約 ${(t.length / 1000).toFixed(1)} km）</small></p>
+    <p style="font-size:32px;font-weight:800;margin:8px 0">${fmtTime(t.time)}</p>
+    <p>${isBest ? '🎉 自己ベスト更新！' : `自己ベスト: ${fmtTime(record.best)}`}${next ? `　${MEDAL_ICON[next.medal]} まであと ${next.seconds.toFixed(1)} 秒` : ''}</p>
+    <table class="result-splits"><thead><tr><th>チェックポイント</th><th>区間</th><th>通過</th><th>自己ベスト比</th></tr></thead><tbody>${rows}</tbody></table>
     <p class="muted small">走行距離 ${fmtDist(state.bike.odometer)} · 最高速度 ${Math.round(state.bike.topSpeed)} km/h</p>`;
   show('result-screen');
 }
@@ -583,6 +708,8 @@ function togglePause(force) {
   const pause = force ?? state.phase === 'play';
   state.phase = pause ? 'paused' : 'play';
   input.enabled = !pause;
+  audio.ui();
+  if (pause) travel.flush();
   if (pause && state.world.stream) {
     const s = state.world.stats, t = state.world.stream.totals;
     $('pause-info').innerHTML = `<p>トゥールーズ全体（${s.tiles} タイル）のうち、自転車の周りの ${state.world.stream.readyCount} タイルを表示中<br>
@@ -602,6 +729,7 @@ function openMap(open) {
   if (open && state.phase !== 'play') return;
   if (!open && state.phase !== 'map') return;
   state.phase = open ? 'map' : 'play';
+  audio.ui();
   input.enabled = !open;
   show('map-screen', open);
   if (open) renderFullMap();
@@ -615,7 +743,7 @@ function renderFullMap() {
   c.height = Math.round(r.height * Math.min(devicePixelRatio, 2));
   const w = state.world;
   const b = state.bike;
-  mapXf = drawFullMap(c, w.map, { x: b.x, z: b.z, heading: b.heading, route: state.route, landmarks: w.landmarks, target: state.target });
+  mapXf = drawFullMap(c, w.map, { x: b.x, z: b.z, heading: b.heading, route: state.route, landmarks: w.landmarks, target: state.target, violets: w.violets?.group.visible ? w.violets.pending : null });
   const ul = $('landmark-list');
   ul.innerHTML = '';
   for (const lm of w.landmarks) {
@@ -660,6 +788,65 @@ $('fullmap').addEventListener('click', (e) => {
   }
 });
 
+// ---------------------------------------------------------------- 旅の手帳（J）
+// 地図の画面と同じ扱い: 開いている間は操作を止める。ポーズ中に開いたらポーズを解いてから
+function openCarnet(open) {
+  if (open && state.phase === 'paused') togglePause(false);
+  if (open && state.phase !== 'play') return;
+  if (!open && state.phase !== 'carnet') return;
+  state.phase = open ? 'carnet' : 'play';
+  audio.ui();
+  input.enabled = !open;
+  show('carnet-screen', open);
+  if (open) renderCarnetScreen();
+  else $('carnet-body').innerHTML = '';
+}
+
+function renderCarnetScreen() {
+  const w = state.world;
+  travel.flush();
+  const tours = TOURS.map((t) => {
+    const record = loadRecord(store, state.presetId, t.id);
+    return { ja: t.ja, fr: t.fr, record, icon: record?.medal ? MEDAL_ICON[record.medal] : '', available: pickTour(w.landmarks, t.id).tour === t };
+  });
+  renderCarnet($('carnet-body'), {
+    landmarks: w.landmarks, bike: state.bike, stats: travel.data, violets: w.violets, discoveredAt: store.get('tav-discovered-at', {}) || {},
+    tours, canGo: state.mode !== 'tour', fmtTime,
+  }, (lm) => {
+    setTarget(lm);
+    openCarnet(false);
+  });
+}
+
+// ---------------------------------------------------------------- 写真モード（F）
+const photo = new PhotoMode({
+  camera, canvas: renderer.domElement, keys: input.keys,
+  getWorld: () => state.world, getBike: () => state.bike,
+  render: () => renderFrame(0),
+  onOpen: () => {
+    state.phase = 'photo';
+    input.enabled = false;
+    audio.ui();
+    show('hud', false);
+  },
+  onClose: () => {
+    state.phase = 'play';
+    input.enabled = true;
+    audio.ui();
+    show('hud');
+    rig.initialized = false; // カメラの追従を元に戻す
+  },
+  onSave: () => audio.shutter(), // 保存のときにシャッター音
+});
+function openPhoto(open) {
+  if (open) {
+    if (state.phase === 'paused') togglePause(false);
+    if (state.phase === 'play') photo.open();
+  } else if (state.phase === 'photo') photo.close();
+}
+// テスト用
+state.photo = { open: () => openPhoto(true), close: () => openPhoto(false), capture: () => photo.capture() };
+
 function respawn() {
   if (state.phase !== 'play') return;
   const w = state.world;
@@ -672,6 +859,7 @@ function respawn() {
 }
 
 function backToTitle() {
+  travel.flush();
   state.phase = 'title';
   input.enabled = true;
   for (const id of ['pause-screen', 'result-screen', 'map-screen', 'hud']) show(id, false);
@@ -680,7 +868,7 @@ function backToTitle() {
   show('title-screen');
 }
 
-input.on('Escape', () => (state.phase === 'map' ? openMap(false) : togglePause()));
+input.on('Escape', () => (state.phase === 'map' ? openMap(false) : state.phase === 'carnet' ? openCarnet(false) : state.phase === 'photo' ? openPhoto(false) : togglePause()));
 input.on('KeyP', () => togglePause());
 input.on('KeyC', () => state.phase === 'play' && rig.cycle());
 input.on('KeyV', () => state.phase === 'play' && rig.cycle());
@@ -691,16 +879,27 @@ input.on('Tab', (e) => {
   else openMap(true);
 });
 input.on('KeyR', respawn);
-input.on('Space', () => state.phase === 'play' && audio.bell());
+input.on('Space', () => {
+  if (state.phase !== 'play') return;
+  audio.bell();
+  state.world?.life?.bell(state.bike);
+});
+input.on('KeyJ', () => openCarnet(state.phase !== 'carnet'));
+input.on('KeyF', () => openPhoto(state.phase !== 'photo'));
 input.bindTouch($('touch-controls'));
+input.bindLook(renderer.domElement);
 
 for (const btn of document.querySelectorAll('#hud-buttons button')) {
   btn.addEventListener('click', () => {
     const a = btn.dataset.action;
     if (a === 'map') openMap(true);
     else if (a === 'camera') rig.cycle();
-    else if (a === 'bell') audio.bell();
+    else if (a === 'bell') {
+      audio.bell();
+      state.world?.life?.bell(state.bike);
+    }
     else if (a === 'pause') togglePause(true);
+    else if (a === 'carnet') openCarnet(true);
     btn.blur();
   });
 }
@@ -711,11 +910,22 @@ $('clear-target').addEventListener('click', () => {
   renderFullMap();
 });
 $('resume-btn').addEventListener('click', () => togglePause(false));
+$('carnet-btn').addEventListener('click', () => openCarnet(true));
+$('photo-btn').addEventListener('click', () => openPhoto(true));
+$('close-carnet').addEventListener('click', () => openCarnet(false));
 $('title-btn').addEventListener('click', backToTitle);
 $('mute-btn').addEventListener('click', () => {
   audio.setMuted(!audio.muted);
   $('mute-btn').textContent = `音: ${audio.muted ? 'オフ' : 'オン'}`;
+  audio.savePrefs(store);
 });
+$('mute-btn').textContent = `音: ${audio.muted ? 'オフ' : 'オン'}`;
+$('volume').value = String(Math.round(audio.volume * 100));
+$('volume').addEventListener('input', () => {
+  audio.setVolume(+$('volume').value / 100);
+  audio.savePrefs(store);
+});
+$('time-btn').addEventListener('click', () => setTimeOfDay(TIME_ORDER[(TIME_ORDER.indexOf(state.timeOfDay) + 1) % TIME_ORDER.length]));
 $('again-btn').addEventListener('click', () => {
   show('result-screen', false);
   input.enabled = true;
@@ -727,6 +937,7 @@ $('free-btn').addEventListener('click', () => {
   input.enabled = true;
   state.mode = 'free';
   state.tour = null;
+  if (state.world.violets) state.world.violets.group.visible = true;
   setTarget(null);
   state.phase = 'play';
   updateModeHud();
@@ -741,10 +952,28 @@ addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
+  pipe.setSize(innerWidth, innerHeight);
   if (state.phase === 'map') renderFullMap();
 });
 
+// 自動で軽くする: 遊び始めて 1〜6 秒（最初の 1 秒は読み込み直後で遅いので除く）の平均が 24 fps 未満なら、フォトリアルを切る（1 回だけ）
+function watchFps(now) {
+  const g = photoGuard;
+  if (g.done || !pipe.enabled) return;
+  g.t0 ||= now;
+  if (now - g.t0 < 1000) return;
+  if (!g.t1) g.t1 = now;
+  else g.frames++;
+  if (now - g.t0 < 6000) return;
+  g.done = true;
+  if (g.frames / ((now - g.t1) / 1000) < 24) {
+    pipe.enabled = false;
+    toast('描画を軽くしました（フォトリアルを切りました）', 4);
+  }
+}
+
 // ---------------------------------------------------------------- ループ
+const QUIET_PHASES = new Set(['paused', 'map', 'carnet', 'photo']);
 let last = performance.now();
 function frame(now) {
   requestAnimationFrame(frame);
@@ -753,12 +982,22 @@ function frame(now) {
   if (state.world && state.phase === 'play') {
     update(dt);
     drawHud();
+    watchFps(now);
   }
+  if (state.world && state.phase === 'photo') photo.update(dt);
+  // ポーズ・地図・手帳・写真モードの間は音を小さく（phase が変わったときだけ切り替える）
+  const quiet = QUIET_PHASES.has(state.phase);
+  if (quiet !== !!audio.paused) audio.setPaused(quiet);
   if (state.world) {
     fitSunShadow();
     sky.position.copy(camera.position); // 空の箱はカメラと一緒に動かす（5 km のエリアの端でも空が切れないように）
-    renderer.render(scene, camera);
+    renderFrame(dt);
   }
+}
+
+// 描画の入口（写真モードの保存もここを通す）
+function renderFrame(dt) {
+  pipe.render(dt); // フォトリアルを切っているときは中でそのまま描く
 }
 requestAnimationFrame(frame);
 

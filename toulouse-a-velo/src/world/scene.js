@@ -2,7 +2,7 @@
 // three.js のシェーダーの部品（トーンマッピング・高さの霧）を書き換えるので、ページで 1 回だけ呼ぶ
 import * as THREE from 'three';
 import { Sky } from 'three/addons/objects/Sky.js';
-import { TONE_MAPPING_GLSL, displayColor, environmentIntensity, probeEnvironment } from './light.js';
+import { TIME_OF_DAY, TONE_MAPPING_GLSL, displayColor, environmentIntensity, probeEnvironment, shadowLook, sunDirection } from './light.js';
 
 export function setupScene(container) {
   const renderer = new THREE.WebGLRenderer({ antialias: true, stencil: true, powerPreference: 'high-performance' });
@@ -40,25 +40,19 @@ export function setupScene(container) {
   const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.5, 8000); // 遠くの丘（パーパンからペシュ・ダヴィッドまで 6.3 km）
   camera.position.set(0, 40, 80);
 
-  // 午後のトゥールーズ: 南西の空に太陽
+  // 太陽（夜は月）の向き。時間帯で書き換える（同じ Vector3 を fitSunShadow が読む）。既定は午後のトゥールーズ: 南西の空に太陽
   const SUN_ELEVATION = 38, SUN_AZIMUTH = 225;
-  const sunDir = new THREE.Vector3().setFromSphericalCoords(
-    1, THREE.MathUtils.degToRad(90 - SUN_ELEVATION), THREE.MathUtils.degToRad(180 - SUN_AZIMUTH),
-  );
+  const sunDir = new THREE.Vector3(...sunDirection(SUN_ELEVATION, SUN_AZIMUTH));
   const sky = new Sky();
   sky.scale.setScalar(4000);
   sky.renderOrder = -1000; // 最初に描く（深度を書かないので、箱より遠くの丘も上に描かれる）
-  sky.material.uniforms.turbidity.value = 3.5;
-  sky.material.uniforms.rayleigh.value = 1.4;
-  sky.material.uniforms.mieCoefficient.value = 0.004;
-  sky.material.uniforms.mieDirectionalG.value = 0.82;
-  sky.material.uniforms.sunPosition.value.copy(sunDir);
   scene.add(sky);
 
   // ---- 光の強さの割合（写真の日なたと日陰のレンガの色に合わせた） ----
   // 太陽（暖色、影を落とす）: 日なたのレンガは #bc7c55 前後。半球光: 日陰のレンガは #644337 前後で、道の片側は深い日陰になる
   // （太陽と半球光の比は 2 倍あまり）。写真の日陰は空の青さより、日の当たった向かいの壁や地面からの照り返し（暖色）が効いて
   // ほぼ無彩色なので、半球光の地面の色はばら色のレンガの照り返しにする。環境マップ（青い空）は弱く、空の光の一部と映り込み
+  // （午後の値。ほかの時間帯の色・強さは light.js の TIME_OF_DAY）
   const LIGHT = { sun: 2.8, hemi: 1.3, envShare: 0.4, envFallback: 0.06 };
   const hemi = new THREE.HemisphereLight('#cfdcef', '#a48a76', LIGHT.hemi);
   scene.add(hemi);
@@ -70,21 +64,66 @@ export function setupScene(container) {
   sun.shadow.normalBias = 0.25;
   scene.add(sun, sun.target);
 
+  // 地平線のもや: 空の地平線の近くを霧の色に寄せる（霧で溶けた遠くの街並みと、その向こうの空の色がそろう）。
+  // 空のシェーダーの最後（sRGB にした後）で混ぜるので、霧と同じく画面の色で指定する。
+  // 夜（uNight）: その前に、空を「天頂 #070c1f → 地平線 #27325a」のグラデーションと星・月に置き換える。星は向きを細かい格子
+  // （1 目 0.23°）に切ったハッシュで点を打つ（向きだけで決まるので、カメラが動いてもちらつかない。地平線の近くには出さない）。
+  // 月は月の向き（夜の sunPosition）に直径 1.2° の淡い黄白の円盤とかすかな暈
+  sky.material.uniforms.hazeColor = { value: new THREE.Vector3() };
+  sky.material.uniforms.uNight = { value: 0 };
+  sky.material.fragmentShader = sky.material.fragmentShader
+    .replace('uniform float showSunDisc;', 'uniform float showSunDisc;\nuniform vec3 hazeColor;\nuniform float uNight;')
+    .replace('#include <colorspace_fragment>', `#include <colorspace_fragment>
+        if (uNight > 0.0) {
+          vec3 nightSky = mix(vec3(0.153, 0.196, 0.353), vec3(0.027, 0.047, 0.122), pow(smoothstep(0.0, 1.0, max(direction.y, 0.0)), 0.6));
+          vec3 sp = direction * 250.0, cell = floor(sp), sf = fract(sp) - 0.5;
+          float sh = fract(sin(dot(cell, vec3(127.1, 311.7, 74.7))) * 43758.5453);
+          float star = step(0.992, sh) * smoothstep(0.38, 0.1, length(sf)) * (0.3 + 0.7 * fract(sh * 91.7)) * smoothstep(0.06, 0.3, direction.y);
+          nightSky += vec3(0.8, 0.86, 1.0) * star;
+          float mc = dot(direction, vSunDirection);
+          nightSky += vec3(0.07, 0.08, 0.1) * pow(max(mc, 0.0), 800.0);
+          nightSky = mix(nightSky, vec3(0.95, 0.93, 0.84), smoothstep(0.999941, 0.999952, mc));
+          gl_FragColor.rgb = mix(gl_FragColor.rgb, nightSky, uNight);
+        }
+        float hazeK = 1.0 - smoothstep(0.0, 0.2, direction.y);
+        gl_FragColor.rgb = mix(gl_FragColor.rgb, hazeColor, hazeK * hazeK);`);
+  sky.material.needsUpdate = true;
+
   // 環境マップ: 太陽の円盤を抜いた空と、地平線より下の地面（街の色）。太陽の円盤は平行光が受け持つ
-  // （環境マップに入れると、影の中まで太陽の光が回り込んで影が消える）
-  const { envMap, waterEnv } = (() => {
+  // （環境マップに入れると、影の中まで太陽の光が回り込んで影が消える）。
+  // 夜は空のシェーダーの代わりに、同じグラデーションの球（頂点カラー）と、街灯に照らされた暖色の地面
+  function bakeEnvironment(look) {
     const envScene = new THREE.Scene();
-    const skyClone = new Sky();
-    skyClone.scale.setScalar(100);
-    for (const k of Object.keys(sky.material.uniforms)) {
-      const v = sky.material.uniforms[k].value;
-      skyClone.material.uniforms[k].value = v?.clone ? v.clone() : v;
+    const temp = [];
+    if (look.night > 0) {
+      const g = new THREE.SphereGeometry(100, 32, 16);
+      const pos = g.getAttribute('position'), col = new Float32Array(pos.count * 3);
+      const lo = new THREE.Color('#27325a'), hi = new THREE.Color('#070c1f'), c = new THREE.Color();
+      for (let i = 0; i < pos.count; i++) c.lerpColors(lo, hi, Math.pow(Math.max(0, pos.getY(i) / 100), 0.6)).toArray(col, i * 3);
+      g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      temp.push(new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide })));
+    } else {
+      const skyClone = new Sky();
+      skyClone.scale.setScalar(100);
+      for (const k of Object.keys(skyClone.material.uniforms)) {
+        const v = sky.material.uniforms[k].value;
+        skyClone.material.uniforms[k].value = v?.clone ? v.clone() : v;
+      }
+      skyClone.material.uniforms.showSunDisc.value = 0;
+      // 水面用の環境マップだけ、空のいちばん明るい所（低い太陽のまわりの輝き）を色合いを保ったまま抑える（look.waterClamp。
+      // 夕暮れに低い角度から太陽の方を見ると、水面が白く飛ぶため）。ふつうの環境マップでは抑えない（値が大きい）
+      skyClone.material.uniforms.uClamp = { value: 1e9 };
+      skyClone.material.fragmentShader = skyClone.material.fragmentShader
+        .replace('uniform float showSunDisc;', 'uniform float showSunDisc;\nuniform float uClamp;')
+        .replace('#include <tonemapping_fragment>', `float clampL = max(max(gl_FragColor.r, gl_FragColor.g), gl_FragColor.b);
+          if (clampL > uClamp) gl_FragColor.rgb *= uClamp / clampL;
+          #include <tonemapping_fragment>`);
+      temp.push(skyClone);
     }
-    skyClone.material.uniforms.showSunDisc.value = 0;
-    envScene.add(skyClone);
+    envScene.add(...temp);
     // 地面: 日なたと日陰が混ざった街の平均の明るさ（反射率 0.22 前後）
-    const lit = ((LIGHT.sun * Math.sin(THREE.MathUtils.degToRad(SUN_ELEVATION)) + LIGHT.hemi) * 0.85) / Math.PI;
-    const ground = new THREE.Mesh(new THREE.CircleGeometry(48, 32), new THREE.MeshBasicMaterial({ color: '#8f7a6a' }));
+    const lit = ((look.sun.intensity * Math.sin(THREE.MathUtils.degToRad(look.sun.elevation)) + look.hemi.intensity) * 0.85) / Math.PI;
+    const ground = new THREE.Mesh(new THREE.CircleGeometry(48, 32), new THREE.MeshBasicMaterial({ color: look.night > 0 ? '#8a6a4e' : '#8f7a6a' }));
     ground.material.color.multiplyScalar(lit);
     ground.rotation.x = -Math.PI / 2;
     ground.position.y = -0.4;
@@ -95,36 +134,67 @@ export function setupScene(container) {
     // 水面に映す環境: 低い角度には空でなく対岸の街並みと並木（暗い帯、仰角 0〜7°）が映る
     const skyline = new THREE.Mesh(
       new THREE.CylinderGeometry(46, 46, 46 * Math.tan(THREE.MathUtils.degToRad(7)) + 0.4, 48, 1, true),
-      new THREE.MeshBasicMaterial({ color: '#6a5d50', side: THREE.BackSide }),
+      new THREE.MeshBasicMaterial({ color: look.night > 0 ? '#7a5838' : '#6a5d50', side: THREE.BackSide }),
     );
     skyline.material.color.multiplyScalar(lit * 0.8);
     skyline.position.y = (46 * Math.tan(THREE.MathUtils.degToRad(7)) - 0.4) / 2;
     envScene.add(skyline);
+    if (look.waterClamp && temp[0].material.uniforms.uClamp) temp[0].material.uniforms.uClamp.value = look.waterClamp;
     const water = pmrem.fromScene(envScene, 0.04).texture;
     pmrem.dispose();
+    for (const o of [...temp, ground, skyline]) {
+      o.geometry.dispose();
+      o.material.dispose();
+    }
+    return { envMap: tex, waterEnv: water, probe };
+  }
+
+  // 時間帯を変える（light.js の TIME_OF_DAY の id）。太陽・空・半球光・露出・環境マップ・霧・空のもやを作り直す。
+  // 戻り値: 水面用の環境マップ（使う側が水の材料に入れる）と夜の割合（0〜1）
+  const timeOfDay = { id: null };
+  const shadowFit = { half: 0, fwd: new THREE.Vector3(), c: new THREE.Vector3(), x: new THREE.Vector3(), y: new THREE.Vector3(), dist: 600, normalBias: 1 };
+  const env = { envMap: null, waterEnv: null };
+  function applyTimeOfDay(id) {
+    const look = TIME_OF_DAY[id] || TIME_OF_DAY.afternoon;
+    timeOfDay.id = TIME_OF_DAY[id] ? id : 'afternoon';
+    sunDir.set(...sunDirection(look.sun.elevation, look.sun.azimuth));
+    const u = sky.material.uniforms;
+    for (const [k, v] of Object.entries(look.sky)) u[k].value = v;
+    u.sunPosition.value.copy(sunDir);
+    u.showSunDisc.value = look.night > 0 ? 0 : 1; // 夜は太陽の円盤を消す（月は夜の空のシェーダーが描く）
+    u.uNight.value = look.night;
+    hemi.color.set(look.hemi.sky);
+    hemi.groundColor.set(look.hemi.ground);
+    hemi.intensity = look.hemi.intensity;
+    sun.color.set(look.sun.color);
+    sun.intensity = look.sun.intensity;
+    renderer.toneMappingExposure = look.exposure;
+    // 影の箱: 低い太陽は奥行きを長く、ずらしを大きく（fitSunShadow が読む。次のフレームで箱を作り直す）
+    const sl = shadowLook(look.sun.elevation);
+    shadowFit.dist = sl.dist;
+    shadowFit.normalBias = sl.normalBias;
+    shadowFit.half = 0;
+    sun.shadow.camera.far = sl.dist * 2;
+    sun.shadow.camera.updateProjectionMatrix();
+
+    const old = [env.envMap, env.waterEnv];
+    const { envMap, waterEnv, probe } = bakeEnvironment(look);
+    for (const t of old) t?.dispose();
+    Object.assign(env, { envMap, waterEnv });
+    scene.environment = envMap;
     const k = probe && environmentIntensity(probe.up, hemi.color.toArray(), hemi.intensity, LIGHT.envShare);
     scene.environmentIntensity = k || LIGHT.envFallback;
     // 霧の色 = 画面に映る地平線の空の色（遠くの街並みが空に溶ける）。写真のように少し灰色がかったばら色に寄せる
+    // （霧の near / far は使う側がエリアで決める）
     const fog = new THREE.Color('#c9d3da');
     if (probe) fog.setRGB(...displayColor(probe.horizon, renderer.toneMappingExposure), THREE.SRGBColorSpace);
-    fog.lerp(new THREE.Color('#bdb5b2'), 0.35);
-    scene.fog = new THREE.Fog(fog, 280, 1500);
-    window.__tavLight = { probe, environmentIntensity: scene.environmentIntensity, fog: fog.getHexString() }; // デバッグ用
-    return { envMap: tex, waterEnv: water };
-  })();
-  scene.environment = envMap;
-
-  // 地平線のもや: 空の地平線の近くを霧の色に寄せる（霧で溶けた遠くの街並みと、その向こうの空の色がそろう）。
-  // 空のシェーダーの最後（sRGB にした後）で混ぜるので、霧と同じく画面の色で指定する
-  {
+    fog.lerp(new THREE.Color(look.fogTint), look.fogMix);
+    if (scene.fog) scene.fog.color.copy(fog);
+    else scene.fog = new THREE.Fog(fog, 280, 1500);
     const haze = scene.fog.color.clone().convertLinearToSRGB();
-    sky.material.uniforms.hazeColor = { value: new THREE.Vector3(haze.r, haze.g, haze.b) };
-    sky.material.fragmentShader = sky.material.fragmentShader
-      .replace('uniform float showSunDisc;', 'uniform float showSunDisc;\nuniform vec3 hazeColor;')
-      .replace('#include <colorspace_fragment>', `#include <colorspace_fragment>
-        float hazeK = 1.0 - smoothstep(0.0, 0.2, direction.y);
-        gl_FragColor.rgb = mix(gl_FragColor.rgb, hazeColor, hazeK * hazeK);`);
-    sky.material.needsUpdate = true;
+    u.hazeColor.value.set(haze.r, haze.g, haze.b);
+    window.__tavLight = { probe, environmentIntensity: scene.environmentIntensity, fog: fog.getHexString(), timeOfDay: timeOfDay.id }; // デバッグ用
+    return { waterEnv, night: look.night };
   }
 
   // 環境の明るさを測る: 小さな浮動小数点の画像に 6 方向を描いて読み戻す（読み戻せない環境では null）
@@ -163,8 +233,8 @@ export function setupScene(container) {
   }
 
   // 太陽の影の箱をカメラに合わせる: 低い視点は手前 ±100 m、上空ほど広く（最大 ±320 m）、見ている方へずらす。
-  // 箱の中心は影の地図の 1 画素単位にそろえ、動いても影の縁がちらつかないようにする
-  const shadowFit = { half: 0, fwd: new THREE.Vector3(), c: new THREE.Vector3(), x: new THREE.Vector3(), y: new THREE.Vector3() };
+  // 箱の中心は影の地図の 1 画素単位にそろえ、動いても影の縁がちらつかないようにする。
+  // 太陽までの距離（dist）と法線方向のずらしの倍率（normalBias）は時間帯で決まる（applyTimeOfDay）
   function fitSunShadow(groundAt = null) {
     const f = shadowFit;
     if (f.lock) return; // デバッグ用: 影の箱を固定する
@@ -186,14 +256,18 @@ export function setupScene(container) {
     const px = c.dot(f.x), py = c.dot(f.y);
     c.addScaledVector(f.x, Math.round(px / texel) * texel - px).addScaledVector(f.y, Math.round(py / texel) * texel - py);
     sun.target.position.copy(c);
-    sun.position.copy(c).addScaledVector(sunDir, 600);
+    sun.position.copy(c).addScaledVector(sunDir, f.dist);
     if (half !== f.half) {
       f.half = half;
       Object.assign(sun.shadow.camera, { left: -half, right: half, top: half, bottom: -half });
       sun.shadow.camera.updateProjectionMatrix();
-      sun.shadow.normalBias = Math.max(0.12, texel * 2.2);
+      sun.shadow.normalBias = Math.max(0.12, texel * 2.2) * f.normalBias;
     }
   }
 
-  return { renderer, scene, camera, sky, sun, hemi, sunDir, envMap, waterEnv, LIGHT, shadowFit, fitSunShadow, SUN_ELEVATION, SUN_AZIMUTH };
+  // 既定は午後（メトロのゲームは時間帯を変えない）
+  applyTimeOfDay('afternoon');
+  const { envMap, waterEnv } = env;
+
+  return { renderer, scene, camera, sky, sun, hemi, sunDir, envMap, waterEnv, LIGHT, shadowFit, fitSunShadow, SUN_ELEVATION, SUN_AZIMUTH, applyTimeOfDay, timeOfDay };
 }

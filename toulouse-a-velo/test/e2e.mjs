@@ -144,6 +144,48 @@ try {
   await sim(1.5, { throttle: 1 });
   await page.waitForTimeout(500);
   await page.screenshot({ path: join(out, '09-fpv.png') });
+
+  // スミレ: 花の 1 つの場所へ自転車を置いて進めると集まる
+  const vio = await page.evaluate(() => {
+    const vs = window.__tav.world.violets;
+    const v = vs?.pending[0];
+    if (!v) return { total: vs?.total || 0 };
+    const before = vs.collected.size;
+    window.__tav.bike.place(v.x, v.z, 0);
+    window.__tavSimulate(0.3, {});
+    return { total: vs.total, before, after: vs.collected.size, hud: document.getElementById('hud-mode').textContent };
+  });
+  check(vio.total > 0 && vio.after === vio.before + 1, `スミレを集める（${vio.before} → ${vio.after} / ${vio.total}、HUD「${vio.hud}」）`);
+
+  // 旅の手帳: J で開くと見つけた名所のカードがあり、閉じると走行に戻る
+  await page.keyboard.press('KeyJ');
+  await page.waitForTimeout(400);
+  const carnet = await page.evaluate(() => ({ phase: window.__tav.phase, found: document.querySelectorAll('#carnet-screen .carnet-card.found').length, all: document.querySelectorAll('#carnet-screen .carnet-card').length }));
+  await page.screenshot({ path: join(out, '13-carnet.png') });
+  await page.keyboard.press('KeyJ');
+  const afterCarnet = await page.evaluate(() => window.__tav.phase);
+  check(carnet.phase === 'carnet' && carnet.found >= 1 && afterCarnet === 'play', `旅の手帳（見つけた名所 ${carnet.found}/${carnet.all} 枚、閉じると ${afterCarnet}）`);
+  // スマホの大きさでも 1 列で読める
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.keyboard.press('KeyJ');
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: join(out, '13-carnet-mobile.png') });
+  await page.keyboard.press('KeyJ');
+  await page.setViewportSize({ width: 1280, height: 720 });
+
+  // 写真モード: 開いて PNG を作り、閉じると走行に戻る
+  await page.evaluate(() => window.__tav.photo.open());
+  await page.waitForTimeout(600);
+  await page.screenshot({ path: join(out, '14-photo.png') });
+  const photo = await page.evaluate(async () => {
+    const s = window.__tav;
+    const phase = s.phase;
+    const url = await s.photo.capture();
+    s.photo.close();
+    return { phase, head: String(url).slice(0, 22), len: String(url).length, after: s.phase, hud: !document.getElementById('hud').classList.contains('hidden') };
+  });
+  check(photo.phase === 'photo' && photo.head === 'data:image/png;base64,' && photo.len > 1000 && photo.after === 'play' && photo.hud,
+    `写真モード（${photo.head}… ${Math.round(photo.len / 1024)} KB、閉じると ${photo.after}）`);
   await page.close();
 
   // ---- タイムアタック ----
@@ -159,7 +201,48 @@ try {
   const idx = await tour.evaluate(() => window.__tav.tour.index);
   check(idx === 2, `チェックポイント通過（index=${idx}）`);
   await tour.screenshot({ path: join(out, '10-tour.png') });
+  // 残りのチェックポイントを回ってゴール → 結果画面にメダルと区間の時間
+  const fin = await tour.evaluate(() => {
+    const s = window.__tav;
+    for (let i = 0; i < 20 && s.phase === 'play'; i++) {
+      const lm = s.target;
+      s.bike.place(lm.approach.x, lm.approach.z, 0);
+      window.__tavSimulate(2, { throttle: 1 });
+    }
+    return { phase: s.phase, id: s.tour.id, times: s.tour.times, text: document.getElementById('result-text').textContent, rows: document.querySelectorAll('.result-splits tbody tr').length, n: s.tour.list.length };
+  });
+  check(fin.phase === 'result' && fin.id === 'classique' && fin.times.gold > 0 && /メダル|完走/.test(fin.text) && fin.rows === fin.n - 1,
+    `ゴールで結果画面（${fin.id}、${fin.text.slice(0, 40).replace(/\s+/g, ' ')}…、区間 ${fin.rows}）`);
+  await tour.screenshot({ path: join(out, '12-result.png') });
   await tour.close();
+
+  // ---- タイトル画面: コースの選択と設定の保存（読み込み直すと戻る。opt-refresh は戻さない）----
+  const tp = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+  tp.on('pageerror', (e) => errors.push(String(e)));
+  // ページの読み込み（模様の生成）はソフトウェア描画の機械で 30 秒ほどかかるので、待つ時間を長めに
+  await tp.goto('http://localhost:4179/?area=light', { timeout: 120000 });
+  await tp.check('input[name=mode][value=tour]');
+  await tp.selectOption('#opt-tour', 'garonne');
+  await tp.evaluate(() => {
+    for (const [id, v] of [['opt-shadows', false], ['opt-refresh', true]]) {
+      const el = document.getElementById(id);
+      el.checked = v;
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  });
+  await tp.screenshot({ path: join(out, '15-title-tour.png') });
+  await tp.reload({ timeout: 120000 });
+  const restored = await tp.evaluate(() => ({
+    shadows: document.getElementById('opt-shadows').checked,
+    refresh: document.getElementById('opt-refresh').checked,
+    mode: document.querySelector('input[name=mode]:checked').value,
+    tour: document.getElementById('opt-tour').value,
+    pick: !document.getElementById('tour-pick').classList.contains('hidden'),
+    area: document.querySelector('input[name=area]:checked').value,
+  }));
+  check(!restored.shadows && !restored.refresh && restored.mode === 'tour' && restored.tour === 'garonne' && restored.pick && restored.area === 'light',
+    `設定を読み込み直しても戻る（${JSON.stringify(restored)}）`);
+  await tp.close();
 
   // ---- 塀（同梱データの、地籍と LiDAR から見つけた塀）----
   // スタート地点の 10 m 先に、道を横切る長さ 16 m の塀を置く: 道路の上は切り取られて通れ、道の外の部分は当たり判定がある

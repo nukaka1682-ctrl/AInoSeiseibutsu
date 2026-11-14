@@ -123,6 +123,20 @@ export class RoadNetwork {
     return i;
   }
 
+  // 節点 n（交差点・道の折れ点）につながる、自転車で走れる区間（ほかの自転車乗りが次の道を選ぶ。traffic.js）。
+  // 表は初めて呼ばれたときに作る
+  segsAt(n) {
+    if (!this.nodeSegs) {
+      this.nodeSegs = this.nx.map(() => []);
+      for (const s of this.segs) {
+        if (s.ia < 0) continue;
+        this.nodeSegs[s.ia].push(s);
+        this.nodeSegs[s.ib].push(s);
+      }
+    }
+    return this.nodeSegs[n] || [];
+  }
+
   // (x,z) に最も近い道路の線分
   nearestSegment(x, z, maxDist = 30, filter = null) {
     let best = null;
@@ -138,13 +152,15 @@ export class RoadNetwork {
     return best;
   }
 
-  onRoad(x, z, margin = 0.8) {
+  // filter(seg): false の区間は数えない（例: 車道だけを見る）。既定は全部の道
+  onRoad(x, z, margin = 0.8, filter = null) {
     let on = false;
     const seen = new Set();
     this.segGrid.queryPoint(x, z, this.maxHalfWidth + margin, (i) => {
       if (on || seen.has(i)) return;
       seen.add(i);
       const s = this.segs[i];
+      if (filter && !filter(s)) return;
       const lim = s.road.width / 2 + margin;
       if (closestOnSegment(x, z, s.ax, s.az, s.bx, s.bz).d2 < lim * lim) on = true;
     });
