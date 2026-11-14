@@ -102,22 +102,41 @@ function flowerGeometry() {
   return g;
 }
 
-// 光の柱の形: 縦長の板 2 枚の十字（下が濃いスミレ色、上へ黒 = 加算合成で見えなくなる）
-function beamGeometry() {
+// 光の柱の形: 縦長の板 2 枚の十字。色はスミレ色、濃さ（アルファ）は下 0.55 → 上 0 の通常の半透明。
+// 加算合成では昼の空の前で白く見えた（f2-violet-30m.jpg）。花ごとの濃さ（近いと薄く）は fade（インスタンスの属性）
+function beamGeometry(n) {
   const pos = [], col = [];
-  const c = new THREE.Color('#a070e0');
+  const c = new THREE.Color('#9a6ae0');
   for (const [ax, az] of [[1, 0], [0, 1]]) {
     const w = BEAM_W / 2;
     const v = [[-w * ax, 0, -w * az, 1], [w * ax, 0, w * az, 1], [w * ax, BEAM_H, w * az, 0], [-w * ax, 0, -w * az, 1], [w * ax, BEAM_H, w * az, 0], [-w * ax, BEAM_H, -w * az, 0]];
     for (const [x, y, z, k] of v) {
       pos.push(x, y, z);
-      col.push(c.r * k, c.g * k, c.b * k);
+      col.push(c.r, c.g, c.b, 0.55 * k);
     }
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 4)); // 4 成分: 頂点のアルファ
+  const fade = new THREE.InstancedBufferAttribute(new Float32Array(n).fill(1), 1);
+  fade.setUsage(THREE.DynamicDrawUsage);
+  g.setAttribute('fade', fade);
   return g;
+}
+
+// 柱の材料: 頂点のアルファに、花ごとの fade を掛ける
+function beamMaterial() {
+  const m = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 1, depthWrite: false, side: THREE.DoubleSide, fog: true });
+  m.onBeforeCompile = (sh) => {
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute float fade;\nvarying float vFade;')
+      .replace('#include <color_vertex>', '#include <color_vertex>\nvFade = fade;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying float vFade;')
+      .replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.a *= vFade;');
+  };
+  m.customProgramCacheKey = () => 'violet-beam';
+  return m;
 }
 
 // 自転車からの距離 d（m）での柱の濃さ: 12 m 以内は 0.15、そこから 8 m かけて 1 へ
@@ -130,7 +149,6 @@ const _q = new THREE.Quaternion();
 const _p = new THREE.Vector3();
 const _s = new THREE.Vector3(1, 1, 1);
 const _fs = new THREE.Vector3(FLOWER_SCALE, FLOWER_SCALE, FLOWER_SCALE);
-const _c = new THREE.Color();
 const _up = new THREE.Vector3(0, 1, 0);
 
 export class Violets {
@@ -155,11 +173,8 @@ export class Violets {
       color: '#b48ce6', transparent: true, opacity: 0.45, depthWrite: false, side: THREE.DoubleSide, fog: true,
       polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4,
     }), n);
-    this.beams = new THREE.InstancedMesh(beamGeometry(), new THREE.MeshBasicMaterial({
-      vertexColors: true, transparent: true, opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: true,
-    }), n);
-    for (let i = 0; i < n; i++) this.beams.setColorAt(i, _c.setScalar(1)); // 花ごとの濃さ（近いと薄く）
-    this.beams.instanceColor.setUsage(THREE.DynamicDrawUsage);
+    this.beams = new THREE.InstancedMesh(beamGeometry(n), beamMaterial(), n);
+    this.beamFade = this.beams.geometry.getAttribute('fade'); // 花ごとの濃さ（近いと薄く）
     for (const m of [this.flowers, this.rings, this.beams]) {
       m.frustumCulled = false; // 花は街じゅうに散らばるので、まとめた箱では切れない
       m.count = 0;
@@ -215,7 +230,7 @@ export class Violets {
       // 柱は花の上から（地面から立てると、近くで花が光に埋もれる: f2-violet-8m.jpg）
       _p.y = y + FLOAT_Y + BEAM_BASE;
       this.beams.setMatrixAt(n, _m.compose(_p, _q, _s));
-      this.beams.setColorAt(n, _c.setScalar(beamFade(Math.sqrt(d2))));
+      this.beamFade.array[n] = beamFade(Math.sqrt(d2));
       n++;
     }
     const nb = n;
@@ -239,7 +254,7 @@ export class Violets {
     this.rings.count = nb;
     this.beams.count = nb;
     for (const m of [this.flowers, this.rings, this.beams]) m.instanceMatrix.needsUpdate = true;
-    this.beams.instanceColor.needsUpdate = true;
+    this.beamFade.needsUpdate = true;
     this.beams.material.opacity = 0.85 + 0.15 * Math.sin((time * 2 * Math.PI) / BEAM_PERIOD); // 0.7〜1.0 でゆっくり明滅
     return this.picked;
   }
