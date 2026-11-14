@@ -137,7 +137,7 @@ async function bakeTerrainFile(id, bbox) {
   const buf = await encodeTerrain(data);
   const out = join(root, 'public', 'data', `${id}-terrain.bin`);
   await writeFile(out, buf);
-  console.log(`\n  保存: ${out}（${(buf.length / 1048576).toFixed(2)} MB、${data.near.cols} × ${data.near.rows} 点、橋の縦断面 ${data.bridges.length}、${((Date.now() - t0) / 1000).toFixed(0)} 秒）`);
+  console.log(`\n  保存: ${out}（${(buf.length / 1048576).toFixed(2)} MB、${data.near.cols} × ${data.near.rows} 点、橋の縦断面 ${data.bridges.length}、岸壁の線 ${data.quays ? data.quays.length : 'なし'}、${((Date.now() - t0) / 1000).toFixed(0)} 秒）`);
   // 確かめ: 標高（m）。トゥールーズ全体の座標（x = 東, z = 南）から緯度経度にして引く
   const t = new Terrain(data, proj);
   const T = areaFrame({ s: 43.5994, n: 43.5994, w: 1.4395, e: 1.4395 }).proj;

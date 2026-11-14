@@ -201,6 +201,14 @@ export const LANDMARKS = [
     text: '大通りが放射状に集まる円形の公園。ジャルダン・ロワイヤル、植物園へと緑がつながる。',
   },
   {
+    id: 'monument-combattants',
+    name: 'Monument aux Combattants',
+    ja: '戦没者記念碑の凱旋門',
+    lat: 43.600102, lon: 1.452021,
+    match: /^Monument aux (Combattants de la Haute-Garonne|morts de la Haute-Garonne)$/i,
+    text: 'フランソワ・ヴェルディエの並木道の入口に立つ、高さ 16 m の石の凱旋門（1928 年）。第一次世界大戦で亡くなったオート＝ガロンヌ県の兵士にささげられ、壁には兵士の行列の浮き彫りが巡る。',
+  },
+  {
     id: 'jardin-plantes',
     name: 'Jardin des Plantes',
     ja: '植物園（ジャルダン・デ・プラント）',

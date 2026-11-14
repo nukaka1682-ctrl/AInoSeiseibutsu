@@ -12,7 +12,7 @@ import { FLAT_TERRAIN, surfaceFns } from './terrain.js';
 import { buildTerrainTile } from './terrainmesh.js';
 import { buildCoverMesh } from './cover.js';
 import { tileBounds, tileLayout } from '../data/tiles.js';
-import { buildTrees, fillParkTrees, planeTreeTest, streetTrees, treelessTest, magnoliaTest, liftQuayTrees, underDeck, addPhotoTrees } from './trees.js';
+import { buildTrees, fillParkTrees, planeTreeTest, streetTrees, treelessTest, magnoliaTest, liftQuayTrees, underDeck, addPhotoTrees, curbTrees } from './trees.js';
 import { buildEnclosures, clearNamedAreas, clearRoads, fixedWalls, projectTrees, projectWalls, tameWalls } from './enclosures.js';
 import { clearEntrances, entranceWalls, inEntrance, projectEntrances } from './metro.js';
 import { findTowers } from './towers.js';
@@ -21,6 +21,7 @@ import { findCapitoleFacade, markBrickSites, markStreetStyles } from './landmark
 import { greySquareTest, historicCoreTest, oldTownTest } from '../config.js';
 import { POST_HIT, planStreets } from './streets.js';
 import { buildFurniture } from './furniture.js';
+import { quayChains, snapPathsToQuays } from './quays.js';
 import { CollisionWorld } from '../game/collision.js';
 import { RoadNetwork } from '../game/roadnet.js';
 import { resolveLandmarks } from '../game/landmarks.js';
@@ -43,6 +44,7 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   progress('建物・道路・水辺を解析中…', 0);
   await pause();
   const parsed = parseOsm(data.osm, proj, rect, data.bdtopo);
+  if (terrain.quayLines) snapPathsToQuays(parsed.roads, quayChains(terrain.quayLines, proj)); // 岸壁に沿う小道を壁のどちらか側へ
   const roadnet = new RoadNetwork(parsed.roads);
   const group = new THREE.Group();
   const facade = findCapitoleFacade(parsed); // キャピトルの正面には専用のテクスチャ
@@ -124,8 +126,10 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   await pause();
   let treePts;
   if (data.trees?.length) {
-    // LiDAR で見つけた木（水の上・道路の真ん中は除く）
-    treePts = projectTrees(data.trees, proj).filter((p) => !inWater(p.x, p.z) && !roadnet.onRoad(p.x, p.z, -1.5) && !underDeck(terrain, p.x, p.z) && !inEntrance(terrain.metro || [], p.x, p.z));
+    // LiDAR で見つけた木（水の上は除く）
+    const free = (x, z) => !inWater(x, z) && !underDeck(terrain, x, z) && !inEntrance(terrain.metro || [], x, z);
+    // 車道・小道の上に立つ木（樹冠のてっぺんが道の上）は縁石の外の歩道へ寄せる
+    treePts = curbTrees(projectTrees(data.trees, proj).filter((p) => free(p.x, p.z)), roadnet, (x, z) => free(x, z) && !insideBuilding(x, z));
   } else {
     const m = 30;
     const inRect = ([x, z]) => x > rect.minX - m && x < rect.maxX + m && z > rect.minZ - m && z < rect.maxZ + m;

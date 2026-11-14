@@ -6,9 +6,10 @@
 import * as THREE from 'three';
 import { Grid, pointInRing } from '../geo.js';
 import { CAR_ROADS, parseOsm } from './parse.js';
+import { quayChains, snapPathsToQuays } from './quays.js';
 import { loadTileData, tileAt, tileBounds, tileLayout } from '../data/tiles.js';
 import { buildBuildings } from './buildings.js';
-import { buildTrees, fillParkTrees, planeTreeTest, streetTrees, treelessTest, magnoliaTest, liftQuayTrees, underDeck, addPhotoTrees } from './trees.js';
+import { buildTrees, fillParkTrees, planeTreeTest, streetTrees, treelessTest, magnoliaTest, liftQuayTrees, underDeck, addPhotoTrees, curbTrees } from './trees.js';
 import { buildEnclosures, clearNamedAreas, clearRoads, fixedWalls, projectTrees, projectWalls, tameWalls } from './enclosures.js';
 import { clearEntrances, entranceWalls, inEntrance } from './metro.js';
 import { findCapitoleFacade, markBrickSites, markStreetStyles } from './landmarkfacades.js';
@@ -38,6 +39,7 @@ export async function assembleStreamWorld({ base, bbox, presetId, buildingMats, 
   progress('道路・川・公園を解析中…', 0.05);
   await pause();
   const parsed = parseOsm(base.osm, proj, rect, []);
+  if (terrain.quayLines) snapPathsToQuays(parsed.roads, quayChains(terrain.quayLines, proj)); // 岸壁に沿う小道を壁のどちらか側へ（assemble.js と同じ）
   progress('道路網を作成中…', 0.3);
   await pause();
   const roadnet = new RoadNetwork(parsed.roads);
@@ -292,7 +294,9 @@ class TileStreamer {
     const inB = (x, z) => x >= B.minX && x < B.maxX && z >= B.minZ && z < B.maxZ;
     let treePts;
     if (data.trees.length) {
-      treePts = projectTrees(data.trees, this.proj).filter((p) => !this.inWater(p.x, p.z) && !this.roadnet.onRoad(p.x, p.z, -1.5) && !underDeck(this.terrain, p.x, p.z) && !inEntrance(this.terrain.metro || [], p.x, p.z));
+      const free = (x, z) => !this.inWater(x, z) && !underDeck(this.terrain, x, z) && !inEntrance(this.terrain.metro || [], x, z);
+      // 車道・小道の上に立つ木（樹冠のてっぺんが道の上）は縁石の外の歩道へ寄せる（assemble.js と同じ）
+      treePts = curbTrees(projectTrees(data.trees, this.proj).filter((p) => free(p.x, p.z)), this.roadnet, (x, z) => free(x, z) && !insideBuilding(x, z) && !insideContext(x, z));
     } else {
       const free = (x, z) => inB(x, z) && !this.roadnet.onRoad(x, z, 1.5) && !this.inWater(x, z) && !insideBuilding(x, z);
       const parks = this.parsed.areas.filter((a) => a.bounds.maxX > B.minX && a.bounds.minX < B.maxX && a.bounds.maxZ > B.minZ && a.bounds.minZ < B.maxZ);

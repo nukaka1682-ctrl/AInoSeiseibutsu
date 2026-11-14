@@ -264,3 +264,34 @@ test('旧市街の壁付けの角灯（夜の明かり）: 壁のある側だけ
   assert.equal(fs.lampHeads.length, 2);
   assert.deepEqual(fs.lampHeads[1].slice(0, 5), [10, 11.6, 0, 5, 11.6 - 5]);
 });
+
+test('車道の上に立つ木は縁石の外へ寄せる（curbTrees）', async () => {
+  const { curbTrees } = await import('../../src/world/trees.js');
+  const { RoadNetwork } = await import('../../src/game/roadnet.js');
+  const roads = [
+    road(1, 'residential', 6, [[0, 0], [100, 0]]),
+    road(2, 'cycleway', 2.5, [[0, 30], [100, 30]]),
+    road(3, 'pedestrian', 8, [[0, 60], [100, 60]]),
+  ];
+  const net = new RoadNetwork(roads);
+  const pts = [
+    { x: 20, z: 1.5, y: 0, h: 12, r: 4 }, // 車道の中（北寄り）→ 北の歩道へ
+    { x: 40, z: -3.4, y: 0, h: 12, r: 4 }, // 縁石のすぐ外（0.4 m）→ 歩道の中へ
+    { x: 60, z: 8, y: 0, h: 12, r: 4 }, // 道の外 → そのまま
+    { x: 50, z: 30.3, y: 0, h: 8, r: 3 }, // 自転車道の上 → 縁の外
+    { x: 50, z: 61, y: 0, h: 8, r: 3 }, // 歩行者の通り → そのまま
+    { x: 80, z: 0.5, y: 0, h: 12, r: 4 }, // 車道の中。北の歩道は建物 → 南へ
+    { x: 80.5, z: -0.5, y: 0, h: 12, r: 4 }, // 同じ所へ寄る木は 1 本だけ
+  ];
+  const out = curbTrees(pts, net, (x, z) => !(x > 70 && z > 3 && z < 20));
+  const at = (x) => out.filter((p) => Math.abs(p.x - x) < 1.5);
+  assert.equal(at(20).length, 1);
+  assert.ok(Math.abs(at(20)[0].z - 4.1) < 1e-6, `z=${at(20)[0].z}`);
+  assert.ok(Math.abs(at(40)[0].z + 4.1) < 1e-6);
+  assert.equal(at(60)[0].z, 8);
+  assert.ok(out.some((p) => p.x === 50 && Math.abs(p.z - 31.85) < 1e-6), JSON.stringify(out.filter((p) => p.x === 50)));
+  assert.ok(out.some((p) => p.x === 50 && p.z === 61));
+  assert.equal(at(80).length, 1);
+  assert.ok(Math.abs(at(80)[0].z + 4.1) < 1e-6);
+  for (const p of out) assert.ok(!net.onRoad(p.x, p.z, 0.3, (s) => s.road.type !== 'pedestrian'), `(${p.x}, ${p.z}) は道の上`);
+});

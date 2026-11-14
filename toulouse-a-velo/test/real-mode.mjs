@@ -22,6 +22,8 @@ const context = await browser.newContext({ viewport: { width: 1280, height: 720 
 const page = await context.newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
+page.on('crash', () => console.log('ページが落ちました（crash）'));
+browser.on('disconnected', () => console.log('ブラウザが閉じました'));
 page.on('console', (m) => (m.type() === 'error' || m.type() === 'warning') && console.log(`[${m.type()}]`, m.text().slice(0, 200)));
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json' };
 await page.route('http://game.test/**', async (r) => {
@@ -77,7 +79,39 @@ console.log(`${((Date.now() - t0) / 1000).toFixed(0)} 秒`, st);
 
 // 名所の発見などの通知は写さない
 await page.addStyleTag({ content: '#toast { display: none !important; }' });
-for (const v of views) {
+// SESSION=1: 最初の撮影のあともブラウザを開いたままにして、test/output/cmd.json（撮影の一覧）が置かれるたびに撮る
+// （結果は test/output/cmd.out。{"quit":true} で終わる）。v.eval: ページで評価する式の文字列（結果を <name>.json に保存、撮影しない）
+import { rm, access } from 'node:fs/promises';
+const logLines = [];
+const say = (...a) => { console.log(...a); logLines.push(a.join(' ')); };
+async function run(views) {
+for (let v of views) {
+  if (v.eval) {
+    let res;
+    try { res = await page.evaluate(v.eval); } catch (e) { res = { error: String(e).slice(0, 2000) }; }
+    if (typeof res === 'string' && res.startsWith('data:image/png;base64,')) {
+      await writeFile(join(out, `${v.name}.png`), Buffer.from(res.slice(22), 'base64'));
+      say(`  ${v.name}: 画像`);
+      continue;
+    }
+    await writeFile(join(out, `${v.name}.json`), JSON.stringify(res, null, 1));
+    say(`  ${v.name}: ${JSON.stringify(res).slice(0, 300)}`);
+    continue;
+  }
+  // at: [緯度, 経度] で置く。cam.posLL / cam.lookLL: [緯度, 経度, 地面からの高さ] でカメラを置く（cam.ground と同じ扱い）
+  v = await page.evaluate((v) => {
+    const P = window.__tav.world.proj;
+    if (v.at) [v.x, v.z] = P.project(v.at[0], v.at[1]);
+    if (v.lookAt) v.look = P.project(v.lookAt[0], v.lookAt[1]);
+    if (v.cam?.posLL) {
+      const a = P.project(v.cam.posLL[0], v.cam.posLL[1]), b = P.project(v.cam.lookLL[0], v.cam.lookLL[1]);
+      v.cam.pos = [a[0], v.cam.posLL[2], a[1]];
+      v.cam.look = [b[0], v.cam.lookLL[2], b[1]];
+      if (!v.cam.deck) v.cam.ground = true;
+      if (v.x == null && !v.lm && !v.street) [v.x, v.z] = a;
+    }
+    return v;
+  }, v);
   await page.evaluate((v) => {
     const s = window.__tav;
     if (v.lm) {
@@ -173,10 +207,28 @@ for (const v of views) {
     return `y=${window.__tav.bike.y.toFixed(1)}、航空写真の解像度別の区画数 ${lv.join('/')}・失敗 ${o?.failures}${tiles}、描画コール ${ri.calls}・三角形 ${ri.triangles}`;
   });
   await page.screenshot({ path: join(out, `${v.name}.jpg`), type: 'jpeg', quality: 85, timeout: 240000 });
-  console.log(`  ${v.name}: 自転車の高さ ${info}`);
+  say(`  ${v.name}: 自転車の高さ ${info}`);
   // probe: ページで評価する式（例: 近くの小物の位置を調べる）。結果を JSON で表示する
   if (v.probe) console.log(`  ${v.name} probe:`, JSON.stringify(await page.evaluate(v.probe)));
   if (v.cam) await page.evaluate(() => (window.__tav.phase = 'play'));
+}
+}
+await run(views);
+if (process.env.SESSION) {
+  const cmd = join(out, 'cmd.json');
+  await writeFile(join(out, 'cmd.out'), 'ready\n');
+  for (;;) {
+    await new Promise((r) => setTimeout(r, 500));
+    if (!(await access(cmd).then(() => true, () => false))) continue;
+    let vs;
+    try { vs = JSON.parse(await readFile(cmd, 'utf8')); } catch { continue; }
+    await rm(cmd);
+    if (vs.quit) break;
+    logLines.length = 0;
+    try { await run(vs); } catch (e) { say('失敗: ' + String(e).slice(0, 500)); }
+    if (errors.length) say('エラー: ' + errors.splice(0).join(' | ').slice(0, 800));
+    await writeFile(join(out, 'cmd.out'), logLines.join('\n') + '\ndone\n');
+  }
 }
 await browser.close();
 if (errors.length) console.log('エラー:\n' + errors.join('\n'));

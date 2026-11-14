@@ -488,8 +488,49 @@ export function setupDecks(terrain, roads, proj, waterDepthAt = () => 0) {
   });
   terrain.setDecks([...out.values()]);
   deckCache.set(terrain, out);
+  sinkUnderDecks(terrain);
   terrain.abutments = abutmentWalls(terrain, roads, waterDepthAt);
   return out;
+}
+
+// 橋面の下の地面を、橋面より下に抑える（利用者の指摘: 橋と岸のつなぎ目が変。橋の端のまわりの地面は橋面の高さまで
+// 盛り上げてあり（raiseBridgeEnds）、5 m の格子の面が橋面から顔を出して、橋の上に広場や歩道の切れ端が重なっていた）。
+// 橋の幅の中（+ 0.3 m）で、両端から 2 m より内側の格子点を、橋面 − すき間（端の近くは 0.25 m、端から 8 m で 0.9 m）まで
+// 下げる。崖の 2 つの高さ（terrain.js の setCliffs）も同じに下げる。地形ごとに 1 回だけ
+export function sinkUnderDecks(terrain) {
+  if (!terrain || terrain.flat || terrain.decksSunk || !terrain.near) return 0;
+  terrain.decksSunk = true;
+  const g = terrain.near, D = g.data, DAT = terrain.datum;
+  let n = 0;
+  for (const d of terrain.decks) {
+    let s0 = 0;
+    for (let i = 0; i + 1 < d.pts.length; i++) {
+      const [ax, az] = d.pts[i], [bx, bz] = d.pts[i + 1], len = Math.hypot(bx - ax, bz - az), R = d.half + 0.3;
+      const c0 = Math.max(0, Math.ceil(g.ax * (Math.min(ax, bx) - R) + g.bx)), c1 = Math.min(g.cols - 1, Math.floor(g.ax * (Math.max(ax, bx) + R) + g.bx));
+      const r0 = Math.max(0, Math.ceil(g.az * (Math.min(az, bz) - R) + g.bz)), r1 = Math.min(g.rows - 1, Math.floor(g.az * (Math.max(az, bz) + R) + g.bz));
+      for (let r = r0; r <= r1; r++) {
+        const z = (r - g.bz) / g.az;
+        for (let c = c0; c <= c1; c++) {
+          const x = (c - g.bx) / g.ax, cs = closestOnSegment(x, z, ax, az, bx, bz);
+          if (cs.d2 > R * R) continue;
+          const s = s0 + cs.t * len, e = Math.min(s, d.length - s);
+          if (e < 2) continue;
+          const lim = terrain.deckY(d, s) - (0.25 + 0.65 * Math.min(1, (e - 2) / 6)) + DAT, k = r * g.cols + c;
+          if (D[k] > lim) {
+            D[k] = lim;
+            n++;
+          }
+          const lv = terrain.cliffLevels?.get(k);
+          if (lv) {
+            lv[0] = Math.min(lv[0], lim);
+            lv[1] = Math.min(lv[1], lim);
+          }
+        }
+      }
+      s0 += len;
+    }
+  }
+  return n;
 }
 
 // 陸の上の高速道路の高架の下をくぐる車道の両脇の擁壁（ユーザーのストリートビュー: A620 の下の Grande-Bretagne 通りは、

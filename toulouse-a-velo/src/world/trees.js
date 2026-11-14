@@ -353,6 +353,67 @@ export function buildTrees(points, { isPlane = () => false, isMagnolia = () => f
   return group;
 }
 
+// 車道・小道の上に立つ木を道の外へ寄せる。LiDAR の木の位置は樹冠のてっぺんで、歩道に立つ街路樹は樹冠が車道の上へ
+// 張り出すので、幹が車道の中に立ってしまう（利用者の指摘: 車道に街路樹が立っている）。
+// 車道（CAR_ROADS・生活道路・サービス道路）の縁から CURB_IN m 以内に立つ木は、近い側の縁石の外 CURB_OUT m（歩道の上）へ、
+// 自転車道・歩道・小道の上の木は道の縁の外 0.6 m へ動かす。動かした先がほかの道の上・ok(x, z) が false（水・建物）なら
+// 反対側を試し、だめなら捨てる。動かした木がほかの木と GAP m 以内に重なるときも捨てる。
+// roadnet: RoadNetwork（nearestSegment・maxHalfWidth）。返り値は新しい配列（動かさない木は同じ物）
+const CURB_IN = 0.9, CURB_OUT = 1.1, MOVED_GAP = 2.5;
+const DRIVE = new Set([...CAR_ROADS, 'living_street', 'service', 'motorway', 'motorway_link']);
+export function curbTrees(points, roadnet, ok = () => true) {
+  const live = (s) => !s.road.tunnel && !s.road.bridge && (s.road.layer || 0) >= 0 && s.road.type !== 'steps' && s.road.type !== 'pedestrian'; // 歩行者の通り・広場の木はそのまま
+  const margin = (road) => (DRIVE.has(road.type) ? CURB_IN : 0.4);
+  const blocked = (x, z) => {
+    const n = roadnet.nearestSegment(x, z, roadnet.maxHalfWidth + 1.2, live);
+    return !!n && Math.sqrt(n.d2) < n.seg.road.width / 2 + margin(n.seg.road) - 0.05;
+  };
+  const kept = [], moved = [];
+  for (const p of points) {
+    if (p.x == null || p.abs) {
+      kept.push(p);
+      continue;
+    }
+    const n = roadnet.nearestSegment(p.x, p.z, roadnet.maxHalfWidth + 1.2, live);
+    if (!n) {
+      kept.push(p);
+      continue;
+    }
+    const road = n.seg.road, half = road.width / 2, d = Math.sqrt(n.d2);
+    if (d >= half + margin(road)) {
+      kept.push(p);
+      continue;
+    }
+    const s = n.seg, L = Math.hypot(s.bx - s.ax, s.bz - s.az) || 1;
+    let nx = -(s.bz - s.az) / L, nz = (s.bx - s.ax) / L;
+    const side = (p.x - n.x) * nx + (p.z - n.z) * nz;
+    if (side < 0 || (side === 0 && treeSeed(p.x, p.z) % 2)) [nx, nz] = [-nx, -nz];
+    const out = half + (DRIVE.has(road.type) ? CURB_OUT : 0.6);
+    let placed = null;
+    for (const sg of [1, -1]) {
+      const x = n.x + nx * out * sg, z = n.z + nz * out * sg;
+      if (!blocked(x, z) && ok(x, z)) {
+        placed = { ...p, x, z };
+        break;
+      }
+    }
+    if (placed) moved.push(placed);
+  }
+  if (!moved.length) return kept;
+  const grid = new Grid(8);
+  for (const p of kept) if (p.x != null) grid.insertPoint(p.x, p.z, p);
+  for (const p of moved) {
+    let near = false;
+    grid.queryPoint(p.x, p.z, MOVED_GAP, (q) => {
+      if (!near && Math.hypot(q.x - p.x, q.z - p.z) < MOVED_GAP) near = true;
+    });
+    if (near) continue;
+    grid.insertPoint(p.x, p.z, p);
+    kept.push(p);
+  }
+  return kept;
+}
+
 // 橋面の下（橋の幅の中）か。河岸から生えた木の幹が橋面を突き抜けて、橋の上の当たり判定になるのを防ぐ（Pont Saint-Pierre の
 // 西の端で、橋の下の木の幹に自転車が止められた）
 export function underDeck(terrain, x, z) {

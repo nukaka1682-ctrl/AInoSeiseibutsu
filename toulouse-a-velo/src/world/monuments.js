@@ -88,6 +88,12 @@ export const MONUMENTS = [
   // リケの像（Monument à Pierre-Paul Riquet。利用者の写真 212520）: ジャン・ジョレス通りの北東の端、運河の手前。
   // 淡い灰色の花崗岩の島に、2 段の台・石灰岩の台座（3 m 角・4.5 m）と白い大理石の立像（約 3.5 m）
   { id: 'riquet', kind: 'statue', lat: 43.60906, lon: 1.45389, facing: [43.6061, 1.4490] },
+  // 戦没者記念碑の凱旋門（Monument aux Combattants de la Haute-Garonne、1928 年、Léon Jaussely。François Verdier の並木道の北の端）:
+  // 淡い石の大きな門。位置・向き・寸法は LiDAR HD の表面モデルから: 真ん中の高い塊（幅 8 m・奥行き 11.5 m・高さ 16 m）を
+  // 半円アーチの通路が並木道の軸に沿って貫き、両脇に低い翼（幅 4 m・奥行き 8 m・高さ 12.5 m、上の帯に浮き彫りの行列）。
+  // 2023 年にメトロ C 線の駅の工事で南へ 35 m 動かして仮置きされ（OpenStreetMap の今の外形は仮置きの場所）、2027 年に
+  // 元の場所へ戻る。ここでは元の場所・向きに建てる。facing: 通路の軸の先（並木道の南）。old: 仮置きの外形を探す所
+  { id: 'monument-combattants', kind: 'memorial', lat: 43.600102, lon: 1.452021, facing: [43.59847, 1.45219], old: [43.59979, 1.45208] },
   // Place de la Trinité の噴水（1826 年、Urbain Vitry。写真: Wikimedia Commons「Fontaine de la Trinité」、航空写真で位置）:
   // 低い灰色の石の丸い水盤、白い大理石の 3 つの面が内へ反った台座（面ごとにライオンの口の吐水口）、背中合わせの 3 体の
   // ブロンズの翼のあるセイレーンと真ん中の手すり子が、大きな白い大理石の水盤を支える。広場の石畳に淡い石の輪
@@ -580,6 +586,13 @@ export function findMonuments(proj, { buildings = [], areas = [], facade = null,
     } else if (spec.kind === 'trinite') {
       if (!inB(x, z)) continue;
       out.push({ spec, kind: 'trinite', x, z, replaced: [] });
+    } else if (spec.kind === 'memorial') {
+      if (!inB(x, z)) continue;
+      const [fx, fz] = proj.project(...spec.facing), fl = Math.hypot(fx - x, fz - z) || 1;
+      // 仮置きの場所の外形（OpenStreetMap の building=roof・historic=memorial）は描かない・ぶつからない
+      const [ox, oz] = proj.project(...spec.old);
+      const replaced = buildings.filter((b) => b.info.area < 400 && Math.hypot(b.inside[0] - ox, b.inside[1] - oz) < 12 && (b.tags?.historic === 'memorial' || b.info.kind === 'roof'));
+      out.push({ spec, kind: 'memorial', x, z, f: [(fx - x) / fl, (fz - z) / fl], replaced, open: replaced });
     } else if (spec.kind === 'statue') {
       if (!inB(x, z)) continue;
       const [fx, fz] = proj.project(...spec.facing);
@@ -714,6 +727,7 @@ export function monumentClearance(list, proj = null) {
     if (m.kind === 'coq') circles.push([m.x, m.z, 3]);
     if (m.kind === 'roundabout') circles.push([m.x, m.z, m.radius + 0.5]); // 島の木は島のモデルで描く
     if (m.kind === 'statue') circles.push([m.x, m.z, 6]);
+    if (m.kind === 'memorial') circles.push([m.x, m.z, 11]);
     if (m.kind === 'pavilion') circles.push([m.x, m.z, 5]);
     if (m.kind === 'hgate') circles.push([...m.arch, 5], ...m.pillars.map(([x, z]) => [x, z, 3]));
     if (m.kind === 'lift') circles.push([m.x, m.z, 3]);
@@ -2730,6 +2744,101 @@ function writeStatue(m, W, groundAt, colliders, onRoad, keepOut) {
   keepOut.push([x, z, 6]);
 }
 
+// ---- 戦没者記念碑の凱旋門（François Verdier）。f: 通路の向き、s: 横（門の幅）の向き
+export const MEMORIAL = { half: 4, depth: 5.75, top: 16, wing: 4, wingDepth: 4, wingTop: 12.5, arch: 5, spring: 7.0 };
+// ぶつかる所: 通路の両脇の塊（真ん中の塊の柱 + 翼）の外形の線分。通路（幅 arch m）は通り抜けられる
+export function memorialColliders(x, z, f) {
+  const M = MEMORIAL, s = [-f[1], f[0]], P = (a, d) => [x + s[0] * a + f[0] * d, z + s[1] * a + f[1] * d];
+  const out = [];
+  for (const sg of [1, -1]) {
+    const r = M.arch / 2, ring = [[r, -M.depth], [M.half, -M.depth], [M.half, -M.wingDepth], [M.half + M.wing, -M.wingDepth], [M.half + M.wing, M.wingDepth], [M.half, M.wingDepth], [M.half, M.depth], [r, M.depth]].map(([a, d]) => P(a * sg, d));
+    ring.forEach((p, i) => out.push([...p, ...ring[(i + 1) % ring.length]]));
+  }
+  return out;
+}
+function writeMemorial(m, W, groundAt, colliders, onRoad, keepOut) {
+  const { x, z, f } = m, M = MEMORIAL, s = [-f[1], f[0]];
+  const y0 = groundAt(x, z), w = W.main;
+  const STONE = col('#dccba6'), SHADE = col('#bfab86'), DARK = col('#8f8066'), VAULT = col('#a59373'), REL_A = col('#cdb98f'), REL_B = col('#a08a66'), BASE = col('#b9ad98');
+  const P = (a, d) => [x + s[0] * a + f[0] * d, z + s[1] * a + f[1] * d];
+  const P3 = (a, y, d) => [x + s[0] * a + f[0] * d, y0 + y, z + s[1] * a + f[1] * d];
+  const ex = (h) => [s[0] * h, 0, s[1] * h], ez = (h) => [f[0] * h, 0, f[1] * h], ey = (h) => [0, h, 0];
+  const bx = (a, y, d, ha, hy, hd, color, opt) => box(w, P3(a, y, d), ex(ha), ey(hy), ez(hd), color, opt);
+  const q = (A, B, C, D, n, color) => w.quad(A, B, C, D, n, PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, color);
+  const R = M.arch / 2, BODY = 14.2;
+  // 低い石の台（2 段）
+  bx(0, 0.08, 0, M.half + M.wing + 1.2, 0.08, M.depth + 1.4, BASE);
+  bx(0, 0.22, 0, M.half + M.wing + 0.6, 0.07, M.depth + 0.8, BASE);
+  // 真ん中の塊: 通路の両脇の柱（足元から迫り元まで）と、アーチの上の壁
+  for (const sg of [1, -1]) {
+    bx(sg * (R + M.half) / 2, BODY / 2, 0, (M.half - R) / 2, BODY / 2, M.depth, STONE);
+    bx(sg * (R + M.half) / 2, 0.6, 0, (M.half - R) / 2 + 0.12, 0.6, M.depth + 0.12, SHADE); // 腰の帯
+    bx(sg * (R + 0.05), M.spring - 0.2, 0, 0.16, 0.2, M.depth + 0.1, SHADE); // 迫り元の帯（インポスト）
+  }
+  const N = 14, arc = [];
+  for (let i = 0; i <= N; i++) {
+    const t = (i / N) * Math.PI;
+    arc.push([Math.cos(t) * R, M.spring + Math.sin(t) * R]);
+  }
+  for (const d of [M.depth, -M.depth]) {
+    const n = [f[0] * Math.sign(d), 0, f[1] * Math.sign(d)];
+    for (let i = 0; i < N; i++) {
+      const [a0, h0] = arc[i], [a1, h1] = arc[i + 1];
+      q(P3(a0, h0, d), P3(a1, h1, d), P3(a1, BODY, d), P3(a0, BODY, d), n, STONE);
+      // アーチの縁の帯（アーキヴォルト）と要石
+      const k = (R + 0.5) / R, o = d + Math.sign(d) * 0.07;
+      q(P3(a0, h0, o), P3(a1, h1, o), P3(a1 * k, M.spring + (h1 - M.spring) * k, o), P3(a0 * k, M.spring + (h0 - M.spring) * k, o), n, SHADE);
+    }
+    bx(0, M.spring + R + 0.45, d + Math.sign(d) * 0.1, 0.38, 0.6, 0.1, STONE);
+    // 屋階の銘の板（暗い石）と、アーチの両脇の縦長の浮き彫りの板
+    bx(0, 15.3, d - Math.sign(d) * 0.2, 3.0, 0.42, 0.06, DARK);
+    for (const sg of [1, -1]) bx(sg * (R + M.half) / 2, 10.4, d + Math.sign(d) * 0.05, 0.5, 1.9, 0.05, REL_B);
+  }
+  // 通路の天井（格間のあるヴォールト。暗い石、格間ごとに濃淡）と、通路の中の壁の浮き彫りの板
+  const ND = 6;
+  for (let i = 0; i < N; i++) {
+    const [a0, h0] = arc[i], [a1, h1] = arc[i + 1], am = (a0 + a1) / 2, hm = (h0 + h1) / 2 - M.spring;
+    const nl = Math.hypot(am, hm) || 1, n = [-(s[0] * am) / nl, -hm / nl, -(s[1] * am) / nl];
+    for (let j = 0; j < ND; j++) {
+      const d0 = -M.depth + (2 * M.depth * j) / ND, d1 = -M.depth + (2 * M.depth * (j + 1)) / ND;
+      q(P3(a0, h0, d0), P3(a1, h1, d0), P3(a1, h1, d1), P3(a0, h0, d1), n, (i + j) % 2 ? VAULT : DARK);
+    }
+  }
+  for (const sg of [1, -1]) bx(sg * (R - 0.04), 3.7, 0, 0.04, 2.3, M.depth - 1.2, REL_A);
+  // 軒の蛇腹と屋階
+  bx(0, BODY + 0.25, 0, M.half + 0.3, 0.25, M.depth + 0.3, SHADE);
+  bx(0, (BODY + 0.5 + M.top - 0.3) / 2, 0, M.half - 0.15, (M.top - 0.3 - BODY - 0.5) / 2, M.depth - 0.15, STONE);
+  bx(0, M.top - 0.15, 0, M.half + 0.1, 0.15, M.depth + 0.1, SHADE);
+  // 両脇の翼: 無地の石の塊、腰の帯、上の帯に兵士の行列の浮き彫り（縦長の人の形を並べて表す）、軒
+  for (const sg of [1, -1]) {
+    const ac = sg * (M.half + M.wing / 2), WT = M.wingTop;
+    bx(ac, (WT - 0.4) / 2, 0, M.wing / 2, (WT - 0.4) / 2, M.wingDepth, STONE);
+    bx(ac, 0.6, 0, M.wing / 2 + 0.12, 0.6, M.wingDepth + 0.12, SHADE);
+    bx(ac, WT - 0.2, 0, M.wing / 2 + 0.25, 0.2, M.wingDepth + 0.25, SHADE);
+    const F0 = 8.2, F1 = 11.4; // 浮き彫りの帯の下端・上端
+    bx(ac, F0 - 0.12, 0, M.wing / 2 + 0.1, 0.12, M.wingDepth + 0.1, SHADE);
+    // 帯の 3 面（正面・裏・外の横）に人の形
+    const faces = [
+      { o: (t) => [ac + t, M.wingDepth + 0.05], L: M.wing, e: (h, t) => [h, t] },
+      { o: (t) => [ac + t, -M.wingDepth - 0.05], L: M.wing, e: (h, t) => [h, t] },
+      { o: (t) => [sg * (M.half + M.wing + 0.05), t], L: 2 * M.wingDepth, e: (h, t) => [t, h] },
+    ];
+    for (const fc of faces) {
+      const n = Math.floor((fc.L - 0.3) / 0.62);
+      for (let i = 0; i < n; i++) {
+        const t = -((n - 1) * 0.62) / 2 + i * 0.62, [a, d] = fc.o(t), [ha, hd] = fc.e(0.2, 0.05);
+        const hgt = 2.2 + 0.25 * hash01(i * 7 + (sg > 0 ? 3 : 11), 5), c = i % 2 ? REL_A : REL_B;
+        bx(a, F0 + hgt / 2, d, ha, hgt / 2, hd, c);
+        const [hha, hhd] = fc.e(0.13, 0.06);
+        bx(a, F0 + hgt + 0.2, d, hha, 0.17, hhd, c);
+      }
+    }
+    void F1;
+  }
+  colliders.push(...memorialColliders(x, z, f));
+  keepOut.push([x, z, 9.5]);
+}
+
 // ---- 店の並ぶ通りの建物の正面の飾り（Rue de la République）
 // 窓の並びは buildings.js の writeWalls と同じ: 辺の真ん中から FACADE_BAY m ごとの窓の列、1 階の高さは max(3.4, 階高 × 1.15)、
 // 上の階の窓は階の床から階高の 0.13〜0.83
@@ -2978,7 +3087,7 @@ function writeBikeracks(m, W, groundAt, colliders) {
   colliders.push([a[0], a[1], b[0], b[1]]);
 }
 
-const WRITERS = { bikeracks: writeBikeracks, shopstreet: writeShopstreet, trinite: writeTrinite, bollards: writeBollards, hgate: writeHospitalGate, lift: writeLift, pavilion: writePavilion, lock: writeLock, equestrian: writeEquestrian, wallFountain: writeWallFountain, capitainerie: writeCapitainerie, moorings: writeMoorings, riverfront: writeRiverfront, arcades: writeArcades, choir: writeChoir, ramblas: writeRamblas, basilica: writeBasilica, island: writeIsland, roundabout: writeRoundabout, portico: writePortico, donjon: writeDonjon, statue: writeStatue, dome: writeDome, chateau: writeChateau, stadium: writeStadium, cabanis: writeCabanis, coq: writeCoq, cross: writeCross, fastfood: writeFastfood, jgarden: writeJgarden, parterre: writeParterre };
+const WRITERS = { memorial: writeMemorial, bikeracks: writeBikeracks, shopstreet: writeShopstreet, trinite: writeTrinite, bollards: writeBollards, hgate: writeHospitalGate, lift: writeLift, pavilion: writePavilion, lock: writeLock, equestrian: writeEquestrian, wallFountain: writeWallFountain, capitainerie: writeCapitainerie, moorings: writeMoorings, riverfront: writeRiverfront, arcades: writeArcades, choir: writeChoir, ramblas: writeRamblas, basilica: writeBasilica, island: writeIsland, roundabout: writeRoundabout, portico: writePortico, donjon: writeDonjon, statue: writeStatue, dome: writeDome, chateau: writeChateau, stadium: writeStadium, cabanis: writeCabanis, coq: writeCoq, cross: writeCross, fastfood: writeFastfood, jgarden: writeJgarden, parterre: writeParterre };
 
 // 名所のモデルを作る。colliders: 足す当たり判定の円 [x, z, r] か線分 [ax, az, bx, bz]、
 // keepOut: 街の小物を置かない円 [x, z, r]（像の台・シャトー・ドーの柵の内側。monumentSolid）

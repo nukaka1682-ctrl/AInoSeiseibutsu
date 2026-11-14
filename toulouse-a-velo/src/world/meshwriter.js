@@ -112,11 +112,11 @@ export class MeshWriter {
       }
       return;
     }
-    for (const p of d.split([A, B, C])) for (let k = 1; k + 1 < p.length; k++) this.emit(p[0], p[k], p[k + 1], n);
+    for (const p of d.split([A, B, C])) for (let k = 1; k + 1 < p.length; k++) this.emit(p[0], p[k], p[k + 1], n, p.side); // side: 崖のどちらの段か
   }
 
   // 地形に載せた（または map した）三角形を書く。頂点は [x, y, z, u, v, r, g, b]
-  emit(A, B, C, n) {
+  emit(A, B, C, n, side) {
     const ux = B[0] - A[0], uy = B[1] - A[1], uz = B[2] - A[2];
     const vx = C[0] - A[0], vy = C[1] - A[1], vz = C[2] - A[2];
     const cx = uy * vz - uz * vy, cy = uz * vx - ux * vz, cz = ux * vy - uy * vx;
@@ -124,10 +124,10 @@ export class MeshWriter {
     const d = this.drape, o = this.yOffset;
     const up = d && n[1] > 0.95 ? 1 : d && n[1] < -0.95 ? -1 : 0;
     for (const P of [A, B, C]) {
-      const y = this.map ? this.map(P[0], P[1], P[2]) + o : P[1] + d.h(P[0], P[2]) + this.lift + o;
+      const y = this.map ? this.map(P[0], P[1], P[2]) + o : P[1] + d.h(P[0], P[2], side) + this.lift + o;
       this.pos.push(P[0], y, P[2]);
       if (up) {
-        const g = d.normal(P[0], P[2]);
+        const g = d.normal(P[0], P[2], undefined, side);
         this.nor.push(g[0] * up, g[1] * up, g[2] * up);
       } else this.nor.push(n[0], n[1], n[2]);
       this.uv.push(P[3], P[4]);
