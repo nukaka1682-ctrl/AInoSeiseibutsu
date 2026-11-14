@@ -203,8 +203,24 @@ class TileStreamer {
     const t0 = performance.now();
     const B = t.bounds;
     const tp = parseOsm(data.osm, this.proj, this.rect, []);
-    const buildings = tp.buildings;
-    const context = parseOsm(data.ctx, this.proj, this.rect, []).buildings;
+    // 高架の駅の建物（メトロのゲームでは専用の形を置くので、輪郭が駅にかかる建物は作らない）
+    const C = this.terrain.clearAt;
+    const keep = (b) => !C || !(C((b.bounds.minX + b.bounds.maxX) / 2, (b.bounds.minZ + b.bounds.maxZ) / 2) || b.outer.some(([x, z], i) => {
+      const [x1, z1] = b.outer[(i + 1) % b.outer.length], n = Math.max(1, Math.ceil(Math.hypot(x1 - x, z1 - z) / 3));
+      for (let k = 0; k < n; k++) if (C(x + ((x1 - x) * k) / n, z + ((z1 - z) * k) / n)) return true;
+      return false;
+    }) || (this.terrain.clearPts || []).some(([px, pz]) => {
+      // 駅がすっぽり入る大きな建物
+      let inside = false;
+      for (let i = 0, j = b.outer.length - 1; i < b.outer.length; j = i++) {
+        const [xi, zi] = b.outer[i], [xj, zj] = b.outer[j];
+        if (zi > pz !== zj > pz && px < ((xj - xi) * (pz - zi)) / (zj - zi) + xi) inside = !inside;
+      }
+      return inside;
+    }));
+    const buildings = (tp.buildings = tp.buildings.filter(keep));
+    tp.parts = (tp.parts || []).filter(keep);
+    const context = parseOsm(data.ctx, this.proj, this.rect, []).buildings.filter(keep);
     const group = new THREE.Group();
     group.name = `tile-${t.key}`;
     const walls = clearNamedAreas(clearEntrances(clearRoads(tameWalls(projectWalls(data.walls, this.proj), buildings.concat(context)), (x, z) => this.roadnet.onRoad(x, z, 0.3)), this.terrain.metro || []), this.parsed.areas, this.proj).concat(fixedWalls(this.proj, B));
@@ -288,7 +304,7 @@ class TileStreamer {
     const clear = monumentClearance(monuments, this.proj);
     treePts = liftQuayTrees(treePts, T); // 岸壁の下の段の木は上の段へ
     this.treeless ||= treelessTest(this.parsed.areas);
-    treePts = treePts.filter((p) => !clear(p.x ?? p[0], p.z ?? p[1]) && !this.treeless(p.x ?? p[0], p.z ?? p[1])); // 像・塔のまわり・木のない広場には植えない
+    treePts = treePts.filter((p) => !clear(p.x ?? p[0], p.z ?? p[1]) && !this.treeless(p.x ?? p[0], p.z ?? p[1]) && !T.clearAt?.(p.x ?? p[0], p.z ?? p[1])); // 像・塔のまわり・木のない広場には植えない
     // 街路・運河沿いはプラタナス。横に広い LiDAR の塊を分けた木は、道路・水・建物の上には置かない
     const trees = buildTrees(treePts, {
       isPlane: planeTreeTest(this.roadnet, this.inWater),

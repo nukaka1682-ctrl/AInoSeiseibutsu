@@ -902,10 +902,10 @@ export function buildGroundBase(parsed, rect, mats, terrain = FLAT_TERRAIN, layo
     conditionUnderpasses(T, parsed.roads, inWater); // 高架の下の擁壁の足元を道の高さに（bridges.js）
   }
   if (!T.flat && T.quayWalls.length) group.add(buildQuayWalls(T.quayWalls, mats, parsed.proj));
-  if (!T.flat && T.metro.length) {
+  if (!T.flat && (T.metro.length || T.voids?.length)) {
     // メトロの出入口の吹き抜け: 水と同じステンシルの穴（地面のあとに深度テスト付きで印を付け、その所の深度を一番奥に戻す）
     const hole = new MeshWriter();
-    writeEntranceMasks(hole, T.metro, (x, z) => T.h(x, z));
+    writeEntranceMasks(hole, T.metro.concat(T.voids || []), (x, z) => T.h(x, z)); // T.voids: 高架の駅の建物の中（メトロのゲーム）
     const geo = hole.toGeometry();
     const m = new THREE.Mesh(geo, mats.waterMask);
     m.renderOrder = TERRAIN_ORDER.mask;

@@ -227,7 +227,15 @@ export function stationTrack(network, station, line) {
     }
   }
   const c = trackPoint(tr, q.u);
-  return { u: q.u, d: q.d, k: c.k, alt: n ? sum / n : null, open: open / all };
+  // 駅の箱のすぐ外（60 m 以内）から橋になる駅（Jolimont: 西の半分は丘の中、東の端から高架橋）
+  let near = null;
+  for (let d = L; d <= 60 && near == null; d += 4) {
+    for (const u of [q.u + d, q.u - d]) {
+      const p = trackPoint(tr, u);
+      if (u >= 0 && u <= tr.length && p.k !== 't' && p.alt != null) near ??= p.alt;
+    }
+  }
+  return { u: q.u, d: q.d, k: c.k, alt: n ? sum / n : near, open: n ? open / all : near != null ? 0.5 : 0 };
 }
 
 // 路線網。proj: LocalProjection、levelOf(station) → { ym, yp: { A, B } }（改札階・ホームの床の高さ。地形と出入口から決める。
@@ -278,7 +286,7 @@ export function buildNetwork(proj, { bdStations = null, levelOf = null, osm = nu
   for (const s of stations) {
     for (const line of s.lines) {
       const t = stationTrack(network, s, line);
-      if (t && t.alt != null && t.open > 0.45) (s.aerial ||= {})[line] = t.alt;
+      if (t && t.alt != null && t.open > 0.3) (s.aerial ||= {})[line] = t.alt;
     }
   }
   relevelNetwork(network, levelOf);
@@ -371,7 +379,7 @@ export function buildLinePath(line, list, track = null, groundAt = null) {
     for (let k = 0; k <= n; k++) {
       const u = -L + (2 * L * k) / n;
       const q = sk ? trackPoint(track, su.u + u) : null;
-      push(sx + ax * u, sz + az * u, y, ax, az, q ? q.k : 't', null);
+      push(sx + ax * u, sz + az * u, y, ax, az, s.aerial?.[line] != null ? 'b' : q ? q.k : 't', null);
       pts[pts.length - 1].st = true;
     }
   });

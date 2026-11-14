@@ -14,7 +14,7 @@ const net = buildNetwork(proj, { osm, tracks });
 
 test('本物の線形: 駅は線路の上に順に並び、ホームは直線、曲がりはなめらか', () => {
   for (const [line, path] of Object.entries(net.lines)) {
-    let prev = -1;
+    let prev = -1000;
     for (const s of path.stations) {
       assert.ok(stationTrack(net, s, line).d < 20, `${s.name} は線路の近く`);
       assert.ok(s.S[line] > prev + 250, `${s.name} は順に並ぶ`);

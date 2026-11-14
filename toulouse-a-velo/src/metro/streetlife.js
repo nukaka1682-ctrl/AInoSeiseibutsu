@@ -82,6 +82,7 @@ export class StreetLife {
     if (w.roadnet.onRoad(x, z, 0.35)) return false;
     if (w.collision.blockedByWater(x, z)) return false;
     if (inEntrance(this.pits, x, z, 1.0)) return false;
+    if (w.terrain?.clearAt?.(x, z) || this.clearAt?.(x, z)) return false; // 高架の駅の建物の中
     return !w.collision.resolve(x, z, 0.45).hit;
   }
 

@@ -17,6 +17,7 @@ import { entranceFrame, inEntrance } from '../world/metro.js';
 import { MONUMENTS } from '../world/monuments.js';
 import { MapRenderer, drawMinimap } from '../ui/minimap.js';
 import { LINES, LINE_COLORS, RAIL_ALT_TO_FLOOR, TRAIN_CARS, buildNetwork, doorSideAt, kindAt, relevelNetwork, runTime, stationFrame, stationList, terminusOf } from './network.js';
+import { aerialFootprints, aerialLevels, buildAerialMesh, buildAerialNav, isAerial, planAerialStation } from './aerial.js';
 import { adjustStationPits, buildStationNav, planStation, stationLevelsFor } from './stationplan.js';
 import { buildStationMesh } from './stationmesh.js';
 import { alignShallowPits, buildOsmStationNav, completeShallowPits, osmCapable, osmConnected, osmStationDepth, osmStationLevels, planOsmStation, projectStationOsm } from './osmplan.js';
@@ -85,6 +86,7 @@ function bakeProbe(rec, x, y, z) {
   return env;
 }
 function bakeStationProbes(rec) {
+  if (rec.plan.layout === 'aerial') return; // 高架の駅は空の映り込み
   const p = rec.plan, L = p.lines[0], [px, pz] = L.frame.at(0, L.island ? 0 : (L.P + L.WT) / 2 || 4.8);
   rec.envPlatform = bakeProbe(rec, px, L.yp + 2.0, pz);
   if (p.layout === 'osm') {
@@ -197,7 +199,22 @@ async function loadAll() {
   // 路線網（駅の位置と向き: OSM のホーム）。出入口の階段の深さは、駅の階の床にそろえる（地上の出入口を組み立てる前に。world/ground.js）
   const { proj } = areaFrame(bbox);
   const network = buildNetwork(proj, { bdStations: metro?.stations || null, osm: osmStations, tracks: await tracksFile });
-  const entrancesOf = (s) => (terrain.metro || []).filter((e) => e.kind === 'metro' && e.station === s.bd);
+  const entrancesOf = (s) => (isAerial(s) ? [] : (terrain.metro || []).filter((e) => e.kind === 'metro' && e.station === s.bd));
+  // 高架の駅（Basso Cambo・Jolimont）: 高さは線路の標高から。建物の中は地面を描かず、もとの建物・木・LiDAR の吹き抜けを置かない
+  const aerial = network.stations.filter(isAerial);
+  for (const s of aerial) {
+    s.layout = 'aerial';
+    const lv = aerialLevels(s, RAIL_ALT_TO_FLOOR, (x, z) => terrain.h(x, z));
+    s.ym = lv.ym;
+    s.yp = lv.yp;
+  }
+  terrain.voids = aerial.flatMap((s) => aerialFootprints(s, (x, z) => terrain.h(x, z)));
+  terrain.clearAt = (x, z) => aerial.some((s) => {
+    const f = stationFrame(s, s.lines[0]), [ls, lt] = f.local(x, z);
+    return Math.abs(ls) < 33 && Math.abs(lt) < 9.5;
+  });
+  terrain.clearPts = aerial.flatMap((s) => [-25, 0, 25].map((u) => stationFrame(s, s.lines[0]).at(u, 0)));
+  terrain.metroRaw = (terrain.metroRaw || []).filter((e) => e.kind !== 'metro' || !aerial.some((s) => s.bd === e.station));
   if (osmStations) {
     // 出入口: OSM の階段から作った吹き抜け（LiDAR の吹き抜けと合う所はその形）。OSM に出入口のない駅（高架の駅）は LiDAR のまま
     const withOsm = new Set(Object.values(osmStations).filter((o) => o.bouches?.some((b) => b.kind === 'metro')).map((o) => o.bd));
@@ -229,6 +246,7 @@ async function loadAll() {
   terrain.metroAdjust = () => {
     const groundAt = (x, z) => terrain.h(x, z);
     for (const s of network.stations) {
+      if (s.layout === 'aerial') continue;
       // OSM の間取り: 出入口からどのホームへも歩ける駅（scripts/metro-osm.mjs が調べた印 layout）。間取りは駅を組み立てるときに作る
       s.layout = osmStations?.[s.id]?.layout === 'osm' && osmCapable(s) ? 'osm' : 'synth';
       if (s.layout === 'osm') osmStationDepth(s, entrancesOf(s), groundAt);
@@ -242,6 +260,7 @@ async function loadAll() {
   scene.add(world.group);
   // 駅の高さ（改札階・ホーム）と線路の縦断面
   relevelNetwork(network, (s) => {
+    if (s.layout === 'aerial') return aerialLevels(s, RAIL_ALT_TO_FLOOR, (x, z) => terrain.h(x, z));
     if (s.layout === 'osm') return osmStationLevels(s, terrain.h(s.x, s.z));
     const lv = stationLevelsFor(s, entrancesOf(s), terrain.h(s.x, s.z));
     return { ym: lv.ym, yp: lv.yp };
@@ -249,6 +268,7 @@ async function loadAll() {
   const map = new MapRenderer(world.parsed, world.rect);
   base = { world, network, terrain, entrancesOf, osmOf, map };
   life = new StreetLife(world, entrancesOf);
+  life.clearAt = terrain.clearAt;
   world.group.add(life.group);
   window.__metroDebug.life = life;
   window.__metroDebug.base = base; // 確認用（test/metro-shot.mjs から全駅の出入口を調べる）
@@ -262,7 +282,7 @@ function setupSurfaceNav(world, terrain) {
   const pits = terrain.metro || [];
   nav.surface = {
     floorAt(x, z, y) {
-      if (inEntrance(pits, x, z, 0)) return null;
+      if (inEntrance(pits, x, z, 0) || inEntrance(terrain.voids || [], x, z, 0)) return null; // 出入口の吹き抜け・高架の駅の建物の中
       if (y < terrain.h(x, z) - 3) return null; // 地下（地上の床は届かない）
       if (state.station && Math.hypot(x - state.station.x, z - state.station.z) > WALK_HARD) {
         if (state.time - state.lastLimitWarn > 4) {
@@ -289,6 +309,7 @@ function setupSurfaceNav(world, terrain) {
 // ---------------------------------------------------------------- 駅・トンネルを組み立てる・捨てる
 function planFor(id) {
   const b = base, s = b.network.byId.get(id);
+  if (s.layout === 'aerial') return (s.aerialPlan ||= planAerialStation(s, (x, z) => b.terrain.h(x, z), b.network));
   if (s.layout === 'osm') {
     // OSM の間取り（1 回だけ作って使い回す）
     if (!s.osmPlan) {
@@ -327,10 +348,12 @@ function ensureStation(id, preplanned = null) {
   const plan = preplanned || planFor(id);
   const t1 = performance.now();
   const osmLayout = plan.layout === 'osm';
-  const layer = osmLayout ? buildOsmStationNav(plan) : buildStationNav(plan);
+  const aerialLayout = plan.layout === 'aerial';
+  if (aerialLayout) plan.psdWalls = [];
+  const layer = aerialLayout ? buildAerialNav(plan) : osmLayout ? buildOsmStationNav(plan) : buildStationNav(plan);
   const streetAt = (x, z) => b.world.roadnet.streetNameAt(x, z)?.name || '';
   const t2 = performance.now();
-  const mesh = osmLayout ? buildOsmStationMesh(plan, { streetAt, network: b.network }) : buildStationMesh(plan, { streetAt, network: b.network });
+  const mesh = aerialLayout ? buildAerialMesh(plan, { network: b.network, groundAt: (x, z) => b.terrain.h(x, z) }) : osmLayout ? buildOsmStationMesh(plan, { streetAt, network: b.network }) : buildStationMesh(plan, { streetAt, network: b.network });
   const t3 = performance.now();
   const crowd = stationCrowd(plan, layer, (s.id.length * 7919 + s.id.charCodeAt(0) * 31 + Math.floor(Math.random() * 1000)) | 0);
   console.info(`  間取り ${(t1 - t0).toFixed(0)} ms・歩ける所 ${(t2 - t1).toFixed(0)} ms・メッシュ ${(t3 - t2).toFixed(0)} ms・人 ${(performance.now() - t3).toFixed(0)} ms`);
@@ -340,7 +363,7 @@ function ensureStation(id, preplanned = null) {
   const rec = { station: s, plan, group: mesh.group, doors: mesh.doors, displays: mesh.displays || [], layer };
   bakeStationProbes(rec);
   state.stations.set(id, rec);
-  console.info(`駅 ${s.name}: ${(performance.now() - t0).toFixed(0)} ms（${osmLayout ? `OSM の間取り: 階 ${plan.levels.size}、階段 ${plan.blocks.length}、出入口 ${plan.pits.length}` : `通路 ${plan.corridors.length}、閉じた出入口 ${plan.closed.length}`}）`);
+  console.info(`駅 ${s.name}: ${(performance.now() - t0).toFixed(0)} ms（${aerialLayout ? '高架の駅' : osmLayout ? `OSM の間取り: 階 ${plan.levels.size}、階段 ${plan.blocks.length}、出入口 ${plan.pits.length}` : `通路 ${plan.corridors.length}、閉じた出入口 ${plan.closed.length}`}）`);
   for (const line of s.lines) {
     const i = LINES[line].indexOf(id);
     for (const j of [i - 1, i]) {
@@ -622,7 +645,7 @@ function trainOpen(margin = 0) {
 // ---------------------------------------------------------------- 光（地上 ⇄ 地下）
 function updateLighting(dt) {
   const kind = placeKind();
-  const openAir = trainOpen();
+  const openAir = trainOpen() || (kind !== 'surface' && state.station?.layout === 'aerial' && !state.playerTrain);
   const camBelow = camera.position.y < base.terrain.h(camera.position.x, camera.position.z) - 1.2;
   const under = !openAir && ((kind !== 'surface' && kind !== 'pit') || (kind === 'pit' && camBelow && walker.y < base.terrain.h(walker.x, walker.z) - 2.6));
   const target = under ? 1 : 0;
@@ -641,7 +664,7 @@ function updateLighting(dt) {
   scene.environment = k > 0.5 ? probe || interiorEnv : surfaceEnv;
   scene.environmentIntensity = k > 0.5 ? (probe ? 0.85 : 0.3) : surfaceEnvK;
   // 地上の街は、地下の深い所（ホーム・ホームへの階段・電車）では描かない（改札階からは出入口の吹き抜け・通路の先の階段が見える）
-  const deep = (kind === 'platform' || kind === 'train' || kind === 'stairs') && !state.freeCam && !trainOpen(250);
+  const deep = (kind === 'platform' || kind === 'train' || kind === 'stairs') && !state.freeCam && !trainOpen(250) && !openAir;
   base.world.group.visible = !deep && !state.hideCity;
   sky.visible = !deep;
   scene.fog = deep ? null : surfaceFog;
@@ -1003,7 +1026,14 @@ async function startGame() {
       setLoading(`${s.name} 駅のまわりの街並みを組み立て中… ${done}/${total}\n（建物: IGN BD TOPO、塀と木: 地籍と LiDAR の実測）`, 0.55 + (0.4 * done) / Math.max(1, total)));
     // はじめる場所
     const line = s.lines[0];
-    if (start === 'street') {
+    if (start === 'street' && rec.plan.layout === 'aerial') {
+      // 高架の駅: 切符売り場の扉の外
+      const d = rec.plan.doors[0];
+      walker.place(d.out[0], b.world.groundAt(d.out[0], d.out[1], 999), d.out[1]);
+      walker.region = null;
+      state.viewYaw = Math.atan2(-d.nx, d.nz);
+      state.viewPitch = 0.05;
+    } else if (start === 'street') {
       const open = rec.plan.pits.filter((e) => !rec.plan.closed.includes(e));
       const e = open[0] || rec.plan.pits[0];
       const f = entranceFrame(e);
