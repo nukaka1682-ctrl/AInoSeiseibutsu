@@ -14,10 +14,14 @@ const FLOAT_Y = 1.3; // 浮く高さ（m）
 // 花の大きさ: 形は直径 0.45 m で作り、0.8 m に拡大して描く（0.45 m では 8 m 先でやっと見えた: c-violet-near.jpg）
 const FLOWER_SCALE = 0.8 / 0.45;
 // 花の上の淡い光の柱（遠くから「あそこにある」と分かるように）: 高さ 9 m・幅 0.5 m の板 2 枚の十字
-const BEAM_H = 9, BEAM_W = 0.5;
+const BEAM_H = 9, BEAM_W = 1.4; // 幅 1.0 m では 60 m 先で細い線に見えた（beam-day-60m.jpg）
+// 柱の色と濃さ（アルファ）: 下 0.9、下 1/3 までは 0.85 とほとんど変わらず、そこから上へ 0 に消える。
+// 幅 0.5 m・濃さ 0.55 の淡いスミレ色では、昼の 30 m 先でほとんど見えなかった（docs-violet-day.jpg）
+const BEAM_COLOR = '#7a3fe0';
+const BEAM_ALPHA = [[0, 0.9], [1 / 3, 0.85], [1, 0]]; // [高さの割合, 濃さ]
 const BEAM_BASE = 0.45; // 柱の根元: 花の真ん中からこれだけ上（花の上端のすぐ上）
 const BEAM_NEAR = 12; // 自転車からこの距離（m）より近いと柱を薄く（近くでは花そのものを見せる）
-const BEAM_PERIOD = 2.4; // 明滅の周期（秒）。明るさ 0.7〜1.0
+const BEAM_PERIOD = 2.4; // 明滅の周期（秒）。濃さ 0.75〜1.0
 const POP_TIME = 0.35; // 集めたとき: この秒数で上へ 1 m 跳ね、回りながら小さくなって消える
 
 // 文字列 → 32 bit の種（FNV-1a）
@@ -102,17 +106,22 @@ function flowerGeometry() {
   return g;
 }
 
-// 光の柱の形: 縦長の板 2 枚の十字。色はスミレ色、濃さ（アルファ）は下 0.55 → 上 0 の通常の半透明。
+// 光の柱の形: 縦長の板 2 枚の十字。色は濃いスミレ色、濃さ（アルファ）は BEAM_ALPHA の通常の半透明。
 // 加算合成では昼の空の前で白く見えた（f2-violet-30m.jpg）。花ごとの濃さ（近いと薄く）は fade（インスタンスの属性）
 function beamGeometry(n) {
   const pos = [], col = [];
-  const c = new THREE.Color('#9a6ae0');
+  const c = new THREE.Color(BEAM_COLOR);
   for (const [ax, az] of [[1, 0], [0, 1]]) {
     const w = BEAM_W / 2;
-    const v = [[-w * ax, 0, -w * az, 1], [w * ax, 0, w * az, 1], [w * ax, BEAM_H, w * az, 0], [-w * ax, 0, -w * az, 1], [w * ax, BEAM_H, w * az, 0], [-w * ax, BEAM_H, -w * az, 0]];
-    for (const [x, y, z, k] of v) {
-      pos.push(x, y, z);
-      col.push(c.r, c.g, c.b, 0.55 * k);
+    // 高さの区切りごとに 1 枚の四角（下の区切りから上の区切りまで、濃さを線形に）
+    for (let i = 0; i + 1 < BEAM_ALPHA.length; i++) {
+      const [h0, a0] = BEAM_ALPHA[i], [h1, a1] = BEAM_ALPHA[i + 1];
+      const y0 = h0 * BEAM_H, y1 = h1 * BEAM_H;
+      const v = [[-w, y0, a0], [w, y0, a0], [w, y1, a1], [-w, y0, a0], [w, y1, a1], [-w, y1, a1]];
+      for (const [t, y, a] of v) {
+        pos.push(t * ax, y, t * az);
+        col.push(c.r, c.g, c.b, a);
+      }
     }
   }
   const g = new THREE.BufferGeometry();
@@ -255,7 +264,7 @@ export class Violets {
     this.beams.count = nb;
     for (const m of [this.flowers, this.rings, this.beams]) m.instanceMatrix.needsUpdate = true;
     this.beamFade.needsUpdate = true;
-    this.beams.material.opacity = 0.85 + 0.15 * Math.sin((time * 2 * Math.PI) / BEAM_PERIOD); // 0.7〜1.0 でゆっくり明滅
+    this.beams.material.opacity = 0.875 + 0.125 * Math.sin((time * 2 * Math.PI) / BEAM_PERIOD); // 0.75〜1.0 でゆっくり明滅
     return this.picked;
   }
 
