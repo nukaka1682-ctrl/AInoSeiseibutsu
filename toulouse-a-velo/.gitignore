@@ -5,6 +5,8 @@ test/output/
 public/data/*.json
 # 駅の中と出入口（OpenStreetMap の屋内の地図。scripts/metro-osm.mjs で作る。小さいので Git に入れる）
 !public/data/toulouse-metro-osm.json
+# 本物の線路の線形（OpenStreetMap と IGN。scripts/metro-tracks.mjs で作る。小さいので Git に入れる）
+!public/data/toulouse-metro-tracks.json
 public/data/*-tiles/
 public/data/*-terrain.bin
 .vite-cache/

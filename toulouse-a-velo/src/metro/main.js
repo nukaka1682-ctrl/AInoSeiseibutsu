@@ -16,7 +16,7 @@ import { setupScene } from '../world/scene.js';
 import { entranceFrame, inEntrance } from '../world/metro.js';
 import { MONUMENTS } from '../world/monuments.js';
 import { MapRenderer, drawMinimap } from '../ui/minimap.js';
-import { LINES, LINE_COLORS, TRAIN_CARS, buildNetwork, doorSideAt, relevelNetwork, runTime, stationFrame, stationList, terminusOf } from './network.js';
+import { LINES, LINE_COLORS, RAIL_ALT_TO_FLOOR, TRAIN_CARS, buildNetwork, doorSideAt, kindAt, relevelNetwork, runTime, stationFrame, stationList, terminusOf } from './network.js';
 import { adjustStationPits, buildStationNav, planStation, stationLevelsFor } from './stationplan.js';
 import { buildStationMesh } from './stationmesh.js';
 import { alignShallowPits, buildOsmStationNav, completeShallowPits, osmCapable, osmConnected, osmStationDepth, osmStationLevels, planOsmStation, projectStationOsm } from './osmplan.js';
@@ -187,6 +187,8 @@ async function loadAll() {
   const metroFile = fetch(`${import.meta.env.BASE_URL}data/${PRESET}-metro.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
   // 駅の中と出入口（OpenStreetMap の屋内の地図。scripts/metro-osm.mjs）
   const osmFile = fetch(`${import.meta.env.BASE_URL}data/${PRESET}-metro-osm.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  // 本物の線路の線形（OpenStreetMap の線路と IGN の標高。scripts/metro-tracks.mjs）
+  const tracksFile = fetch(`${import.meta.env.BASE_URL}data/${PRESET}-metro-tracks.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
   const data = await loadBaseData({ bbox, presetId: PRESET, onStatus: (t) => setLoading(t, 0.08) });
   const { terrain } = await loadTerrain({ filePromise: terrainFile, bbox, osm: data.osm, onStatus: (t) => setLoading(t, 0.15) });
   terrain.metroWalk = true; // 出入口の吹き抜けの下の扉を開け、階段を下りられるように（world/ground.js・stream.js）
@@ -194,7 +196,7 @@ async function loadAll() {
   const osmStations = (await osmFile)?.stations || null;
   // 路線網（駅の位置と向き: OSM のホーム）。出入口の階段の深さは、駅の階の床にそろえる（地上の出入口を組み立てる前に。world/ground.js）
   const { proj } = areaFrame(bbox);
-  const network = buildNetwork(proj, { bdStations: metro?.stations || null, osm: osmStations });
+  const network = buildNetwork(proj, { bdStations: metro?.stations || null, osm: osmStations, tracks: await tracksFile });
   const entrancesOf = (s) => (terrain.metro || []).filter((e) => e.kind === 'metro' && e.station === s.bd);
   if (osmStations) {
     // 出入口: OSM の階段から作った吹き抜け（LiDAR の吹き抜けと合う所はその形）。OSM に出入口のない駅（高架の駅）は LiDAR のまま
@@ -243,7 +245,7 @@ async function loadAll() {
     if (s.layout === 'osm') return osmStationLevels(s, terrain.h(s.x, s.z));
     const lv = stationLevelsFor(s, entrancesOf(s), terrain.h(s.x, s.z));
     return { ym: lv.ym, yp: lv.yp };
-  });
+  }, (x, z) => terrain.h(x, z));
   const map = new MapRenderer(world.parsed, world.rect);
   base = { world, network, terrain, entrancesOf, osmOf, map };
   life = new StreetLife(world, entrancesOf);
@@ -345,7 +347,7 @@ function ensureStation(id, preplanned = null) {
       if (j < 0 || j + 1 >= LINES[line].length) continue;
       const key = `${line}:${j}`;
       if (!state.tunnels.has(key)) {
-        const g = tunnelBetween(b.network, line, j);
+        const g = tunnelBetween(b.network, line, j, { groundAt: b.terrain.h.bind(b.terrain) });
         scene.add(g);
         state.tunnels.set(key, g);
       }
@@ -354,7 +356,7 @@ function ensureStation(id, preplanned = null) {
       if ((end < 0 && i === 0) || (end > 0 && i === LINES[line].length - 1)) {
         const key = `${line}:end${end}`;
         if (!state.tunnels.has(key)) {
-          const g = tunnelBeyond(b.network, line, end);
+          const g = tunnelBeyond(b.network, line, end, { groundAt: b.terrain.h.bind(b.terrain) });
           scene.add(g);
           state.tunnels.set(key, g);
         }
@@ -606,11 +608,23 @@ function updateCurrentStation() {
   }
 }
 
+// 乗っている電車が地上・高架の区間にいるか（margin: 前後 m の中に地上の区間があれば）
+function trainOpen(margin = 0) {
+  const t = state.playerTrain;
+  if (!t || placeKind() !== 'train') return false;
+  for (let d = -margin; d <= margin; d += 50) {
+    const k = kindAt(t.path, t.S + d);
+    if (k === 'o' || k === 'b') return true;
+  }
+  return false;
+}
+
 // ---------------------------------------------------------------- 光（地上 ⇄ 地下）
 function updateLighting(dt) {
   const kind = placeKind();
+  const openAir = trainOpen();
   const camBelow = camera.position.y < base.terrain.h(camera.position.x, camera.position.z) - 1.2;
-  const under = (kind !== 'surface' && kind !== 'pit') || (kind === 'pit' && camBelow && walker.y < base.terrain.h(walker.x, walker.z) - 2.6);
+  const under = !openAir && ((kind !== 'surface' && kind !== 'pit') || (kind === 'pit' && camBelow && walker.y < base.terrain.h(walker.x, walker.z) - 2.6));
   const target = under ? 1 : 0;
   state.lightK += (target - state.lightK) * Math.min(1, dt * 3);
   if (Math.abs(target - state.lightK) < 0.002) state.lightK = target;
@@ -627,7 +641,7 @@ function updateLighting(dt) {
   scene.environment = k > 0.5 ? probe || interiorEnv : surfaceEnv;
   scene.environmentIntensity = k > 0.5 ? (probe ? 0.85 : 0.3) : surfaceEnvK;
   // 地上の街は、地下の深い所（ホーム・ホームへの階段・電車）では描かない（改札階からは出入口の吹き抜け・通路の先の階段が見える）
-  const deep = (kind === 'platform' || kind === 'train' || kind === 'stairs') && !state.freeCam;
+  const deep = (kind === 'platform' || kind === 'train' || kind === 'stairs') && !state.freeCam && !trainOpen(250);
   base.world.group.visible = !deep && !state.hideCity;
   sky.visible = !deep;
   scene.fog = deep ? null : surfaceFog;
@@ -1085,7 +1099,9 @@ function update(dt, ctl = null) {
     if (t) t.player = true;
   }
   updateCurrentStation();
-  base.world.stream.update(state.station ? state.station.x : walker.x, state.station ? state.station.z : walker.z);
+  // 地上の街並みは駅のまわり。電車が地上・高架の区間に近づいたら、電車のまわり
+  const ride = trainOpen(500);
+  base.world.stream.update(state.station && !ride ? state.station.x : walker.x, state.station && !ride ? state.station.z : walker.z);
   if (state.station) life.setStation(state.station);
   if (base.world.group.visible) life.update(dt, walker);
   // 地上に出たのに街並みがまだなら知らせる
