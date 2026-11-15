@@ -436,3 +436,71 @@ export async function decodePng(bytes) {
   }
   return { width, height, rgb };
 }
+
+// 道から離れた「公道」のマスを芝にする。地籍のどの敷地にも入らない所は公道の舗装として焼き込んであるが、高速道路の盛り土・
+// 立体交差の法面・川の土手も敷地の外なので、灰色のアスファルトの丘になっていた（利用者の指摘: 物理的におかしな所。
+// 航空写真では草の斜面）。道の縁から reach m（高速道路は 3 m）より遠い公道のマスを芝生に変える。広場・駐車場の中と
+// 旧市街（inOld）は変えない。敷地の中の地面（国有地の盛り土も地籍では敷地）は、steep(x, z) が true の急な斜面だけ芝にする。grid: { cols, rows, data }、rect: 板の範囲、roads・areas: 地図（parse.js）
+export function greenVerges(grid, rect, roads = [], areas = [], inOld = null, reach = 9, steep = null) {
+  const { cols, rows, data } = grid;
+  const sx = (rect.maxX - rect.minX) / cols, sz = (rect.maxZ - rect.minZ) / rows;
+  let any = false;
+  for (let i = 0; i < data.length && !any; i++) any = data[i] === COVER.public;
+  if (!any) return 0;
+  const near = new Uint8Array(cols * rows);
+  for (const r of roads) {
+    if (r.tunnel || !r.pts || r.pts.length < 2) continue;
+    const R = (r.width || 3) / 2 + (r.type === 'motorway' || r.type === 'motorway_link' ? 3 : reach), R2 = R * R;
+    const I2 = ((r.width || 3) / 2 + 2.5) ** 2;
+    for (let k = 0; k + 1 < r.pts.length; k++) {
+      const [ax, az] = r.pts[k], [bx, bz] = r.pts[k + 1];
+      if (Math.max(ax, bx) + R < rect.minX || Math.min(ax, bx) - R > rect.maxX || Math.max(az, bz) + R < rect.minZ || Math.min(az, bz) - R > rect.maxZ) continue;
+      const dx = bx - ax, dz = bz - az, L2 = dx * dx + dz * dz || 1;
+      const ca = Math.max(0, Math.floor((Math.min(ax, bx) - R - rect.minX) / sx)), cb = Math.min(cols - 1, Math.floor((Math.max(ax, bx) + R - rect.minX) / sx));
+      const ra = Math.max(0, Math.floor((Math.min(az, bz) - R - rect.minZ) / sz)), rb = Math.min(rows - 1, Math.floor((Math.max(az, bz) + R - rect.minZ) / sz));
+      for (let rr = ra; rr <= rb; rr++) {
+        const z = rect.minZ + (rr + 0.5) * sz;
+        for (let c = ca; c <= cb; c++) {
+          const x = rect.minX + (c + 0.5) * sx, t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / L2));
+          const d2 = (ax + dx * t - x) ** 2 + (az + dz * t - z) ** 2;
+          if (d2 < R2) near[rr * cols + c] = Math.max(near[rr * cols + c], d2 < I2 ? 2 : 1); // 2: 道の面とすぐ脇
+        }
+      }
+    }
+  }
+  // 広場・駐車場・運動場の中は舗装のまま
+  for (const a of areas) {
+    if (a.type !== 'plaza' && a.type !== 'parking' && a.type !== 'pitch') continue;
+    const b = a.bounds;
+    if (!b || b.maxX < rect.minX || b.minX > rect.maxX || b.maxZ < rect.minZ || b.minZ > rect.maxZ) continue;
+    const ra = Math.max(0, Math.floor((b.minZ - rect.minZ) / sz)), rb = Math.min(rows - 1, Math.floor((b.maxZ - rect.minZ) / sz));
+    for (let rr = ra; rr <= rb; rr++) {
+      const z = rect.minZ + (rr + 0.5) * sz, xs = [];
+      for (let i = 0, j = a.outer.length - 1; i < a.outer.length; j = i++) {
+        const [px, pz] = a.outer[j], [qx, qz] = a.outer[i];
+        if (pz > z !== qz > z) xs.push(px + ((z - pz) / (qz - pz)) * (qx - px));
+      }
+      xs.sort((p, q) => p - q);
+      for (let k = 0; k + 1 < xs.length; k += 2) {
+        const c0 = Math.max(0, Math.ceil((xs[k] - rect.minX) / sx - 0.5)), c1 = Math.min(cols - 1, Math.floor((xs[k + 1] - rect.minX) / sx - 0.5));
+        for (let c = c0; c <= c1; c++) near[rr * cols + c] = 1;
+      }
+    }
+  }
+  let n = 0;
+  for (let rr = 0; rr < rows; rr++) {
+    const z = rect.minZ + (rr + 0.5) * sz;
+    for (let c = 0; c < cols; c++) {
+      const i = rr * cols + c;
+      if (near[i] === 2 || (data[i] !== COVER.public && data[i] !== COVER.private)) continue;
+      const x = rect.minX + (c + 0.5) * sx;
+      // 敷地の中の地面（中庭・駐車場の舗装）と、道の近く（縁から 2.5 m〜reach m）の公道は、急な斜面（盛り土の法面。
+      // steep(x, z)）だけ芝にする
+      if ((data[i] === COVER.private || near[i]) && !(steep && steep(x, z))) continue;
+      if (inOld && inOld(x, z)) continue;
+      data[i] = COVER.lawn;
+      n++;
+    }
+  }
+  return n;
+}

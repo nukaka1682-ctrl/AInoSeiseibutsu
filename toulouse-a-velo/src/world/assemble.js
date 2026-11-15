@@ -24,6 +24,8 @@ import { buildFurniture } from './furniture.js';
 import { manualChains, nearManualQuay, quayChains, snapPathsToQuays } from './quays.js';
 let photoQuays = null;
 const PHOTO_QUAYS = (proj) => (photoQuays && photoQuays.proj === proj ? photoQuays.list : (photoQuays = { proj, list: manualChains(proj) }).list);
+// 急な斜面か（4 m で 0.45 m 以上。盛り土の法面を芝にする。cover.js の greenVerges）
+export const steepAt = (T) => (x, z) => Math.hypot(T.h(x + 2, z) - T.h(x - 2, z), T.h(x, z + 2) - T.h(x, z - 2)) > 0.45;
 // 岸から 8 m 以上離れた水の上か（川の真ん中に土手の木が並んでいた）
 const offshore = (inWater, x, z) => inWater(x, z) && inWater(x + 8, z) && inWater(x - 8, z) && inWater(x, z + 8) && inWater(x, z - 8);
 // 小道（車の走らない道）の区間
@@ -114,7 +116,7 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
         if (cv) ground.group.add(buildCoverMesh(cv.c, b, groundMats.cover, inOldTown, parsed, tile.geometry, (x, z) => {
           const q = terrain.quayBelow?.(x, z, 40);
           return inGreySquare(x, z) || (q != null && q.drop > 2 && !q.setts);
-        }));
+        }, steepAt(terrain)));
         ground.far?.setTile(i, j, true);
       }
     }

@@ -9,6 +9,7 @@ import { CAR_ROADS, parseOsm } from './parse.js';
 import { manualChains, nearManualQuay, quayChains, snapPathsToQuays } from './quays.js';
 let photoQuays = null;
 const PHOTO_QUAYS = (proj) => (photoQuays && photoQuays.proj === proj ? photoQuays.list : (photoQuays = { proj, list: manualChains(proj) }).list);
+const steepFn = (T) => (x, z) => Math.hypot(T.h(x + 2, z) - T.h(x - 2, z), T.h(x, z + 2) - T.h(x, z - 2)) > 0.45; // 急な斜面（assemble.js の steepAt と同じ）
 // 岸から 8 m 以上離れた水の上か（川の真ん中に土手の木が並んでいた）
 const offshore = (inWater, x, z) => inWater(x, z) && inWater(x + 8, z) && inWater(x - 8, z) && inWater(x, z + 8) && inWater(x, z - 8);
 // 小道（車の走らない道）の区間
@@ -245,7 +246,7 @@ class TileStreamer {
       const q = T.quayBelow?.(x, z, 40);
       return this.inGreySquare(x, z) || (q != null && q.drop > 2 && !q.setts);
     };
-    if (data.cover) ground.group.add(buildCoverMesh(data.cover, B, this.groundMats.cover, this.inOldTown, this.parsed, tile?.geometry, lowQuay));
+    if (data.cover) ground.group.add(buildCoverMesh(data.cover, B, this.groundMats.cover, this.inOldTown, this.parsed, tile?.geometry, lowQuay, T.flat ? null : steepFn(T)));
     group.add(ground.group);
     await pause();
     if (t.state !== 'loading') return disposeGroup(group);

@@ -265,3 +265,24 @@ test('地面の覆い: 重みのテクスチャ（舗石は R だけ半分の値
   const pav = (1 - w.reduce((s, v) => s + v, 0)) * (255 / 127);
   assert.ok(Math.abs(pav - 0.5) < 0.01 && Math.abs(w[0] - pav * (128 / 255) - 0.25) < 0.01 && Math.abs(w[3] - 0.25) < 0.01);
 });
+
+test('道から離れた公道（盛り土・法面）は芝にする（greenVerges）', async () => {
+  const { COVER: C, greenVerges } = await import('../../src/data/cover.js');
+  const grid = { cols: 100, rows: 100, data: new Uint8Array(10000) }; // 全部「公道」
+  grid.data[50 * 100 + 90] = C.private;
+  const rect = { minX: 0, minZ: 0, maxX: 100, maxZ: 100 };
+  const roads = [{ type: 'residential', width: 6, pts: [[0, 20.5], [100, 20.5]] }, { type: 'motorway', width: 10, pts: [[0, 80.5], [100, 80.5]] }, { type: 'primary', width: 8, tunnel: true, pts: [[50.5, 0], [50.5, 100]] }];
+  const plaza = { type: 'plaza', bounds: { minX: 60, minZ: 40, maxX: 80, maxZ: 60 }, outer: [[60, 40], [80, 40], [80, 60], [60, 60]] };
+  const n = greenVerges(grid, rect, roads, [plaza], (x) => x < 10);
+  const at = (x, z) => grid.data[Math.floor(z) * 100 + Math.floor(x)];
+  assert.ok(n > 1000);
+  assert.equal(at(30, 20), C.public); // 車道
+  assert.equal(at(30, 30), C.public); // 縁から 9 m 以内
+  assert.equal(at(30, 45), C.lawn); // 離れた所
+  assert.equal(at(50, 50), C.lawn); // トンネルの上
+  assert.equal(at(30, 87), C.public); // 高速道路の路肩（3 m）
+  assert.equal(at(30, 92), C.lawn); // その先の法面
+  assert.equal(at(70, 50), C.public); // 広場の中
+  assert.equal(at(5, 50), C.public); // 旧市街
+  assert.equal(at(90, 50), C.private);
+});
