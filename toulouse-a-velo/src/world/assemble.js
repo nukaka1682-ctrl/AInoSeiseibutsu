@@ -22,6 +22,8 @@ import { greySquareTest, historicCoreTest, oldTownTest } from '../config.js';
 import { POST_HIT, planStreets } from './streets.js';
 import { buildFurniture } from './furniture.js';
 import { quayChains, snapPathsToQuays } from './quays.js';
+// 小道（車の走らない道）の区間
+const PATH_SEG = (s) => s.bike && !CAR_ROADS.has(s.road.type) && s.road.type !== 'service' && s.road.type !== 'living_street' && s.road.type !== 'pedestrian';
 import { CollisionWorld } from '../game/collision.js';
 import { RoadNetwork } from '../game/roadnet.js';
 import { resolveLandmarks } from '../game/landmarks.js';
@@ -116,7 +118,7 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   const liftAt = ground.heightAt; // 一段高い歩道の高さ（地面からの相対）
   const surf = surfaceFns(terrain, liftAt);
   group.add(ground.group);
-  for (const [x, z] of ground.posts) collision.addCircle(x, z, POST_HIT); // 横断歩道の脇の車止め
+  for (const [x, z] of ground.posts) if (!roadnet.onRoad(x, z, 0.3)) collision.addCircle(x, z, POST_HIT); // 横断歩道の脇の車止め（小道の線の上は見た目だけ）
   for (const q of terrain.quayWalls || []) collision.addSegment(q.ax, q.az, q.bx, q.bz); // 岸壁（垂直のレンガの壁）
   for (const q of terrain.abutments || []) collision.addSegment(q.ax, q.az, q.bx, q.bz); // 高架の下の擁壁
   for (const e of terrain.metro || []) for (const s of entranceWalls(e)) collision.addSegment(...s); // メトロの出入口の吹き抜け
@@ -178,7 +180,7 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   const onMonument = monumentSolid(mon.keepOut); // 雄鶏の像の台・シャトー・ドーの柵の内側には置かない
   const furniture = buildFurniture({
     parsed, plan: planStreets(parsed, inCore), clip: { minX: rect.minX - pad, minZ: rect.minZ - pad, maxX: rect.maxX + pad, maxZ: rect.maxZ + pad },
-    curbs: ground.curbs, inOldTown: inCore, heightAt: liftAt, terrain, onRoad: (x, z, m) => roadnet.onRoad(x, z, m),
+    curbs: ground.curbs, inOldTown: inCore, heightAt: liftAt, terrain, onRoad: (x, z, m) => roadnet.onRoad(x, z, m), onPath: (x, z, m) => roadnet.onRoad(x, z, m, PATH_SEG),
     solid: (x, z) => insideBuilding(x, z) || inWater(x, z) || onMonument(x, z), trunks: trees.userData.trunks,
   }, collision);
   furniture.addBridgeLamps(ground.group.getObjectByName('bridges')?.userData.lamps); // ポン・ヌフの街灯の夜の明かり

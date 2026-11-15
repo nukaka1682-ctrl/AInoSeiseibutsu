@@ -7,6 +7,8 @@ import * as THREE from 'three';
 import { Grid, pointInRing } from '../geo.js';
 import { CAR_ROADS, parseOsm } from './parse.js';
 import { quayChains, snapPathsToQuays } from './quays.js';
+// 小道（車の走らない道）の区間
+const PATH_SEG = (s) => s.bike && !CAR_ROADS.has(s.road.type) && s.road.type !== 'service' && s.road.type !== 'living_street' && s.road.type !== 'pedestrian';
 import { loadTileData, tileAt, tileBounds, tileLayout } from '../data/tiles.js';
 import { buildBuildings } from './buildings.js';
 import { buildTrees, fillParkTrees, planeTreeTest, streetTrees, treelessTest, magnoliaTest, liftQuayTrees, underDeck, addPhotoTrees, curbTrees } from './trees.js';
@@ -264,7 +266,7 @@ class TileStreamer {
     // 塀
     const cw = new CollisionWorld({ minX: B.minX - 80, maxX: B.maxX + 80, minZ: B.minZ - 80, maxZ: B.maxZ + 80 });
     group.add(buildEnclosures(walls, this.materials, cw, T));
-    for (const [x, z] of ground.posts) cw.addCircle(x, z, POST_HIT); // 横断歩道の脇の車止め
+    for (const [x, z] of ground.posts) if (!this.roadnet.onRoad(x, z, 0.3)) cw.addCircle(x, z, POST_HIT); // 横断歩道の脇の車止め（小道の線の上は見た目だけ）
     for (const q of [...(T.quayWalls || []), ...(T.abutments || [])]) {
       const mx = (q.ax + q.bx) / 2, mz = (q.az + q.bz) / 2;
       if (mx >= B.minX && mx < B.maxX && mz >= B.minZ && mz < B.maxZ) cw.addSegment(q.ax, q.az, q.bx, q.bz); // 岸壁・高架の下の擁壁（タイルに中点が入る壁だけ）
@@ -336,7 +338,7 @@ class TileStreamer {
     const onMonument = monumentSolid(mon.keepOut);
     const furniture = buildFurniture({
       parsed: this.parsed, plan: planStreets(this.parsed, this.inCore), clip: B, curbs: ground.streetStats.curbs, inOldTown: this.inCore,
-      heightAt: ground.heightAt, terrain: T, onRoad: (x, z, m) => this.roadnet.onRoad(x, z, m), solid: (x, z) => insideBuilding(x, z) || insideContext(x, z) || this.inWater(x, z) || onMonument(x, z), trunks: trees.userData.trunks,
+      heightAt: ground.heightAt, terrain: T, onRoad: (x, z, m) => this.roadnet.onRoad(x, z, m), onPath: (x, z, m) => this.roadnet.onRoad(x, z, m, PATH_SEG), solid: (x, z) => insideBuilding(x, z) || insideContext(x, z) || this.inWater(x, z) || onMonument(x, z), trunks: trees.userData.trunks,
     }, cw);
     furniture.addBridgeLamps(ground.group.getObjectByName('bridges')?.userData.lamps, B); // ポン・ヌフの街灯の夜の明かり（このタイルの物だけ）
     furniture.cull(this.focus[0], this.focus[1], true);

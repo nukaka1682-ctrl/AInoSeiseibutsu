@@ -103,7 +103,11 @@ function ride(target, limit = 600) {
     bike.events.length = 0;
     if (distanceToLandmark(target, bike.x, bike.z) < 22) return { ok: true, t };
     if (t - lastT > 15) {
-      if (Math.hypot(bike.x - lx, bike.z - lz) < 8) return { ok: false, t, why: `(${bike.x.toFixed(0)}, ${bike.z.toFixed(0)}) で動けなくなった` };
+      if (Math.hypot(bike.x - lx, bike.z - lz) < 8) {
+        // DEBUG=1: 止まった所の様子（向き・速さ・勾配・当たり・道筋の先の点と高さ）
+        if (process.env.DEBUG) console.log(`  [debug] (${bike.x.toFixed(1)}, ${bike.z.toFixed(1)}) y=${bike.y.toFixed(1)} 向き ${bike.heading.toFixed(2)} 速さ ${bike.speed.toFixed(1)} 勾配 ${bike.grade.toFixed(2)} 当たり ${bike.contact} 道の上 ${w.roadnet.onRoad(bike.x, bike.z, 0.5)}\n    道筋: ${(route || []).slice(0, 8).map(([x, z]) => `(${x.toFixed(1)},${z.toFixed(1)} h${w.rideY(x, z, bike.y).toFixed(1)})`).join(' ')}`);
+        return { ok: false, t, why: `(${bike.x.toFixed(0)}, ${bike.z.toFixed(0)}) で動けなくなった` };
+      }
       lastT = t;
       lx = bike.x;
       lz = bike.z;

@@ -371,7 +371,15 @@ export class Bike {
         // 橋の上から橋の外へ、または高さの違う隣の橋の面へ 0.5 m 以上落ちる（上がる）所は、下に道路があっても止める（欄干）
         const T = world.terrain;
         const offDeck = T && !T.flat && deckEdgeBlocked(T.deck(this.x, this.z, this.y), T.deck(this.x + ux, this.z + uz, this.y), S, Sa);
-        if (offDeck || (Math.abs(Sa - S) > 0.5 && !(world.roadnet?.onRoad(nx, nz, 0.5)))) {
+        // 道の縁から急な斜面へはみ出したときは、いちばん近い道へ近づく向きにだけ動ける（斜面の上で前にも後ろにも進めなくなって、
+        // 「道路に戻る」を押すしかなかった）
+        const backToRoad = () => {
+          const near = world.roadnet?.nearestSegment?.(this.x, this.z, 6);
+          if (near && (nx - near.x) ** 2 + (nz - near.z) ** 2 < near.d2 - 1e-6) return true;
+          // すでに斜面の途中にいる（後ろ 1 m も 0.5 m 以上違う）なら、そのまま斜面を進める。平らな所から段へ出るときだけ止める
+          return Math.abs(S - world.rideY(this.x - ux, this.z - uz, this.y)) > 0.5;
+        };
+        if (offDeck || (Math.abs(Sa - S) > 0.5 && !(world.roadnet?.onRoad(nx, nz, 0.5)) && !backToRoad())) {
           if (!this.contact && sp > 3.5) this.events.push({ type: 'bump', strength: Math.min(1, sp / 8) });
           nx = this.x;
           nz = this.z;

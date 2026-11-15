@@ -3,7 +3,7 @@
 // 樹冠は木ごとに違うこぶのある形（シェーダーで作る）、幹は途中で 2 本に分かれ、街路・運河沿いのプラタナスはまだらな樹皮。
 import * as THREE from 'three';
 import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { Grid, hash01, mulberry32, pointInPolygon, pointInRing } from '../geo.js';
+import { Grid, closestOnSegment, hash01, mulberry32, pointInPolygon, pointInRing } from '../geo.js';
 import { CAR_ROADS } from './parse.js';
 import { makeBarkTexture } from './textures.js';
 
@@ -364,26 +364,30 @@ const DRIVE = new Set([...CAR_ROADS, 'living_street', 'service', 'motorway', 'mo
 export function curbTrees(points, roadnet, ok = () => true) {
   const live = (s) => !s.road.tunnel && !s.road.bridge && (s.road.layer || 0) >= 0 && s.road.type !== 'steps' && s.road.type !== 'pedestrian'; // 歩行者の通り・広場の木はそのまま
   const margin = (road) => (DRIVE.has(road.type) ? CURB_IN : 0.4);
-  const blocked = (x, z) => {
-    const n = roadnet.nearestSegment(x, z, roadnet.maxHalfWidth + 1.2, live);
-    return !!n && Math.sqrt(n.d2) < n.seg.road.width / 2 + margin(n.seg.road) - 0.05;
-  };
+  // 動かした先が、どれかの道（隣の歩道・自転車道も）の上か
+  const blocked = (x, z) => roadnet.onRoad(x, z, CURB_IN - 0.05, (s) => live(s) && DRIVE.has(s.road.type)) || roadnet.onRoad(x, z, 0.35, live);
   const kept = [], moved = [];
   for (const p of points) {
     if (p.x == null || p.abs) {
       kept.push(p);
       continue;
     }
-    const n = roadnet.nearestSegment(p.x, p.z, roadnet.maxHalfWidth + 1.2, live);
+    // 木がかかっている道のうち、いちばん深く入っているもの（中心線が近いとは限らない: 広い車道の脇の細い歩道）
+    let n = null, deep = 0;
+    roadnet.segGrid.queryPoint(p.x, p.z, roadnet.maxHalfWidth + 1.2, (i) => {
+      const sg = roadnet.segs[i];
+      if (!live(sg)) return;
+      const c = closestOnSegment(p.x, p.z, sg.ax, sg.az, sg.bx, sg.bz), pen = sg.road.width / 2 + margin(sg.road) - Math.sqrt(c.d2);
+      if (pen > deep) {
+        deep = pen;
+        n = { seg: sg, ...c };
+      }
+    });
     if (!n) {
       kept.push(p);
       continue;
     }
-    const road = n.seg.road, half = road.width / 2, d = Math.sqrt(n.d2);
-    if (d >= half + margin(road)) {
-      kept.push(p);
-      continue;
-    }
+    const road = n.seg.road, half = road.width / 2;
     const s = n.seg, L = Math.hypot(s.bx - s.ax, s.bz - s.az) || 1;
     let nx = -(s.bz - s.az) / L, nz = (s.bx - s.ax) / L;
     const side = (p.x - n.x) * nx + (p.z - n.z) * nz;

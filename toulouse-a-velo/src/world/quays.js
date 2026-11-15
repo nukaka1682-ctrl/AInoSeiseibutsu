@@ -50,7 +50,7 @@ function crossing(ax, az, bx, bz, cx, cz, dx, dz) {
 // 残った部分のうち minLen m より短いものは捨てる。端から taper m の間は端の重み（ea・eb）を 0 から 1 へ（段の高さがすぼむ）。
 // skip(x, z): true の点を含む線分も捨てる（手で決めた岸壁の近くなど）
 // 返り値: 壁の線分 [{ ax, az, bx, bz, nx, nz, at, bt, ab, bb, ea, eb, wet }]（n: 下の段へ向く向き）
-export function quaySegments(chains, roads = [], { minLen = 6, taper = 6, crossSin = 0.8, skip = null } = {}) {
+export function quaySegments(chains, roads = [], { minLen = 6, taper = 6, crossSin = 0.2, skip = null } = {}) {
   const grid = new Grid(25), rsegs = [];
   for (const r of roads) {
     if (!r.pts || r.pts.length < 2) continue;
@@ -83,9 +83,11 @@ export function quaySegments(chains, roads = [], { minLen = 6, taper = 6, crossS
           if (closestOnSegment(mx, mz, r.ax, r.az, r.bx, r.bz).d2 < lim * lim || closestOnSegment(a.x, a.z, r.ax, r.az, r.bx, r.bz).d2 < lim * lim) cut[i] = 1;
           return;
         }
+        // 小道の幅の中に入る壁（寄せきれなかった所）は立てない（道筋どおりに走る自転車をふさがない）
+        if (!r.car && !r.steps && closestOnSegment(mx, mz, r.ax, r.az, r.bx, r.bz).d2 < (r.half + 0.9) ** 2) cut[i] = 1;
         const c = crossing(a.x, a.z, b.x, b.z, r.ax, r.az, r.bx, r.bz);
         if (!c) return;
-        // 小道（階段を除く）は、壁をはっきり横切る（sin ≥ crossSin）ときだけ切る。浅く交わるのは線のずれ（snapPathsToQuays が寄せる）
+        // 小道がごく浅く交わる所（sin < crossSin）は切らない（線のずれの残り。ふつうは snapPathsToQuays が先に寄せてある）
         if (!r.car && !r.steps && !r.tunnel && c.sin < crossSin) return;
         cutAround(S[i] + c.t * (S[i + 1] - S[i]), Math.min(12, (r.half + (r.car ? 1 : 0.6)) / Math.max(0.3, c.sin)));
       });
@@ -118,17 +120,17 @@ export function quaySegments(chains, roads = [], { minLen = 6, taper = 6, crossS
 // 区間の点の多い側（ほぼ壁の真上なら、区間の前後で道がいる側。分からなければ上の段）へ、壁から幅の半分 + gap m 以上
 // 離す。区間には step m ごとに点を足す（足した点の nodeIds は新しい名前）。車道と共有する点は動かさない。
 // roads をその場で書き換える。返り値: 寄せた区間の数
-export function snapPathsToQuays(roads, chains, { band = 3.5, minRun = 6, step = 2.5, gap = 0.7 } = {}) {
+export function snapPathsToQuays(roads, chains, { band = 3.5, minRun = 6, step = 2.5, gap = 1.2 } = {}) {
   if (!chains.length) return 0;
   const grid = new Grid(20), segs = [];
-  for (const { pts } of chains) {
+  chains.forEach(({ pts }, chain) => {
     for (let i = 0; i + 1 < pts.length; i++) {
       const a = pts[i], b = pts[i + 1], L = Math.hypot(b.x - a.x, b.z - a.z);
       if (L < 1e-6) continue;
       grid.insertSegment(a.x, a.z, b.x, b.z, segs.length);
-      segs.push({ ax: a.x, az: a.z, bx: b.x, bz: b.z, tx: (b.x - a.x) / L, tz: (b.z - a.z) / L });
+      segs.push({ ax: a.x, az: a.z, bx: b.x, bz: b.z, tx: (b.x - a.x) / L, tz: (b.z - a.z) / L, chain });
     }
-  }
+  });
   const DRIVE = (r) => CAR_ROADS.has(r.type) || r.type === 'service' || r.type === 'living_street' || r.type === 'motorway' || r.type === 'motorway_link';
   const carNodes = new Set();
   for (const r of roads) if (DRIVE(r) && r.nodeIds) for (const id of r.nodeIds) carNodes.add(id);
@@ -145,6 +147,74 @@ export function snapPathsToQuays(roads, chains, { band = 3.5, minRun = 6, step =
   };
   const moved = new Map(); // 動かした元の点（nodeId → [x, z]）
   let count = 0;
+  // 0. 同じ壁の線を 2 回横切る小道（壁の向こうへ出てまた戻る）: 2.2 m 以上の垂直の壁は通れないので、線のずれ。あいだの部分を
+  //    元の側へ戻す（壁から幅の半分 + gap m）。1 回だけ横切る所は本当の出入り（壁の切れ目・坂）として残す
+  for (const r of roads) {
+    if (DRIVE(r) || r.bridge || r.tunnel || (r.layer || 0) !== 0 || r.type === 'steps' || !r.pts || r.pts.length < 2) continue;
+    const S = [0];
+    for (let i = 0; i + 1 < r.pts.length; i++) S.push(S[i] + Math.hypot(r.pts[i + 1][0] - r.pts[i][0], r.pts[i + 1][1] - r.pts[i][1]));
+    const xs = [];
+    for (let i = 0; i + 1 < r.pts.length; i++) {
+      const [ax, az] = r.pts[i], [bx, bz] = r.pts[i + 1], seen = new Set();
+      grid.query(Math.min(ax, bx), Math.min(az, bz), Math.max(ax, bx), Math.max(az, bz), (k) => {
+        if (seen.has(k)) return;
+        seen.add(k);
+        const q = segs[k], c = crossing(ax, az, bx, bz, q.ax, q.az, q.bx, q.bz);
+        if (!c) return;
+        // 横切る前にいた側（下の段の側が正）
+        const side = Math.sign((ax - c.x) * -q.tz + (az - c.z) * q.tx) || 1;
+        xs.push({ s: S[i] + c.t * (S[i + 1] - S[i]), chain: q.chain, side });
+      });
+    }
+    if (xs.length < 2) continue;
+    xs.sort((a, b) => a.s - b.s);
+    const spans = [];
+    for (let k = 0; k + 1 < xs.length; k++) {
+      if (xs[k].chain !== xs[k + 1].chain || xs[k + 1].s - xs[k].s > 80) continue;
+      spans.push([xs[k].s, xs[k + 1].s, xs[k].chain, xs[k].side]);
+      k++;
+    }
+    if (!spans.length) continue;
+    const keep = (r.width || 2.5) / 2 + gap;
+    const onChain = (x, z, chain) => {
+      let best = null;
+      grid.queryPoint(x, z, 15, (k) => {
+        const q = segs[k];
+        if (q.chain !== chain) return;
+        const c = closestOnSegment(x, z, q.ax, q.az, q.bx, q.bz);
+        if (!best || c.d2 < best.d2) best = { d2: c.d2, x: c.x, z: c.z, nx: -q.tz, nz: q.tx };
+      });
+      return best;
+    };
+    const pts = [], ids = [];
+    for (let i = 0; i < r.pts.length; i++) {
+      const sp = spans.find(([a, b]) => S[i] > a && S[i] < b);
+      let p = r.pts[i], id = r.nodeIds?.[i];
+      if (sp && !(id != null && carNodes.has(id))) {
+        const c = onChain(p[0], p[1], sp[2]);
+        if (c) {
+          p = [c.x + c.nx * sp[3] * keep, c.z + c.nz * sp[3] * keep];
+          if (id != null && !moved.has(id)) moved.set(id, p);
+        }
+      }
+      pts.push(p);
+      ids.push(id);
+      if (i + 1 === r.pts.length) break;
+      // 区間にかかる辺には step m ごとに点を足す（壁の反対側へ戻した点）
+      const [ax, az] = r.pts[i], [bx, bz] = r.pts[i + 1], L = S[i + 1] - S[i], n = Math.ceil(L / step);
+      for (let j = 1; j < n; j++) {
+        const sj = S[i] + (L * j) / n, sq = spans.find(([a, b]) => sj > a && sj < b);
+        if (!sq) continue;
+        const c = onChain(ax + ((bx - ax) * j) / n, az + ((bz - az) * j) / n, sq[2]);
+        if (!c) continue;
+        pts.push([c.x + c.nx * sq[3] * keep, c.z + c.nz * sq[3] * keep]);
+        ids.push(`u${r.id}_${i}_${j}`);
+      }
+    }
+    r.pts = pts;
+    if (r.nodeIds) r.nodeIds = ids;
+    count++;
+  }
   for (const r of roads) {
     if (DRIVE(r) || r.bridge || r.tunnel || (r.layer || 0) !== 0 || r.type === 'steps' || !r.pts || r.pts.length < 2) continue;
     let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
