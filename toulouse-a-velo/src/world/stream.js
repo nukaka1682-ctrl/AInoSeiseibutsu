@@ -9,6 +9,8 @@ import { CAR_ROADS, parseOsm } from './parse.js';
 import { manualChains, nearManualQuay, quayChains, snapPathsToQuays } from './quays.js';
 let photoQuays = null;
 const PHOTO_QUAYS = (proj) => (photoQuays && photoQuays.proj === proj ? photoQuays.list : (photoQuays = { proj, list: manualChains(proj) }).list);
+// 岸から 8 m 以上離れた水の上か（川の真ん中に土手の木が並んでいた）
+const offshore = (inWater, x, z) => inWater(x, z) && inWater(x + 8, z) && inWater(x - 8, z) && inWater(x, z + 8) && inWater(x, z - 8);
 // 小道（車の走らない道）の区間
 const PATH_SEG = (s) => s.bike && !CAR_ROADS.has(s.road.type) && s.road.type !== 'service' && s.road.type !== 'living_street' && s.road.type !== 'pedestrian';
 import { loadTileData, tileAt, tileBounds, tileLayout } from '../data/tiles.js';
@@ -307,7 +309,7 @@ class TileStreamer {
       const roads = this.avenues.filter((r) => r.pts.some(([x, z]) => x > B.minX - 50 && x < B.maxX + 50 && z > B.minZ - 50 && z < B.maxZ + 50));
       treePts = fillParkTrees(parks, [], free).concat(streetTrees(roads, (x, z) => inB(x, z) && !this.roadnet.onRoad(x, z, 0.2) && !this.inWater(x, z) && !insideBuilding(x, z)));
     }
-    treePts = treePts.concat(this.bankTrees.filter((t) => inB(t.x, t.z))); // 街の外れの川岸の土手の木
+    treePts = treePts.concat(this.bankTrees.filter((t) => inB(t.x, t.z) && !offshore(this.inWater, t.x, t.z))); // 街の外れの川岸の土手の木
     treePts = addPhotoTrees(treePts, this.proj, inB); // 写真で決まる並木
     const clear = monumentClearance(monuments, this.proj);
     treePts = liftQuayTrees(treePts, T); // 岸壁の下の段の木は上の段へ

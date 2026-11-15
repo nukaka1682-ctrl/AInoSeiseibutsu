@@ -912,7 +912,7 @@ export function buildGroundBase(parsed, rect, mats, terrain = FLAT_TERRAIN, layo
       for (const k of T.cliffLevels.keys()) T.quayMask[k] = 1; // despike が段の縁の点を「とげ」として戻さないように
       // 壁の上端・下端は、切れた地面の両側の高さ（端へ向けてすぼむ）。壁の上の歩道の板は要らない（wa = wb = 0）
       const cliffs = segs.map((q) => ({
-        ax: q.ax, az: q.az, bx: q.bx, bz: q.bz, nx: q.nx, nz: q.nz, wa: 0, wb: 0, cliff: true, wet: q.wet,
+        ax: q.ax, az: q.az, bx: q.bx, bz: q.bz, nx: q.nx, nz: q.nz, wa: 0, wb: 0, cliff: true, wet: q.wet, stone: q.stone, setts: q.plain,
         at: T.h(q.ax, q.az, -1), ab: T.h(q.ax, q.az, 1), bt: T.h(q.bx, q.bz, -1), bb: T.h(q.bx, q.bz, 1),
       }));
       T.setQuayWalls(cliffs.concat(manual));

@@ -87,6 +87,11 @@ export const MONUMENTS = [
   { id: 'donjon', kind: 'donjon', lat: 43.60442, lon: 1.44478, r: 12, front: [43.60448, 1.44508] },
   // リケの像（Monument à Pierre-Paul Riquet。利用者の写真 212520）: ジャン・ジョレス通りの北東の端、運河の手前。
   // 淡い灰色の花崗岩の島に、2 段の台・石灰岩の台座（3 m 角・4.5 m）と白い大理石の立像（約 3.5 m）
+  // Empalot の旧ニエル兵舎の本館（Place Guy-Hersant の Maison des associations。Alliance Française de Toulouse が入る。
+  // 写真: Wikimedia Commons「Place Guy-Hersant, côté sud (Toulouse)」と航空写真）: 長さ約 75 m のクリーム色の漆喰の建物。
+  // 窓はレンガと石を交互に積んだ枠、角はレンガと石の縞の角石。両翼は 2 階 + 屋根窓の並ぶスレートのマンサード屋根、
+  // 中央の棟は 3 階で少し張り出し、スレートの寄棟屋根。屋根の上に赤レンガの煙突。データの外形（箱）の代わりに描く
+  { id: 'caserne-niel', kind: 'barracks', lat: 43.57744, lon: 1.444198, r: 30, minArea: 500 },
   { id: 'riquet', kind: 'statue', lat: 43.60906, lon: 1.45389, facing: [43.6061, 1.4490] },
   // 戦没者記念碑の凱旋門（Monument aux Combattants de la Haute-Garonne、1928 年、Léon Jaussely。François Verdier の並木道の北の端）:
   // 淡い石の大きな門。位置・向き・寸法は LiDAR HD の表面モデルから: 真ん中の高い塊（幅 8 m・奥行き 11.5 m・高さ 16 m）を
@@ -586,6 +591,16 @@ export function findMonuments(proj, { buildings = [], areas = [], facade = null,
     } else if (spec.kind === 'trinite') {
       if (!inB(x, z)) continue;
       out.push({ spec, kind: 'trinite', x, z, replaced: [] });
+    } else if (spec.kind === 'barracks') {
+      let best = null;
+      for (const b of buildings) {
+        const d = Math.hypot(b.inside[0] - x, b.inside[1] - z);
+        if (d > spec.r || b.info.area < spec.minArea) continue;
+        if (!best || d < best.d) best = { b, d };
+      }
+      if (!best) continue;
+      const ob = orientedBox(best.b.outer);
+      out.push({ spec, kind: 'barracks', ...ob, replaced: [best.b] });
     } else if (spec.kind === 'memorial') {
       if (!inB(x, z)) continue;
       const [fx, fz] = proj.project(...spec.facing), fl = Math.hypot(fx - x, fz - z) || 1;
@@ -2888,6 +2903,120 @@ function writeMemorial(m, W, groundAt, colliders, onRoad, keepOut) {
   keepOut.push([x, z, 10]);
 }
 
+// ---- 旧ニエル兵舎の本館（Maison des associations）。e1: 長い向き、e2: 奥行きの向き。a・b: 半分の長さ・奥行き
+function writeBarracks(m, W, groundAt) {
+  const { cx, cz, e1, e2, a, b } = m, w = W.main;
+  const y0 = groundAt(cx, cz);
+  const CREAM = col('#efe6d2'), STONE = col('#d9cfb8'), BRICK = col('#c2674a'), SLATE = col('#4d525b'), SLATE_D = col('#3f444c'), GLASS = col('#27303a'), TILE = col('#b5573c'), BASE = col('#b9b0a0');
+  const P3 = (u, y, v) => [cx + e1[0] * u + e2[0] * v, y0 + y, cz + e1[1] * u + e2[1] * v];
+  const bx = (u0, u1, ya, yb, v0, v1, color, opt) => box(w, P3((u0 + u1) / 2, (ya + yb) / 2, (v0 + v1) / 2), [e1[0] * Math.abs(u1 - u0) / 2, 0, e1[1] * Math.abs(u1 - u0) / 2], [0, (yb - ya) / 2, 0], [e2[0] * Math.abs(v1 - v0) / 2, 0, e2[1] * Math.abs(v1 - v0) / 2], color, opt);
+  const q = (A, B, C, D, n, color) => w.quad(A, B, C, D, n, PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, color);
+  const F1 = 4.6, F2 = 4.4, EAVE = F1 + F2 + 0.4, MANS = 3.2; // 1 階・2 階の高さ、翼の軒、マンサードの高さ
+  const PAV = Math.min(9, a * 0.25), OUT = 0.6, PEAVE = EAVE + 4.2; // 中央の棟の半分の長さ・張り出し・軒
+  // 壁の塊（翼と中央の棟）、腰の石、階の帯、軒の蛇腹
+  bx(-a, a, 0, EAVE, -b, b, CREAM);
+  bx(-PAV, PAV, 0, PEAVE, -b - OUT, b + OUT, CREAM);
+  bx(-a - 0.06, a + 0.06, 0, 0.9, -b - 0.06, b + 0.06, BASE);
+  bx(-PAV - 0.06, PAV + 0.06, 0, 0.9, -b - OUT - 0.06, b + OUT + 0.06, BASE);
+  bx(-a - 0.08, a + 0.08, F1 - 0.15, F1 + 0.1, -b - 0.08, b + 0.08, STONE);
+  bx(-a - 0.3, a + 0.3, EAVE - 0.45, EAVE, -b - 0.3, b + 0.3, STONE);
+  bx(-PAV - 0.3, PAV + 0.3, PEAVE - 0.45, PEAVE, -b - OUT - 0.3, b + OUT + 0.3, STONE);
+  bx(-PAV - 0.08, PAV + 0.08, F1 + F2 - 0.05, F1 + F2 + 0.2, -b - OUT - 0.08, b + OUT + 0.08, STONE);
+  // 窓: 暗いガラス、レンガと石を交互に積んだ枠（縦の両脇に 5 段）、石の窓台と楣
+  const win = (u, yb, h, v, sg, wd = 1.15) => {
+    const o = v + sg * 0.05;
+    bx(u - wd / 2, u + wd / 2, yb, yb + h, o, o + sg * 0.03, GLASS);
+    for (let k = 0; k < 5; k++) {
+      const ya = yb + (h * k) / 5, c = k % 2 ? STONE : BRICK;
+      bx(u - wd / 2 - 0.22, u - wd / 2, ya, ya + h / 5, v, v + sg * 0.1, c);
+      bx(u + wd / 2, u + wd / 2 + 0.22, ya, ya + h / 5, v, v + sg * 0.1, c);
+    }
+    bx(u - wd / 2 - 0.3, u + wd / 2 + 0.3, yb - 0.16, yb, v, v + sg * 0.16, STONE);
+    bx(u - wd / 2 - 0.26, u + wd / 2 + 0.26, yb + h, yb + h + 0.3, v, v + sg * 0.12, BRICK);
+    bx(u - 0.14, u + 0.14, yb + h, yb + h + 0.36, v, v + sg * 0.15, STONE);
+  };
+  // 角のレンガと石の縞
+  const quoin = (u, v, top, su, sv) => {
+    for (let y = 0.9, k = 0; y < top - 0.5; y += 0.42, k++) {
+      const c = k % 2 ? STONE : BRICK;
+      bx(u, u - su * 0.55, y, y + 0.42, v, v + sv * 0.07, c);
+      bx(u, u + su * 0.07, y, y + 0.42, v, v - sv * 0.55, c);
+    }
+  };
+  const BAY = 3.6;
+  for (const sg of [1, -1]) {
+    // 翼の窓（2 階分）と屋根窓
+    const v = sg * b;
+    const n = Math.max(1, Math.floor((a - PAV - 1.6) / BAY));
+    for (const side of [1, -1]) {
+      for (let i = 0; i < n; i++) {
+        const u = side * (PAV + 1.8 + (a - PAV - 1.6 - 1.8) * ((i + 0.5) / n) + 0.0);
+        win(u, 1.5, 2.5, v, sg);
+        win(u, F1 + 1.1, 2.4, v, sg);
+        // 屋根窓: レンガの脇・石の縁・小さな切妻
+        const d0 = sg * (b - 0.25);
+        bx(u - 0.75, u + 0.75, EAVE, EAVE + 2.1, d0, d0 - sg * 1.2, BRICK);
+        bx(u - 0.5, u + 0.5, EAVE + 0.35, EAVE + 1.75, d0 + sg * 0.02, d0 + sg * 0.05, GLASS);
+        bx(u - 0.9, u + 0.9, EAVE + 2.1, EAVE + 2.35, d0 + sg * 0.12, d0 - sg * 1.3, STONE);
+        bx(u - 0.6, u + 0.6, EAVE + 2.35, EAVE + 2.6, d0 + sg * 0.06, d0 - sg * 1.3, STONE);
+      }
+      quoin(side * a, v, EAVE, side, sg);
+      quoin(side * PAV, sg * (b + OUT), PEAVE, side, sg);
+    }
+    // 中央の棟の窓（3 階分、5 列）と入口
+    for (let i = -2; i <= 2; i++) {
+      const u = (i * (PAV * 2 - 3)) / 4, vv = sg * (b + OUT);
+      if (i === 0) {
+        bx(-0.95, 0.95, 0.2, 3.5, vv + sg * 0.05, vv + sg * 0.09, GLASS);
+        bx(-1.25, 1.25, 0.2, 3.8, vv, vv + sg * 0.06, BRICK);
+        bx(-1.4, 1.4, 3.8, 4.1, vv, vv + sg * 0.14, STONE);
+      } else win(u, 1.5, 2.5, vv, sg);
+      win(u, F1 + 1.1, 2.4, vv, sg);
+      win(u, F1 + F2 + 1.0, 2.2, vv, sg);
+    }
+  }
+  // 妻の窓
+  for (const side of [1, -1]) for (const vv of [-b / 2, b / 2]) {
+    const e = (u, yb, h) => {
+      bx(side * a + side * 0.05, side * a + side * 0.08, yb, yb + h, vv - 0.58, vv + 0.58, GLASS);
+      bx(side * a, side * a + side * 0.1, yb - 0.16, yb, vv - 0.9, vv + 0.9, STONE);
+      bx(side * a, side * a + side * 0.1, yb + h, yb + h + 0.3, vv - 0.85, vv + 0.85, BRICK);
+    };
+    e(0, 1.5, 2.5);
+    e(0, F1 + 1.1, 2.4);
+  }
+  // 屋根: 翼はスレートのマンサード（急な面）と上の赤い瓦のゆるい面、中央はスレートの寄棟
+  const frustum = (u0, u1, v0, v1, ya, yb, inset, side, top) => {
+    const A = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]], B = [[u0 + inset, v0 + inset], [u1 - inset, v0 + inset], [u1 - inset, v1 - inset], [u0 + inset, v1 - inset]];
+    for (let i = 0; i < 4; i++) {
+      const j = (i + 1) % 4, mu = (A[i][0] + A[j][0]) / 2 - (u0 + u1) / 2, mv = (A[i][1] + A[j][1]) / 2 - (v0 + v1) / 2, l = Math.hypot(mu, mv) || 1;
+      const n = [(e1[0] * mu + e2[0] * mv) / l * 0.8, 0.6, (e1[1] * mu + e2[1] * mv) / l * 0.8];
+      q(P3(A[i][0], ya, A[i][1]), P3(A[j][0], ya, A[j][1]), P3(B[j][0], yb, B[j][1]), P3(B[i][0], yb, B[i][1]), n, side);
+    }
+    q(P3(B[0][0], yb, B[0][1]), P3(B[1][0], yb, B[1][1]), P3(B[2][0], yb, B[2][1]), P3(B[3][0], yb, B[3][1]), [0, 1, 0], top);
+    return B;
+  };
+  for (const side of [1, -1]) {
+    const u0 = side > 0 ? PAV : -a, u1 = side > 0 ? a : -PAV;
+    frustum(u0, u1, -b, b, EAVE, EAVE + MANS, 1.3, SLATE, TILE);
+    // 上のゆるい瓦の屋根（低い寄棟）
+    frustum(u0 + 1.3, u1 - 1.3, -b + 1.3, b - 1.3, EAVE + MANS, EAVE + MANS + 1.1, Math.min(b - 1.6, 4.5), TILE, TILE);
+    // 煙突（赤レンガ、石の笠）
+    for (const t of [0.2, 0.5, 0.8]) {
+      const u = u0 + (u1 - u0) * t;
+      for (const vv of [-b + 2.2, b - 2.2]) {
+        bx(u - 0.7, u + 0.7, EAVE + MANS - 0.4, EAVE + MANS + 2.4, vv - 0.4, vv + 0.4, BRICK);
+        bx(u - 0.8, u + 0.8, EAVE + MANS + 2.4, EAVE + MANS + 2.6, vv - 0.5, vv + 0.5, STONE);
+      }
+    }
+  }
+  frustum(-PAV - 0.2, PAV + 0.2, -b - OUT - 0.2, b + OUT + 0.2, PEAVE, PEAVE + 4.2, Math.min(PAV, b + OUT) - 1.2, SLATE, SLATE_D);
+  for (const u of [-PAV + 1.2, PAV - 1.2]) {
+    bx(u - 0.6, u + 0.6, PEAVE + 0.5, PEAVE + 5.4, -0.9, 0.9, BRICK);
+    bx(u - 0.7, u + 0.7, PEAVE + 5.4, PEAVE + 5.6, -1.0, 1.0, STONE);
+  }
+}
+
 // ---- 店の並ぶ通りの建物の正面の飾り（Rue de la République）
 // 窓の並びは buildings.js の writeWalls と同じ: 辺の真ん中から FACADE_BAY m ごとの窓の列、1 階の高さは max(3.4, 階高 × 1.15)、
 // 上の階の窓は階の床から階高の 0.13〜0.83
@@ -3136,7 +3265,7 @@ function writeBikeracks(m, W, groundAt, colliders) {
   colliders.push([a[0], a[1], b[0], b[1]]);
 }
 
-const WRITERS = { memorial: writeMemorial, bikeracks: writeBikeracks, shopstreet: writeShopstreet, trinite: writeTrinite, bollards: writeBollards, hgate: writeHospitalGate, lift: writeLift, pavilion: writePavilion, lock: writeLock, equestrian: writeEquestrian, wallFountain: writeWallFountain, capitainerie: writeCapitainerie, moorings: writeMoorings, riverfront: writeRiverfront, arcades: writeArcades, choir: writeChoir, ramblas: writeRamblas, basilica: writeBasilica, island: writeIsland, roundabout: writeRoundabout, portico: writePortico, donjon: writeDonjon, statue: writeStatue, dome: writeDome, chateau: writeChateau, stadium: writeStadium, cabanis: writeCabanis, coq: writeCoq, cross: writeCross, fastfood: writeFastfood, jgarden: writeJgarden, parterre: writeParterre };
+const WRITERS = { barracks: writeBarracks, memorial: writeMemorial, bikeracks: writeBikeracks, shopstreet: writeShopstreet, trinite: writeTrinite, bollards: writeBollards, hgate: writeHospitalGate, lift: writeLift, pavilion: writePavilion, lock: writeLock, equestrian: writeEquestrian, wallFountain: writeWallFountain, capitainerie: writeCapitainerie, moorings: writeMoorings, riverfront: writeRiverfront, arcades: writeArcades, choir: writeChoir, ramblas: writeRamblas, basilica: writeBasilica, island: writeIsland, roundabout: writeRoundabout, portico: writePortico, donjon: writeDonjon, statue: writeStatue, dome: writeDome, chateau: writeChateau, stadium: writeStadium, cabanis: writeCabanis, coq: writeCoq, cross: writeCross, fastfood: writeFastfood, jgarden: writeJgarden, parterre: writeParterre };
 
 // 名所のモデルを作る。colliders: 足す当たり判定の円 [x, z, r] か線分 [ax, az, bx, bz]、
 // keepOut: 街の小物を置かない円 [x, z, r]（像の台・シャトー・ドーの柵の内側。monumentSolid）

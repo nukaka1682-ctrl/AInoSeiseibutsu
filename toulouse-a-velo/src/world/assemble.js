@@ -24,6 +24,8 @@ import { buildFurniture } from './furniture.js';
 import { manualChains, nearManualQuay, quayChains, snapPathsToQuays } from './quays.js';
 let photoQuays = null;
 const PHOTO_QUAYS = (proj) => (photoQuays && photoQuays.proj === proj ? photoQuays.list : (photoQuays = { proj, list: manualChains(proj) }).list);
+// 岸から 8 m 以上離れた水の上か（川の真ん中に土手の木が並んでいた）
+const offshore = (inWater, x, z) => inWater(x, z) && inWater(x + 8, z) && inWater(x - 8, z) && inWater(x, z + 8) && inWater(x, z - 8);
 // 小道（車の走らない道）の区間
 const PATH_SEG = (s) => s.bike && !CAR_ROADS.has(s.road.type) && s.road.type !== 'service' && s.road.type !== 'living_street' && s.road.type !== 'pedestrian';
 import { CollisionWorld } from '../game/collision.js';
@@ -144,7 +146,7 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
       : [];
     treePts = parsed.trees.filter(inRect).concat(extra, avenue);
   }
-  treePts = treePts.concat(ground.bankTrees || []); // 街の外れの川岸の土手の木
+  treePts = treePts.concat((ground.bankTrees || []).filter((t) => !offshore(inWater, t.x, t.z))); // 街の外れの川岸の土手の木
   treePts = addPhotoTrees(treePts, proj, (x, z) => x >= rect.minX && x < rect.maxX && z >= rect.minZ && z < rect.maxZ); // 写真で決まる並木
   const towers = findTowers(proj, parsed.buildings); // 八角形の鐘楼は専用のモデル
   markBrickSites(proj, parsed.buildings, parsed.areas);

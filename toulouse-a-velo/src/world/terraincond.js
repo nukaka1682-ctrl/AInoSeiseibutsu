@@ -85,7 +85,7 @@ export function conditionRoads(terrain, roads, inWater = () => false, { window =
   const cars = [], minor = [];
   for (const r of roads) {
     if (!ground(r)) continue;
-    if (CAR_ROADS.has(r.type)) {
+    if (CAR_ROADS.has(r.type) || MOTOR_TYPES.has(r.type)) {
       const p = profile(r);
       if (p) cars.push(p);
     } else if (paths && PATH_TYPES.has(r.type)) {
@@ -178,6 +178,8 @@ export function conditionRoads(terrain, roads, inWater = () => false, { window =
   terrain.roadW = maxW; // 車道の重み（1: 車道の上、0: 関係なし）。sharpenQuays・despike が車道を避けるのに使う
   return cars.length;
 }
+// 高速道路とそのランプもならす（走れないが、盛り土の上の路面が 5 m の格子のままだと波打って見える）
+const MOTOR_TYPES = new Set(['motorway', 'motorway_link']);
 // ならす小道の種類（階段 steps は段のままにする）
 const PATH_TYPES = new Set(['cycleway', 'pedestrian', 'living_street', 'service', 'footway', 'path', 'track']);
 

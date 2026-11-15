@@ -144,7 +144,14 @@ export function markBrickSites(proj, buildings, areas = []) {
       if (bb && (x < bb.minX || x > bb.maxX || z < bb.minZ || z > bb.maxZ)) continue;
       if (!pointInRing(x, z, b.outer)) continue;
       b.style = STYLE[ps.style];
-      if (ps.style !== 'brickStone') b.info.roofShape = 'flat'; // 現代の建物は陸屋根
+      if (ps.floor) b.info.floorHeight = ps.floor;
+      if (ps.plain) b.plainGround = true;
+      if (ps.roof) {
+        b.tags['roof:material'] = ps.roof.material;
+        b.tags['roof:colour'] = ps.roof.colour;
+        if (b.info.roofShape === 'flat') b.info.roofShape = 'auto';
+        b.info.roofHeight = Math.max(b.info.roofHeight || 0, 3.5);
+      } else if (ps.style !== 'brickStone') b.info.roofShape = 'flat'; // 現代の建物は陸屋根
     }
   }
   // キャピトルの主塔（donjon）は急なスレートの屋根

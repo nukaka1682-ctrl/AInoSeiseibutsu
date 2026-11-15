@@ -61,7 +61,7 @@ export function quaySegments(chains, roads = [], { minLen = 6, taper = 6, crossS
     }
   }
   const out = [];
-  for (const { pts, solid } of chains) {
+  for (const { pts, solid, spec } of chains) {
     const n = pts.length - 1;
     if (n < 1) continue;
     const S = [0];
@@ -78,6 +78,7 @@ export function quaySegments(chains, roads = [], { minLen = 6, taper = 6, crossS
         if (seen.has(k)) return;
         seen.add(k);
         const r = rsegs[k];
+        if (r.under && spec?.bridge) return; // 高架の下の擁壁
         if (r.under) {
           const lim = r.half + 1;
           if (closestOnSegment(mx, mz, r.ax, r.az, r.bx, r.bz).d2 < lim * lim || closestOnSegment(a.x, a.z, r.ax, r.az, r.bx, r.bz).d2 < lim * lim) cut[i] = 1;
@@ -99,13 +100,13 @@ export function quaySegments(chains, roads = [], { minLen = 6, taper = 6, crossS
       while (j + 1 < n && !cut[j + 1]) j++;
       const s0 = S[i], s1 = S[j + 1];
       if (s1 - s0 >= minLen) {
-        const e = (s) => (solid ? 1 : Math.min(1, (s - s0) / taper, (s1 - s) / taper));
+        const e = (s) => (solid && !spec?.taper ? 1 : Math.min(1, (s - s0) / taper, (s1 - s) / taper));
         for (let k = i; k <= j; k++) {
           const a = pts[k], b = pts[k + 1], L = S[k + 1] - S[k];
           if (L < 1e-6) continue;
           out.push({
             ax: a.x, az: a.z, bx: b.x, bz: b.z, nx: -(b.z - a.z) / L, nz: (b.x - a.x) / L,
-            at: a.top, bt: b.top, ab: a.bot, bb: b.bot, ea: Math.max(0, e(S[k])), eb: Math.max(0, e(S[k + 1])), wet: a.wet && b.wet,
+            at: a.top, bt: b.top, ab: a.bot, bb: b.bot, ea: Math.max(0, e(S[k])), eb: Math.max(0, e(S[k + 1])), wet: a.wet && b.wet, stone: !!spec?.stone, plain: !!spec?.plain,
           });
         }
       }
@@ -373,8 +374,17 @@ export const MANUAL_QUAYS = [
   // トゥニ河岸（ポン・ヌフの南。0.5 m の地形モデルの壁の線をまっすぐな折れ線で）: 川沿いの堤のレンガの壁と、水際の細い下の段。
   // 地形モデルからなぞった線は切れ切れで、壁の切れ端と波打つ斜面になっていた。top・bottom なし: 上は壁の裏の地面、
   // 下は水面 + low m（fillManualHeights）
-  { id: 'tounis-nord', line: [[43.599452, 1.4404], [43.598966, 1.440368]], low: 1.0, front: 12, back: 6 },
-  { id: 'tounis', line: [[43.598734, 1.440304], [43.598224, 1.44016], [43.597714, 1.440096], [43.597251, 1.440144], [43.596556, 1.440224], [43.59586, 1.440304], [43.595513, 1.440352]], low: 1.0, front: 12, back: 6 },
+  // Purpan の A620 の高架の下（利用者の指摘とストリートビュー 225619・航空写真・0.5 m の地形モデル）: Avenue de Grande-Bretagne は
+  // 高速道路の盛り土を、両側が垂直のコンクリートの擁壁の切り通しで平らにくぐる。地形モデルは高架の下を補間するので、
+  // 道が盛り土に埋まって波打ち、高架と地面がひと続きの丘になっていた。2 本の擁壁の線（向かい合う）のあいだを道の高さに平らにする。
+  // low: 'ground' = 下の段は壁の前の地面のいちばん低い所の高さ。bridge: 橋の下でも壁を立てる。stone: 淡い石・コンクリートの壁。
+  // taper: 両端は段の高さをすぼめる（盛り土の斜面へつながる）。plain: 壁の前を河岸の石の板の舗装にしない
+  { id: 'a620-nord', line: [[43.605438, 1.403276], [43.604897, 1.404291]], low: 'ground', front: 21, back: 12, bridge: true, stone: true, taper: true, plain: true },
+  { id: 'a620-sud', line: [[43.604692, 1.404306], [43.605222, 1.402993]], low: 'ground', front: 21, back: 12, bridge: true, stone: true, taper: true, plain: true },
+  // 北の端はガロネットの口（昔の川の支流）: 河岸の道は橋（Pont du Halage de Tounis）で口を渡るが、地図では地面の道で、
+  // 8 m 下の谷へ落ち込んでいた。壁を口の前もまっすぐ通し、壁の裏 13 m（道の幅）を河岸の高さまで埋める（raiseRoads: 車道の下も）。
+  // topWin: 上の段の高さを前後 ±35 m の高い方（上から 1/4 の値）で決める（谷の所でも両側の河岸の高さ）
+  { id: 'tounis', line: [[43.599452, 1.4404], [43.598966, 1.440368], [43.598734, 1.440304], [43.598224, 1.44016], [43.597714, 1.440096], [43.597251, 1.440144], [43.596556, 1.440224], [43.59586, 1.440304], [43.595513, 1.440352]], low: 1.0, front: 12, back: 13, raiseRoads: true, topWin: 14 },
 ];
 
 // 手で決めた岸壁をローカル座標の折れ線にする（quayChains と同じ形。solid: 小道では切らない・端をすぼめない）
@@ -419,18 +429,41 @@ export function fillManualHeights(terrain, chains) {
       const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)], L = Math.hypot(b.x - a.x, b.z - a.z) || 1;
       const nx = -(b.z - a.z) / L, nz = (b.x - a.x) / L; // 下の段へ
       const hs = [6, 8, 10].map((d) => terrain.h(p.x - nx * d, p.z - nz * d)).sort((u, v) => u - v);
-      return { top: hs[1], bot: terrain.waterLevel(p.x + nx * 8, p.z + nz * 8) + (spec.low ?? 1) };
+      const bot = spec.low === 'ground' ? terrain.h(p.x + nx * spec.front * 0.5, p.z + nz * spec.front * 0.5) : terrain.waterLevel(p.x + nx * 8, p.z + nz * 8) + (spec.low ?? 1);
+      return { top: hs[1], bot };
     });
-    const win = 6; // ±6 点（約 15 m）
-    pts.forEach((p, i) => {
+    if (spec.low === 'ground') {
+      // 壁の前の地面のいちばん低い所（下から 2 割の値）にそろえる（橋の下は地形モデルが盛り上がっている）
+      const sorted = raw.map((r) => r.bot).sort((u, v) => u - v), flat = sorted[Math.floor(sorted.length * 0.2)];
+      for (const r of raw) r.bot = flat;
+    }
+    const win = spec.topWin || 6; // ±6 点（約 15 m）
+    const tops = pts.map((p, i) => {
       let st = 0, sb = 0, n = 0;
+      const list = [];
       for (let j = Math.max(0, i - win); j <= Math.min(pts.length - 1, i + win); j++) {
         st += raw[j].top;
         sb += raw[j].bot;
+        list.push(raw[j].top);
         n++;
       }
-      if (!spec.top) p.top = st / n;
+      list.sort((u, v) => u - v);
       if (spec.bottom == null) p.bot = sb / n;
+      return spec.topWin ? list[Math.floor((list.length - 1) * 0.75)] : st / n;
+    });
+    // topWin のときは、選んだ高さをもう一度ならす（段にならないように）
+    pts.forEach((p, i) => {
+      if (spec.top) return;
+      if (!spec.topWin) {
+        p.top = tops[i];
+        return;
+      }
+      let s2 = 0, n = 0;
+      for (let j = Math.max(0, i - 6); j <= Math.min(pts.length - 1, i + 6); j++) {
+        s2 += tops[j];
+        n++;
+      }
+      p.top = s2 / n;
     });
   }
 }
@@ -465,7 +498,7 @@ export function flattenManualQuays(terrain, chains, inWater = () => false, keep 
         const top = a.top + (b.top - a.top) * best.t + DATUM, bot = a.bot + (b.bot - a.bot) * best.t + DATUM;
         if (d > 0 && d < spec.front) {
           if (!inWater(x, z)) D[k] = bot;
-        } else if (d <= 0 && d > -spec.back && (!keep || keep(k))) D[k] = Math.max(D[k], top);
+        } else if (d <= 0 && d > -spec.back && (spec.raiseRoads || !keep || keep(k))) D[k] = Math.max(D[k], top);
       }
     }
   }
