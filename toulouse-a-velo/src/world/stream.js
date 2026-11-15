@@ -6,7 +6,9 @@
 import * as THREE from 'three';
 import { Grid, pointInRing } from '../geo.js';
 import { CAR_ROADS, parseOsm } from './parse.js';
-import { quayChains, snapPathsToQuays } from './quays.js';
+import { manualChains, nearManualQuay, quayChains, snapPathsToQuays } from './quays.js';
+let photoQuays = null;
+const PHOTO_QUAYS = (proj) => (photoQuays && photoQuays.proj === proj ? photoQuays.list : (photoQuays = { proj, list: manualChains(proj) }).list);
 // 小道（車の走らない道）の区間
 const PATH_SEG = (s) => s.bike && !CAR_ROADS.has(s.road.type) && s.road.type !== 'service' && s.road.type !== 'living_street' && s.road.type !== 'pedestrian';
 import { loadTileData, tileAt, tileBounds, tileLayout } from '../data/tiles.js';
@@ -41,7 +43,7 @@ export async function assembleStreamWorld({ base, bbox, presetId, buildingMats, 
   progress('道路・川・公園を解析中…', 0.05);
   await pause();
   const parsed = parseOsm(base.osm, proj, rect, []);
-  if (terrain.quayLines) snapPathsToQuays(parsed.roads, quayChains(terrain.quayLines, proj)); // 岸壁に沿う小道を壁のどちらか側へ（assemble.js と同じ）
+  if (terrain.quayLines) snapPathsToQuays(parsed.roads, quayChains(terrain.quayLines, proj).filter((c) => !c.pts.every((q) => nearManualQuay(PHOTO_QUAYS(proj), q.x, q.z))).concat(PHOTO_QUAYS(proj))); // 岸壁に沿う小道を壁のどちらか側へ（assemble.js と同じ）
   progress('道路網を作成中…', 0.3);
   await pause();
   const roadnet = new RoadNetwork(parsed.roads);

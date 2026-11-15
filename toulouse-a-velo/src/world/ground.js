@@ -18,7 +18,7 @@ import { PONT_NEUF_HALF, bridgeGroups, buildAbutments, buildBridges, conditionUn
 import { DRAPE_LIFT, FLAT_TERRAIN } from './terrain.js';
 import { buildFarTerrain, createTerrainMaterials, splitGeometry, TERRAIN_ORDER } from './terrainmesh.js';
 import { conditionRoads, despike, sharpenQuays, WALK_DEF } from './terraincond.js';
-import { quayChains, quaySegments } from './quays.js';
+import { fillManualHeights, flattenManualQuays, manualChains, manualLawns, nearManualQuay, quayChains, quaySegments } from './quays.js';
 import { buildMetroEntrances, chooseEntrances, createMetroMaterials, fillMetroPits, orientRamps, projectEntrances, writeEntranceMasks } from './metro.js';
 
 export const ORDER = {
@@ -901,8 +901,12 @@ export function buildGroundBase(parsed, rect, mats, terrain = FLAT_TERRAIN, layo
       const basin = lockBasinWalls(T, water, parsed.proj, inWater);
       const fixedQ = fixedQuayWalls(T, parsed.proj, inWater);
       const manual = basin.concat(fixedQ);
-      const skip = (x, z) => onBrienne(x, z) || inBasin0(x, z) || manual.some((q) => closestOnSegment(x, z, q.ax, q.az, q.bx, q.bz).d2 < 100);
-      const segs = quaySegments(quayChains(T.quayLines, parsed.proj), parsed.roads, { skip });
+      // 写真で決めた岸壁（ドラード河岸）: まわりの地形を写真どおりに書き直し、地形モデルからなぞった線はそこでは使わない
+      const photo = manualChains(parsed.proj);
+      fillManualHeights(T, photo);
+      flattenManualQuays(T, photo, inWater, (k) => !(T.roadW && T.roadW[k] > 0.99));
+      const skip = (x, z) => onBrienne(x, z) || inBasin0(x, z) || nearManualQuay(photo, x, z) || manual.some((q) => closestOnSegment(x, z, q.ax, q.az, q.bx, q.bz).d2 < 100);
+      const segs = quaySegments(quayChains(T.quayLines, parsed.proj), parsed.roads, { skip }).concat(quaySegments(photo, parsed.roads));
       T.setCliffs(segs);
       if (!T.quayMask) T.quayMask = new Uint8Array(T.near.cols * T.near.rows);
       for (const k of T.cliffLevels.keys()) T.quayMask[k] = 1; // despike が段の縁の点を「とげ」として戻さないように
@@ -1411,6 +1415,14 @@ function* groundDetailSteps(parsed, clip, mats, waterDepthAt, opts) {
     if (!overlaps(ringBounds(ring))) continue;
     const outer = clipRingToRect(ring, clip.minX, clip.minZ, clip.maxX, clip.maxZ);
     if (outer.length >= 3) writeFlatPolygon(W(ORDER.plaza, 'galets'), outer, [], 0, 2, pb.color);
+  }
+  // ---- 写真で決めた岸壁の足元の芝の帯（ドラード河岸。quays.js の MANUAL_QUAYS）
+  if (parsed.proj && terrain.quayLines) {
+    for (const ring of manualLawns(parsed.proj)) {
+      if (!overlaps(ringBounds(ring))) continue;
+      const outer = clipRingToRect(ring, clip.minX, clip.minZ, clip.maxX, clip.maxZ);
+      if (outer.length >= 3) writeFlatPolygon(W(ORDER.plaza + 0.2, 'grass'), outer, [], 0, 6, GREEN_COLOR.grass);
+    }
   }
   // ---- ポン・ヌフの両端の歩道（橋の花崗岩の歩道の続き）
   writePontNeufAprons(W(ORDER.sidewalk, 'granite'), W(ORDER.sidewalk + 0.1, 'granite'), pontNeufApproaches(parsed.roads), clip);

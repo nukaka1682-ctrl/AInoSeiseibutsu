@@ -61,7 +61,7 @@ export function quaySegments(chains, roads = [], { minLen = 6, taper = 6, crossS
     }
   }
   const out = [];
-  for (const { pts } of chains) {
+  for (const { pts, solid } of chains) {
     const n = pts.length - 1;
     if (n < 1) continue;
     const S = [0];
@@ -84,6 +84,7 @@ export function quaySegments(chains, roads = [], { minLen = 6, taper = 6, crossS
           return;
         }
         // 小道の幅の中に入る壁（寄せきれなかった所）は立てない（道筋どおりに走る自転車をふさがない）
+        if (solid && !r.car) return; // 写真で決めた岸壁は、小道では切らない（横切る小道は snapPathsToQuays が切り離す）
         if (!r.car && !r.steps && closestOnSegment(mx, mz, r.ax, r.az, r.bx, r.bz).d2 < (r.half + 0.9) ** 2) cut[i] = 1;
         const c = crossing(a.x, a.z, b.x, b.z, r.ax, r.az, r.bx, r.bz);
         if (!c) return;
@@ -98,7 +99,7 @@ export function quaySegments(chains, roads = [], { minLen = 6, taper = 6, crossS
       while (j + 1 < n && !cut[j + 1]) j++;
       const s0 = S[i], s1 = S[j + 1];
       if (s1 - s0 >= minLen) {
-        const e = (s) => Math.min(1, (s - s0) / taper, (s1 - s) / taper);
+        const e = (s) => (solid ? 1 : Math.min(1, (s - s0) / taper, (s1 - s) / taper));
         for (let k = i; k <= j; k++) {
           const a = pts[k], b = pts[k + 1], L = S[k + 1] - S[k];
           if (L < 1e-6) continue;
@@ -128,7 +129,7 @@ export function snapPathsToQuays(roads, chains, { band = 3.5, minRun = 6, step =
       const a = pts[i], b = pts[i + 1], L = Math.hypot(b.x - a.x, b.z - a.z);
       if (L < 1e-6) continue;
       grid.insertSegment(a.x, a.z, b.x, b.z, segs.length);
-      segs.push({ ax: a.x, az: a.z, bx: b.x, bz: b.z, tx: (b.x - a.x) / L, tz: (b.z - a.z) / L, chain });
+      segs.push({ ax: a.x, az: a.z, bx: b.x, bz: b.z, tx: (b.x - a.x) / L, tz: (b.z - a.z) / L, chain, solid: !!chains[chain].solid });
     }
   });
   const DRIVE = (r) => CAR_ROADS.has(r.type) || r.type === 'service' || r.type === 'living_street' || r.type === 'motorway' || r.type === 'motorway_link';
@@ -307,6 +308,45 @@ export function snapPathsToQuays(roads, chains, { band = 3.5, minRun = 6, step =
     r.pts = pts;
     if (r.nodeIds) r.nodeIds = ids;
   }
+  // 写真で決めた岸壁（solid）をまだ横切っている小道・階段は、横切る辺で 2 本に切り離す（垂直の壁は通れない。地図の線の
+  // ずれか、モデルにない階段。道筋はほかの坂へ回る）
+  const extra = [];
+  for (const r of roads) {
+    if (DRIVE(r) || r.bridge || r.tunnel || !r.pts || r.pts.length < 2) continue;
+    const cutAt = [];
+    for (let i = 0; i + 1 < r.pts.length; i++) {
+      const [ax, az] = r.pts[i], [bx, bz] = r.pts[i + 1];
+      let hit = false;
+      grid.query(Math.min(ax, bx), Math.min(az, bz), Math.max(ax, bx), Math.max(az, bz), (k) => {
+        if (!hit && segs[k].solid && crossing(ax, az, bx, bz, segs[k].ax, segs[k].az, segs[k].bx, segs[k].bz)) hit = true;
+      });
+      if (hit) cutAt.push(i);
+    }
+    if (!cutAt.length) continue;
+    const parts = [];
+    let from = 0;
+    for (const i of cutAt) {
+      parts.push([from, i]);
+      from = i + 1;
+    }
+    parts.push([from, r.pts.length - 1]);
+    const keepParts = parts.filter(([a, b]) => b - a >= 1);
+    const all = r.pts, ids = r.nodeIds;
+    if (!keepParts.length) {
+      r.pts = [all[0], all[0]];
+      r.dead = true;
+      continue;
+    }
+    keepParts.forEach(([a, b], j) => {
+      const t = j ? { ...r, id: `${r.id}_s${j}` } : r;
+      t.pts = all.slice(a, b + 1);
+      if (ids) t.nodeIds = ids.slice(a, b + 1);
+      if (j) extra.push(t);
+    });
+    count++;
+  }
+  for (let i = roads.length - 1; i >= 0; i--) if (roads[i].dead) roads.splice(i, 1);
+  roads.push(...extra);
   // 動かした点を共有するほかの小道の点も同じ所へ（交差点がずれないように）
   if (moved.size) {
     for (const r of roads) {
@@ -318,4 +358,133 @@ export function snapPathsToQuays(roads, chains, { band = 3.5, minRun = 6, step =
     }
   }
   return count;
+}
+
+// ---------------------------------------------------------------- 写真で決める岸壁
+// 見た目を本物にするため、地形モデルより写真を優先して手で決めた岸壁（利用者の方針）。
+// ドラード河岸（利用者の写真 NCM_0109: ポン・ヌフから北を見る）: ポン・ヌフのたもとからドラード広場の入り江の角まで、
+// 高いレンガの岸壁がまっすぐ一続きに立ち、上の河岸の縁にプラタナスの並木と手すり壁、足元に平らな遊歩道（壁際は舗装、
+// 水際は芝の帯）。地形モデルではポン・ヌフ寄りが坂と段の重なりで、壁が切れ切れ・地面が波打っていた。
+// line: 壁の線 [緯度, 経度]（上の段を左に見る向き）。top: 両端の上の段の標高、bottom: 下の段の標高（m）。
+// front: 壁の前、この距離まで下の段の高さに平らにする。back: 壁の裏、この距離まで上の段の高さにそろえる
+export const MANUAL_QUAYS = [
+  // lawn: 水際の芝の帯 [線の上の始まり・終わり（0〜1）, 壁からの距離の内側・外側 m]
+  { id: 'daurade', line: [[43.600929, 1.4391], [43.599725, 1.440309]], top: [142.25, 144.4], bottom: 133.7, front: 30, back: 7, lawn: [0.3, 0.93, 6, 10.5] },
+  // トゥニ河岸（ポン・ヌフの南。0.5 m の地形モデルの壁の線をまっすぐな折れ線で）: 川沿いの堤のレンガの壁と、水際の細い下の段。
+  // 地形モデルからなぞった線は切れ切れで、壁の切れ端と波打つ斜面になっていた。top・bottom なし: 上は壁の裏の地面、
+  // 下は水面 + low m（fillManualHeights）
+  { id: 'tounis-nord', line: [[43.599452, 1.4404], [43.598966, 1.440368]], low: 1.0, front: 12, back: 6 },
+  { id: 'tounis', line: [[43.598734, 1.440304], [43.598224, 1.44016], [43.597714, 1.440096], [43.597251, 1.440144], [43.596556, 1.440224], [43.59586, 1.440304], [43.595513, 1.440352]], low: 1.0, front: 12, back: 6 },
+];
+
+// 手で決めた岸壁をローカル座標の折れ線にする（quayChains と同じ形。solid: 小道では切らない・端をすぼめない）
+export function manualChains(proj, step = 2.5) {
+  return MANUAL_QUAYS.map((m) => {
+    const P = m.line.map((ll) => proj.project(...ll));
+    let total = 0;
+    for (let i = 0; i + 1 < P.length; i++) total += Math.hypot(P[i + 1][0] - P[i][0], P[i + 1][1] - P[i][1]);
+    const pts = [];
+    let s = 0;
+    for (let i = 0; i + 1 < P.length; i++) {
+      const [ax, az] = P[i], [bx, bz] = P[i + 1], L = Math.hypot(bx - ax, bz - az), n = Math.max(1, Math.ceil(L / step));
+      for (let j = i ? 1 : 0; j <= n; j++) {
+        const t = (s + (L * j) / n) / total;
+        pts.push({ x: ax + ((bx - ax) * j) / n, z: az + ((bz - az) * j) / n, top: m.top ? m.top[0] + (m.top[1] - m.top[0]) * t - DATUM : NaN, bot: m.bottom != null ? m.bottom - DATUM : NaN, wet: false });
+      }
+      s += L;
+    }
+    return { pts, solid: true, spec: m };
+  });
+}
+
+// 点 (x, z) が、手で決めた岸壁の線のそば（線の両端より内側で、前 front + 2 m・裏 back m 以内）か。
+// 地形モデルからなぞった線のうち、ここに入る部分は使わない
+export function nearManualQuay(chains, x, z) {
+  for (const { pts, spec } of chains) {
+    const a = pts[0], b = pts[pts.length - 1], dx = b.x - a.x, dz = b.z - a.z, L2 = dx * dx + dz * dz;
+    const t = ((x - a.x) * dx + (z - a.z) * dz) / L2;
+    if (t < 0.01 || t > 0.99) continue;
+    const L = Math.sqrt(L2), d = ((x - a.x) * -dz + (z - a.z) * dx) / L; // 下の段の側が正
+    if (d < spec.front + 2 && d > -spec.back) return true;
+  }
+  return false;
+}
+
+// 高さを決めていない手書きの岸壁の点の高さを地形から決める: 上は壁の裏 6〜10 m の地面の中央値（線に沿って ±15 m でならす）、
+// 下は水面 + low m。地形を書き直す前（flattenManualQuays の前）に呼ぶ
+export function fillManualHeights(terrain, chains) {
+  for (const { pts, spec } of chains) {
+    if (spec.top && spec.bottom != null) continue;
+    const raw = pts.map((p, i) => {
+      const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)], L = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+      const nx = -(b.z - a.z) / L, nz = (b.x - a.x) / L; // 下の段へ
+      const hs = [6, 8, 10].map((d) => terrain.h(p.x - nx * d, p.z - nz * d)).sort((u, v) => u - v);
+      return { top: hs[1], bot: terrain.waterLevel(p.x + nx * 8, p.z + nz * 8) + (spec.low ?? 1) };
+    });
+    const win = 6; // ±6 点（約 15 m）
+    pts.forEach((p, i) => {
+      let st = 0, sb = 0, n = 0;
+      for (let j = Math.max(0, i - win); j <= Math.min(pts.length - 1, i + win); j++) {
+        st += raw[j].top;
+        sb += raw[j].bot;
+        n++;
+      }
+      if (!spec.top) p.top = st / n;
+      if (spec.bottom == null) p.bot = sb / n;
+    });
+  }
+}
+
+// 手で決めた岸壁のまわりの地形の格子を書き直す: 壁の前（水の上を除く）は下の段の高さに平らに、壁の裏は上の段の高さまで上げる
+// （車道の芯 keep(k) = false の点は上げない）。terrain.setCliffs の前に呼ぶ
+export function flattenManualQuays(terrain, chains, inWater = () => false, keep = null) {
+  const g = terrain.near, D = g.data;
+  for (const { pts, spec } of chains) {
+    const R = Math.max(spec.front, spec.back) + 1;
+    let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+    for (const p of pts) {
+      x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x);
+      z0 = Math.min(z0, p.z); z1 = Math.max(z1, p.z);
+    }
+    const c0 = Math.max(0, Math.floor(g.ax * (x0 - R) + g.bx)), c1 = Math.min(g.cols - 1, Math.ceil(g.ax * (x1 + R) + g.bx));
+    const r0 = Math.max(0, Math.floor(g.az * (z0 - R) + g.bz)), r1 = Math.min(g.rows - 1, Math.ceil(g.az * (z1 + R) + g.bz));
+    for (let r = r0; r <= r1; r++) {
+      const z = (r - g.bz) / g.az;
+      for (let c = c0; c <= c1; c++) {
+        const x = (c - g.bx) / g.ax, k = r * g.cols + c;
+        if (Number.isNaN(D[k])) continue;
+        let best = null;
+        for (let i = 0; i + 1 < pts.length; i++) {
+          const a = pts[i], b = pts[i + 1], cs = closestOnSegment(x, z, a.x, a.z, b.x, b.z);
+          if (!best || cs.d2 < best.d2) best = { d2: cs.d2, i, t: cs.t, x: cs.x, z: cs.z };
+        }
+        const a = pts[best.i], b = pts[best.i + 1], L = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+        // 線の両端の先は触らない
+        if ((best.i === 0 && best.t <= 0) || (best.i === pts.length - 2 && best.t >= 1)) continue;
+        const d = ((x - best.x) * -(b.z - a.z) + (z - best.z) * (b.x - a.x)) / L;
+        const top = a.top + (b.top - a.top) * best.t + DATUM, bot = a.bot + (b.bot - a.bot) * best.t + DATUM;
+        if (d > 0 && d < spec.front) {
+          if (!inWater(x, z)) D[k] = bot;
+        } else if (d <= 0 && d > -spec.back && (!keep || keep(k))) D[k] = Math.max(D[k], top);
+      }
+    }
+  }
+}
+
+// 手で決めた岸壁の足元の芝の帯の外形（[[x, z]…] の輪の一覧）
+export function manualLawns(proj) {
+  const out = [];
+  for (const { pts, spec } of manualChains(proj, 6)) {
+    if (!spec.lawn) continue;
+    const [t0, t1, d0, d1] = spec.lawn, a = pts[0], b = pts[pts.length - 1], dx = b.x - a.x, dz = b.z - a.z, L = Math.hypot(dx, dz);
+    const nx = -dz / L, nz = dx / L, at = (t, d) => [a.x + dx * t + nx * d, a.z + dz * t + nz * d];
+    const n = Math.max(1, Math.ceil(((t1 - t0) * L) / 8)), inner = [], outer = [];
+    for (let i = 0; i <= n; i++) {
+      const t = t0 + ((t1 - t0) * i) / n;
+      inner.push(at(t, d0));
+      outer.push(at(t, d1));
+    }
+    out.push([...inner, ...outer.reverse()]);
+  }
+  return out;
 }

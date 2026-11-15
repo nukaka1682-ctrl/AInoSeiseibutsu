@@ -21,7 +21,9 @@ import { findCapitoleFacade, markBrickSites, markStreetStyles } from './landmark
 import { greySquareTest, historicCoreTest, oldTownTest } from '../config.js';
 import { POST_HIT, planStreets } from './streets.js';
 import { buildFurniture } from './furniture.js';
-import { quayChains, snapPathsToQuays } from './quays.js';
+import { manualChains, nearManualQuay, quayChains, snapPathsToQuays } from './quays.js';
+let photoQuays = null;
+const PHOTO_QUAYS = (proj) => (photoQuays && photoQuays.proj === proj ? photoQuays.list : (photoQuays = { proj, list: manualChains(proj) }).list);
 // 小道（車の走らない道）の区間
 const PATH_SEG = (s) => s.bike && !CAR_ROADS.has(s.road.type) && s.road.type !== 'service' && s.road.type !== 'living_street' && s.road.type !== 'pedestrian';
 import { CollisionWorld } from '../game/collision.js';
@@ -46,7 +48,7 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   progress('建物・道路・水辺を解析中…', 0);
   await pause();
   const parsed = parseOsm(data.osm, proj, rect, data.bdtopo);
-  if (terrain.quayLines) snapPathsToQuays(parsed.roads, quayChains(terrain.quayLines, proj)); // 岸壁に沿う小道を壁のどちらか側へ
+  if (terrain.quayLines) snapPathsToQuays(parsed.roads, quayChains(terrain.quayLines, proj).filter((c) => !c.pts.every((q) => nearManualQuay(PHOTO_QUAYS(proj), q.x, q.z))).concat(PHOTO_QUAYS(proj))); // 岸壁に沿う小道を壁のどちらか側へ
   const roadnet = new RoadNetwork(parsed.roads);
   const group = new THREE.Group();
   const facade = findCapitoleFacade(parsed); // キャピトルの正面には専用のテクスチャ
