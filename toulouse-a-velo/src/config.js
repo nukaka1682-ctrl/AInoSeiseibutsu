@@ -206,7 +206,7 @@ export const LANDMARKS = [
     ja: '戦没者記念碑の凱旋門',
     lat: 43.600102, lon: 1.452021,
     match: /^Monument aux (Combattants de la Haute-Garonne|morts de la Haute-Garonne)$/i,
-    text: 'フランソワ・ヴェルディエの並木道の入口に立つ、高さ 16 m の石の凱旋門（1928 年）。第一次世界大戦で亡くなったオート＝ガロンヌ県の兵士にささげられ、壁には兵士の行列の浮き彫りが巡る。',
+    text: 'フランソワ・ヴェルディエの並木道の入口に立つ、高さ 16 m の石の門（1928 年）。8 本の太い円柱が、浮き彫りの帯と「AVX COMBATTANTS DE LA HAVTE-GARONNE」の銘を掲げる。第一次世界大戦で亡くなったオート＝ガロンヌ県の兵士にささげられた。',
   },
   {
     id: 'jardin-plantes',

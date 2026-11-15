@@ -90,7 +90,7 @@ export const MONUMENTS = [
   { id: 'riquet', kind: 'statue', lat: 43.60906, lon: 1.45389, facing: [43.6061, 1.4490] },
   // 戦没者記念碑の凱旋門（Monument aux Combattants de la Haute-Garonne、1928 年、Léon Jaussely。François Verdier の並木道の北の端）:
   // 淡い石の大きな門。位置・向き・寸法は LiDAR HD の表面モデルから: 真ん中の高い塊（幅 8 m・奥行き 11.5 m・高さ 16 m）を
-  // 半円アーチの通路が並木道の軸に沿って貫き、両脇に低い翼（幅 4 m・奥行き 8 m・高さ 12.5 m、上の帯に浮き彫りの行列）。
+  // 四角い通路が並木道の軸に沿って貫き、太い円柱が支える。両脇に列柱の低い翼（writeMemorial。形は Wikimedia Commons の写真から）。
   // 2023 年にメトロ C 線の駅の工事で南へ 35 m 動かして仮置きされ（OpenStreetMap の今の外形は仮置きの場所）、2027 年に
   // 元の場所へ戻る。ここでは元の場所・向きに建てる。facing: 通路の軸の先（並木道の南）。old: 仮置きの外形を探す所
   { id: 'monument-combattants', kind: 'memorial', lat: 43.600102, lon: 1.452021, facing: [43.59847, 1.45219], old: [43.59979, 1.45208] },
@@ -2745,98 +2745,147 @@ function writeStatue(m, W, groundAt, colliders, onRoad, keepOut) {
 }
 
 // ---- 戦没者記念碑の凱旋門（François Verdier）。f: 通路の向き、s: 横（門の幅）の向き
-export const MEMORIAL = { half: 4, depth: 5.75, top: 16, wing: 4, wingDepth: 4, wingTop: 12.5, arch: 5, spring: 7.0 };
-// ぶつかる所: 通路の両脇の塊（真ん中の塊の柱 + 翼）の外形の線分。通路（幅 arch m）は通り抜けられる
+// 写真（Wikimedia Commons「Monument aux Combattants de la Haute-Garonne」の正面と側面）の寸法の比と、LiDAR の外形
+// （幅 16〜17 m・奥行き 11.5 m・高さ 16 m）から: 丸いアーチではなく、太い円柱が支える門。
+//   真ん中: 通路（幅 3.7 m、平らな格間の天井）をはさむ 2 枚の厚い壁（内側の面に浮き彫り）と、その前後の端に立つ 4 本の
+//           大きな円柱（直径 1.3 m・柱頭まで 9.6 m）。上にエンタブラチュア（浮き彫りの帯）と、銘の板のある屋階（16 m まで）
+//   両脇:   段の上の開いた列柱の翼（外の角に円柱 2 本ずつ、柱頭まで 8.9 m）と、戦場の名（FLANDRE・SOMME…）の帯のある
+//           低いエンタブラチュア（11.7 m まで）。翼の屋根の上、屋階の脇に座った像が 4 体
+export const MEMORIAL = {
+  pass: 1.85, wall: 1.25, wallDepth: 3.4, // 通路の半分の幅、壁の厚さ、壁の奥行きの半分
+  col: 0.65, colA: 3.2, colD: 4.45, colTop: 9.6, // 真ん中の円柱: 半径、横・奥行きの位置、柱頭の上
+  wcol: 0.6, wcolA: 6.6, wcolD: 2.9, wcolTop: 8.9, // 翼の円柱
+  half: 4.3, depth: 5.75, ent: 12.5, top: 16, // 真ん中のエンタブラチュアの半分の幅・奥行き、上端、屋階の上端
+  wingA: 7.6, wingD: 4.0, wingTop: 11.7, step: 0.8, // 翼の端・奥行きの半分・上端、段の高さ
+};
+// ぶつかる所: 通路の両脇の壁（外形の線分）と 8 本の円柱。通路（幅 3.7 m）は通り抜けられる
 export function memorialColliders(x, z, f) {
   const M = MEMORIAL, s = [-f[1], f[0]], P = (a, d) => [x + s[0] * a + f[0] * d, z + s[1] * a + f[1] * d];
   const out = [];
   for (const sg of [1, -1]) {
-    const r = M.arch / 2, ring = [[r, -M.depth], [M.half, -M.depth], [M.half, -M.wingDepth], [M.half + M.wing, -M.wingDepth], [M.half + M.wing, M.wingDepth], [M.half, M.wingDepth], [M.half, M.depth], [r, M.depth]].map(([a, d]) => P(a * sg, d));
+    const ring = [[M.pass, -M.wallDepth], [M.pass + M.wall, -M.wallDepth], [M.pass + M.wall, M.wallDepth], [M.pass, M.wallDepth]].map(([a, d]) => P(a * sg, d));
     ring.forEach((p, i) => out.push([...p, ...ring[(i + 1) % ring.length]]));
+    for (const dg of [1, -1]) {
+      out.push([...P(M.colA * sg, M.colD * dg), M.col + 0.1]);
+      out.push([...P(M.wcolA * sg, M.wcolD * dg), M.wcol + 0.1]);
+    }
   }
   return out;
 }
 function writeMemorial(m, W, groundAt, colliders, onRoad, keepOut) {
   const { x, z, f } = m, M = MEMORIAL, s = [-f[1], f[0]];
   const y0 = groundAt(x, z), w = W.main;
-  const STONE = col('#dccba6'), SHADE = col('#bfab86'), DARK = col('#8f8066'), VAULT = col('#a59373'), REL_A = col('#cdb98f'), REL_B = col('#a08a66'), BASE = col('#b9ad98');
+  const STONE = col('#e6dcc4'), SHADE = col('#cfc3a6'), DARK = col('#a2957a'), CEIL = col('#b9ad92'), REL_A = col('#d8ccb0'), REL_B = col('#b3a587'), BASE = col('#c4baa6'), LETTER = col('#8a7c62');
   const P = (a, d) => [x + s[0] * a + f[0] * d, z + s[1] * a + f[1] * d];
   const P3 = (a, y, d) => [x + s[0] * a + f[0] * d, y0 + y, z + s[1] * a + f[1] * d];
   const ex = (h) => [s[0] * h, 0, s[1] * h], ez = (h) => [f[0] * h, 0, f[1] * h], ey = (h) => [0, h, 0];
-  const bx = (a, y, d, ha, hy, hd, color, opt) => box(w, P3(a, y, d), ex(ha), ey(hy), ez(hd), color, opt);
-  const q = (A, B, C, D, n, color) => w.quad(A, B, C, D, n, PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, color);
-  const R = M.arch / 2, BODY = 14.2;
-  // 低い石の台（2 段）
-  bx(0, 0.08, 0, M.half + M.wing + 1.2, 0.08, M.depth + 1.4, BASE);
-  bx(0, 0.22, 0, M.half + M.wing + 0.6, 0.07, M.depth + 0.8, BASE);
-  // 真ん中の塊: 通路の両脇の柱（足元から迫り元まで）と、アーチの上の壁
-  for (const sg of [1, -1]) {
-    bx(sg * (R + M.half) / 2, BODY / 2, 0, (M.half - R) / 2, BODY / 2, M.depth, STONE);
-    bx(sg * (R + M.half) / 2, 0.6, 0, (M.half - R) / 2 + 0.12, 0.6, M.depth + 0.12, SHADE); // 腰の帯
-    bx(sg * (R + 0.05), M.spring - 0.2, 0, 0.16, 0.2, M.depth + 0.1, SHADE); // 迫り元の帯（インポスト）
-  }
-  const N = 14, arc = [];
-  for (let i = 0; i <= N; i++) {
-    const t = (i / N) * Math.PI;
-    arc.push([Math.cos(t) * R, M.spring + Math.sin(t) * R]);
-  }
-  for (const d of [M.depth, -M.depth]) {
-    const n = [f[0] * Math.sign(d), 0, f[1] * Math.sign(d)];
-    for (let i = 0; i < N; i++) {
-      const [a0, h0] = arc[i], [a1, h1] = arc[i + 1];
-      q(P3(a0, h0, d), P3(a1, h1, d), P3(a1, BODY, d), P3(a0, BODY, d), n, STONE);
-      // アーチの縁の帯（アーキヴォルト）と要石
-      const k = (R + 0.5) / R, o = d + Math.sign(d) * 0.07;
-      q(P3(a0, h0, o), P3(a1, h1, o), P3(a1 * k, M.spring + (h1 - M.spring) * k, o), P3(a0 * k, M.spring + (h0 - M.spring) * k, o), n, SHADE);
+  // 箱: 横 a0〜a1、高さ y0〜y1、奥行き d0〜d1
+  const bx = (a0, a1, ya, yb, d0, d1, color, opt) => box(w, P3((a0 + a1) / 2, (ya + yb) / 2, (d0 + d1) / 2), ex(Math.abs(a1 - a0) / 2), ey((yb - ya) / 2), ez(Math.abs(d1 - d0) / 2), color, opt);
+  // 円柱: 四角い台座、礎盤、柱身（上へ少し細く）、帯の飾りのある柱頭、四角い頂板
+  const column = (a, d, r, top) => {
+    const [cx, cz] = P(a, d);
+    bx(a - r - 0.22, a + r + 0.22, 0, 0.5, d - r - 0.22, d + r + 0.22, SHADE);
+    cylinder(w, cx, cz, r + 0.12, r + 0.03, y0 + 0.5, y0 + 0.85, { seg: 20, color: STONE });
+    cylinder(w, cx, cz, r, r * 0.9, y0 + 0.85, y0 + top - 1.1, { seg: 20, color: STONE });
+    cylinder(w, cx, cz, r * 0.94, r * 0.98, y0 + top - 1.1, y0 + top - 0.4, { seg: 20, color: REL_B }); // 柱頭の浮き彫りの帯
+    cylinder(w, cx, cz, r * 0.98, r + 0.14, y0 + top - 0.4, y0 + top - 0.18, { seg: 20, color: STONE });
+    bx(a - r - 0.2, a + r + 0.2, top - 0.18, top, d - r - 0.2, d + r + 0.2, STONE);
+  };
+  // 浮き彫りの帯（人の形を並べて表す）: 面 a0〜a1（奥行き d の面、向き sgn）か d0〜d1（横 a の面）
+  const frieze = (fixed, lo, hi, ya, yb, along, sgn, label = 0) => {
+    const n = Math.max(1, Math.floor((hi - lo - 0.2) / 0.5)), mid = (lo + hi) / 2;
+    for (let i = 0; i < n; i++) {
+      const t = lo + 0.1 + ((hi - lo - 0.2) * (i + 0.5)) / n;
+      if (label && Math.abs(t - mid) < label) continue; // 真ん中の名前の板の所
+      const hgt = (yb - ya) * (0.72 + 0.22 * hash01(i * 13 + Math.round(fixed * 7 + lo * 3), 9)), c = i % 2 ? REL_A : REL_B;
+      if (along === 'a') bx(t - 0.17, t + 0.17, ya, ya + hgt, fixed, fixed + sgn * 0.07, c);
+      else bx(fixed, fixed + sgn * 0.07, ya, ya + hgt, t - 0.17, t + 0.17, c);
     }
-    bx(0, M.spring + R + 0.45, d + Math.sign(d) * 0.1, 0.38, 0.6, 0.1, STONE);
-    // 屋階の銘の板（暗い石）と、アーチの両脇の縦長の浮き彫りの板
-    bx(0, 15.3, d - Math.sign(d) * 0.2, 3.0, 0.42, 0.06, DARK);
-    for (const sg of [1, -1]) bx(sg * (R + M.half) / 2, 10.4, d + Math.sign(d) * 0.05, 0.5, 1.9, 0.05, REL_B);
-  }
-  // 通路の天井（格間のあるヴォールト。暗い石、格間ごとに濃淡）と、通路の中の壁の浮き彫りの板
-  const ND = 6;
-  for (let i = 0; i < N; i++) {
-    const [a0, h0] = arc[i], [a1, h1] = arc[i + 1], am = (a0 + a1) / 2, hm = (h0 + h1) / 2 - M.spring;
-    const nl = Math.hypot(am, hm) || 1, n = [-(s[0] * am) / nl, -hm / nl, -(s[1] * am) / nl];
-    for (let j = 0; j < ND; j++) {
-      const d0 = -M.depth + (2 * M.depth * j) / ND, d1 = -M.depth + (2 * M.depth * (j + 1)) / ND;
-      q(P3(a0, h0, d0), P3(a1, h1, d0), P3(a1, h1, d1), P3(a0, h0, d1), n, (i + j) % 2 ? VAULT : DARK);
+    if (label) {
+      if (along === 'a') bx(mid - label, mid + label, ya + 0.12, yb - 0.12, fixed, fixed + sgn * 0.09, LETTER);
+      else bx(fixed, fixed + sgn * 0.09, ya + 0.12, yb - 0.12, mid - label, mid + label, LETTER);
+    }
+  };
+  // 低い石の台（広場の石畳の上の 2 段）
+  bx(-M.wingA - 1.6, M.wingA + 1.6, 0, 0.1, -M.depth - 1.2, M.depth + 1.2, BASE);
+  bx(-M.half - 0.4, M.half + 0.4, 0.1, 0.2, -M.depth - 0.5, M.depth + 0.5, BASE);
+  for (const sg of [1, -1]) {
+    // 通路の壁（腰の帯・内側の面の浮き彫りの板と刻んだ名前の板・外側の面の「GLOIRE AUX HEROS」の板と剣）
+    const a0 = sg * M.pass, a1 = sg * (M.pass + M.wall);
+    bx(a0, a1, 0.2, M.colTop, -M.wallDepth, M.wallDepth, STONE);
+    bx(a0 - sg * 0.08, a1 + sg * 0.08, 0.2, 1.3, -M.wallDepth - 0.08, M.wallDepth + 0.08, SHADE);
+    bx(a0 - sg * 0.05, a0, 2.2, 7.6, -M.wallDepth + 0.5, M.wallDepth - 0.5, REL_A);
+    frieze(a0 - sg * 0.05, -M.wallDepth + 0.7, M.wallDepth - 0.7, 5.2, 7.3, 'd', -sg);
+    bx(a1, a1 + sg * 0.05, 1.8, 8.3, -M.wallDepth + 0.45, M.wallDepth - 0.45, REL_A);
+    bx(a1 + sg * 0.05, a1 + sg * 0.1, 7.2, 8.0, -1.6, 1.6, REL_B);
+    bx(a1 + sg * 0.05, a1 + sg * 0.11, 3.4, 6.6, -0.09, 0.09, LETTER); // 剣
+    bx(a1 + sg * 0.05, a1 + sg * 0.11, 5.9, 6.05, -0.4, 0.4, LETTER);
+    for (const dg of [1, -1]) {
+      column(sg * M.colA, dg * M.colD, M.col, M.colTop);
+      column(sg * M.wcolA, dg * M.wcolD, M.wcol, M.wcolTop + M.step * 0 );
+    }
+    // 翼: 段（4 段）の上の床、外の円柱の上のエンタブラチュア（梁・浮き彫りの帯と戦場の名の板・軒）、平らな屋根
+    const wi = sg * (M.pass + M.wall), wo = sg * M.wingA;
+    for (let k = 0; k < 4; k++) {
+      const g = (3 - k) * 0.32;
+      bx(wi, wo + sg * g, 0.2 + k * 0.15, 0.2 + (k + 1) * 0.15, -M.wingD - g, M.wingD + g, k === 3 ? STONE : BASE);
+    }
+    const e0 = sg * (M.half - 0.2), e1 = sg * (M.wingA - 0.25), wd = M.wingD - 0.25;
+    bx(e0, e1, M.wcolTop, M.wcolTop + 0.55, -wd, wd, STONE);
+    bx(e0, e1, M.wcolTop + 0.55, M.wingTop - 0.75, -wd + 0.05, wd - 0.05, SHADE);
+    for (const dg of [1, -1]) frieze(dg * (wd - 0.05), Math.min(e0, e1), Math.max(e0, e1), M.wcolTop + 0.62, M.wingTop - 0.82, 'a', dg, 1.0);
+    frieze(e1 - sg * 0.05, -wd + 0.05, wd - 0.05, M.wcolTop + 0.62, M.wingTop - 0.82, 'd', sg, 1.3);
+    bx(e0, e1 + sg * 0.45, M.wingTop - 0.75, M.wingTop - 0.45, -wd - 0.45, wd + 0.45, STONE); // 張り出した軒
+    bx(e0, e1 + sg * 0.3, M.wingTop - 0.45, M.wingTop, -wd - 0.3, wd + 0.3, STONE, { top: SHADE });
+    // 翼の天井（暗い格間）
+    bx(e0, e1, M.wcolTop - 0.06, M.wcolTop, -wd, wd, CEIL);
+    // 屋階の脇に座った像（前後に 1 体ずつ。ずんぐりした塊で表す）
+    for (const dg of [1, -1]) {
+      const sa = sg * (M.half + 0.9), sd = dg * 2.6;
+      bx(sa - 0.75, sa + 0.75, M.wingTop, M.wingTop + 0.45, sd - 0.75, sd + 0.75, STONE);
+      blob(w, P3(sa, M.wingTop + 1.15, sd), [0.62, 0.8, 0.62], 0, 8, 5, (i) => (i % 2 ? REL_A : SHADE));
+      blob(w, P3(sa - sg * 0.1, M.wingTop + 2.0, sd), [0.36, 0.42, 0.36], 0, 8, 5, () => REL_A);
+      blob(w, P3(sa + sg * 0.45, M.wingTop + 1.5, sd + dg * 0.2), [0.2, 0.75, 0.2], 0, 6, 4, () => SHADE); // 翼・旗
     }
   }
-  for (const sg of [1, -1]) bx(sg * (R - 0.04), 3.7, 0, 0.04, 2.3, M.depth - 1.2, REL_A);
-  // 軒の蛇腹と屋階
-  bx(0, BODY + 0.25, 0, M.half + 0.3, 0.25, M.depth + 0.3, SHADE);
-  bx(0, (BODY + 0.5 + M.top - 0.3) / 2, 0, M.half - 0.15, (M.top - 0.3 - BODY - 0.5) / 2, M.depth - 0.15, STONE);
-  bx(0, M.top - 0.15, 0, M.half + 0.1, 0.15, M.depth + 0.1, SHADE);
-  // 両脇の翼: 無地の石の塊、腰の帯、上の帯に兵士の行列の浮き彫り（縦長の人の形を並べて表す）、軒
-  for (const sg of [1, -1]) {
-    const ac = sg * (M.half + M.wing / 2), WT = M.wingTop;
-    bx(ac, (WT - 0.4) / 2, 0, M.wing / 2, (WT - 0.4) / 2, M.wingDepth, STONE);
-    bx(ac, 0.6, 0, M.wing / 2 + 0.12, 0.6, M.wingDepth + 0.12, SHADE);
-    bx(ac, WT - 0.2, 0, M.wing / 2 + 0.25, 0.2, M.wingDepth + 0.25, SHADE);
-    const F0 = 8.2, F1 = 11.4; // 浮き彫りの帯の下端・上端
-    bx(ac, F0 - 0.12, 0, M.wing / 2 + 0.1, 0.12, M.wingDepth + 0.1, SHADE);
-    // 帯の 3 面（正面・裏・外の横）に人の形
-    const faces = [
-      { o: (t) => [ac + t, M.wingDepth + 0.05], L: M.wing, e: (h, t) => [h, t] },
-      { o: (t) => [ac + t, -M.wingDepth - 0.05], L: M.wing, e: (h, t) => [h, t] },
-      { o: (t) => [sg * (M.half + M.wing + 0.05), t], L: 2 * M.wingDepth, e: (h, t) => [t, h] },
-    ];
-    for (const fc of faces) {
-      const n = Math.floor((fc.L - 0.3) / 0.62);
+  // 真ん中のエンタブラチュア: 梁、浮き彫りの帯、張り出した軒（ライオンの頭の飾り）
+  const A = M.half, Dp = M.depth - 0.35;
+  bx(-A + 0.25, A - 0.25, M.colTop, M.colTop + 0.7, -Dp, Dp, STONE);
+  bx(-A + 0.3, A - 0.3, M.colTop + 0.7, M.ent - 0.8, -Dp + 0.05, Dp - 0.05, SHADE);
+  for (const dg of [1, -1]) frieze(dg * (Dp - 0.05), -A + 0.3, A - 0.3, M.colTop + 0.78, M.ent - 0.88, 'a', dg);
+  for (const sg of [1, -1]) frieze(sg * (A - 0.3), -Dp + 0.05, Dp - 0.05, M.colTop + 0.78, M.ent - 0.88, 'd', sg, 1.2);
+  bx(-A - 0.25, A + 0.25, M.ent - 0.8, M.ent - 0.45, -Dp - 0.5, Dp + 0.5, STONE);
+  bx(-A - 0.1, A + 0.1, M.ent - 0.45, M.ent, -Dp - 0.35, Dp + 0.35, STONE, { top: SHADE });
+  for (const dg of [1, -1]) for (const a of [-A + 0.5, A - 0.5]) bx(a - 0.18, a + 0.18, M.ent - 0.42, M.ent - 0.06, dg * (Dp + 0.35), dg * (Dp + 0.47), REL_B);
+  // 通路の天井（格間: 暗い板に明るい桟）
+  bx(-M.pass, M.pass, M.colTop - 0.05, M.colTop, -Dp, Dp, CEIL);
+  for (let k = -2; k <= 2; k++) bx(-M.pass, M.pass, M.colTop - 0.16, M.colTop - 0.05, k * 2.1 - 0.12, k * 2.1 + 0.12, STONE);
+  bx(-0.1, 0.1, M.colTop - 0.16, M.colTop - 0.05, -Dp, Dp, STONE);
+  // 屋階: 無地の塊、前後に銘の板（額縁と刻んだ文字の列）、横に月桂樹の浮き彫りの板、上の軒
+  const AA = 3.95, AD = M.depth - 0.9;
+  bx(-AA, AA, M.ent, M.top - 0.35, -AD, AD, STONE);
+  bx(-AA - 0.15, AA + 0.15, M.top - 0.35, M.top, -AD - 0.15, AD + 0.15, STONE, { top: SHADE });
+  for (const dg of [1, -1]) {
+    bx(-3.3, 3.3, M.ent + 0.55, M.top - 0.8, dg * AD, dg * (AD + 0.06), REL_A);
+    bx(-3.45, 3.45, M.ent + 0.4, M.ent + 0.55, dg * AD, dg * (AD + 0.1), SHADE);
+    bx(-3.45, 3.45, M.top - 0.8, M.top - 0.65, dg * AD, dg * (AD + 0.1), SHADE);
+    // 3 行の文字（AVX COMBATTANTS / DE LA HAVTE-GARONNE / 1914 1918）: 文字の太さの小さな板の列
+    const rows = [[M.top - 1.35, 2.4, 14], [M.top - 1.95, 2.9, 17], [M.top - 2.5, 1.3, 8]];
+    for (const [yy, hw, n] of rows) {
       for (let i = 0; i < n; i++) {
-        const t = -((n - 1) * 0.62) / 2 + i * 0.62, [a, d] = fc.o(t), [ha, hd] = fc.e(0.2, 0.05);
-        const hgt = 2.2 + 0.25 * hash01(i * 7 + (sg > 0 ? 3 : 11), 5), c = i % 2 ? REL_A : REL_B;
-        bx(a, F0 + hgt / 2, d, ha, hgt / 2, hd, c);
-        const [hha, hhd] = fc.e(0.13, 0.06);
-        bx(a, F0 + hgt + 0.2, d, hha, 0.17, hhd, c);
+        if (n === 8 && (i === 3 || i === 4)) continue; // 1914 と 1918 の間
+        const a = -hw + ((2 * hw) * (i + 0.5)) / n;
+        bx(a - (hw / n) * 0.62, a + (hw / n) * 0.62, yy, yy + 0.36, dg * (AD + 0.06), dg * (AD + 0.1), LETTER);
       }
     }
-    void F1;
   }
-  colliders.push(...memorialColliders(x, z, f));
-  keepOut.push([x, z, 9.5]);
+  for (const sg of [1, -1]) {
+    bx(sg * AA, sg * (AA + 0.06), M.ent + 0.5, M.top - 0.75, -AD + 0.6, AD - 0.6, REL_A);
+    for (let k = -3; k <= 3; k++) bx(sg * (AA + 0.06), sg * (AA + 0.1), M.ent + 0.8 + Math.abs(k) * 0.12, M.top - 1.1 - Math.abs(k) * 0.12, k * 1.1 - 0.3, k * 1.1 + 0.3, REL_B);
+  }
+  void DARK;
+  for (const c of memorialColliders(x, z, f)) colliders.push(c);
+  keepOut.push([x, z, 10]);
 }
 
 // ---- 店の並ぶ通りの建物の正面の飾り（Rue de la République）

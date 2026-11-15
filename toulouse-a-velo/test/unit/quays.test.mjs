@@ -141,3 +141,50 @@ test('道のならし: 自転車道・歩道も縦断面でならし、横に傾
   conditionRoads(T2, [road(1, 'cycleway', 2.5, 40.7)], () => false, { paths: false });
   assert.ok(tilt(T2, 40.7) > 0.2);
 });
+
+test('写真で決めた岸壁: 壁の前を平らに書き直し、小道では切らず、横切る小道は切り離す', async () => {
+  const { MANUAL_QUAYS, manualChains, fillManualHeights, flattenManualQuays, nearManualQuay, manualLawns } = await import('../../src/world/quays.js');
+  const { MEMORIAL, memorialColliders } = await import('../../src/world/monuments.js');
+  const Q = new LocalProjection(43.6, 1.44);
+  const chains = manualChains(Q);
+  assert.equal(chains.length, MANUAL_QUAYS.length);
+  const dau = chains.find((c) => c.spec.id === 'daurade');
+  assert.ok(dau.solid && dau.pts.length > 50);
+  const a = dau.pts[0], b = dau.pts[dau.pts.length - 1], L = Math.hypot(b.x - a.x, b.z - a.z);
+  assert.ok(L > 150 && L < 180, `長さ ${L}`);
+  // 下の段（川）は線の南西
+  const mid = dau.pts[dau.pts.length >> 1], n = [-(b.z - a.z) / L, (b.x - a.x) / L];
+  assert.ok(n[0] < 0 && n[1] > 0);
+  assert.ok(nearManualQuay(chains, mid.x + n[0] * 10, mid.z + n[1] * 10));
+  assert.ok(!nearManualQuay(chains, mid.x - n[0] * 20, mid.z - n[1] * 20));
+  assert.ok(!nearManualQuay(chains, a.x - (b.x - a.x) * 0.1, a.z - (b.z - a.z) * 0.1));
+  // 地形: なまった斜面 → 壁の前は下の段に平ら、裏は上の段
+  const g = latticeFor({ s: 43.598, w: 1.437, n: 43.603, e: 1.443 });
+  const data = new Float32Array(g.cols * g.rows);
+  for (let r = 0; r < g.rows; r++) for (let c = 0; c < g.cols; c++) {
+    const [x, z] = Q.project(g.lat - r * g.dLat, g.lon + c * g.dLon);
+    const d = (x - a.x) * n[0] + (z - a.z) * n[1];
+    data[r * g.cols + c] = 143 - 9 * Math.min(1, Math.max(0, (d + 8) / 20)); // 幅 20 m のなだらかな斜面
+  }
+  const T = new Terrain({ near: { ...g, data } }, Q);
+  fillManualHeights(T, chains);
+  flattenManualQuays(T, chains);
+  const segs = quaySegments([dau], [{ id: 1, type: 'footway', width: 2, pts: [[mid.x - n[0] * 8, mid.z - n[1] * 8], [mid.x + n[0] * 8, mid.z + n[1] * 8]] }]);
+  assert.equal(segs.length, dau.pts.length - 1, '小道では切らない');
+  assert.ok(segs.every((q) => q.ea === 1 && q.eb === 1));
+  T.setCliffs(segs);
+  for (const d of [1, 6, 15, 25]) assert.ok(Math.abs(T.h(mid.x + n[0] * d, mid.z + n[1] * d) - (133.7 - DATUM)) < 0.05, `前 ${d} m: ${T.h(mid.x + n[0] * d, mid.z + n[1] * d)}`);
+  assert.ok(T.h(mid.x - n[0] * 1, mid.z - n[1] * 1) > 143 - DATUM - 0.6, `裏: ${T.h(mid.x - n[0], mid.z - n[1])}`);
+  // 横切る小道は切り離す
+  const roads = [{ id: 7, type: 'footway', width: 2, pts: [[mid.x - n[0] * 8, mid.z - n[1] * 8], [mid.x, mid.z - 0.01], [mid.x + n[0] * 8, mid.z + n[1] * 8]], nodeIds: ['a', 'b', 'c'] }];
+  snapPathsToQuays(roads, [dau]);
+  for (const r of roads) for (let i = 0; i + 1 < r.pts.length; i++) {
+    const s0 = (r.pts[i][0] - a.x) * n[0] + (r.pts[i][1] - a.z) * n[1], s1 = (r.pts[i + 1][0] - a.x) * n[0] + (r.pts[i + 1][1] - a.z) * n[1];
+    assert.ok(s0 * s1 > 0, '壁をまたぐ辺が残っている');
+  }
+  assert.ok(manualLawns(Q).length >= 1);
+  // 記念碑: 通路は通れる（真ん中に当たり判定がない）、壁と 8 本の円柱
+  const cs = memorialColliders(0, 0, [0, 1]);
+  assert.equal(cs.filter((c) => c.length === 3).length, 8);
+  assert.ok(cs.filter((c) => c.length === 4).every(([ax, , bx]) => Math.min(Math.abs(ax), Math.abs(bx)) >= MEMORIAL.pass - 1e-9));
+});
