@@ -1296,9 +1296,14 @@ export function buildFurniture(opts, cw = null) {
   set.addLamps(LAMP_WALL, items.wallLamps || []);
   if (cw) {
     for (const c of items.colliders) {
-      if (c.r) cw.addCircle(c.x, c.z, c.r);
-      else {
+      if (c.r) {
+        // 小道（歩道・自転車道の線）の上に立った車止め・ごみ箱などは、見た目だけ（木の幹と同じ。細い小道をふさいで、
+        // ナビの道筋どおりに走る自転車が動けなくなっていた）
+        if (!opts.onRoad || !opts.onRoad(c.x, c.z, 0.3)) cw.addCircle(c.x, c.z, c.r);
+      } else {
         const { x, z, ux, uz, hl, hw } = c, nx = -uz, nz = ux;
+        // 小道の線の上にかかる箱（路上駐車の車・コンテナ・待合所）も見た目だけ
+        if (opts.onPath && (opts.onPath(x, z, hw) || opts.onPath(x + ux * hl * 0.7, z + uz * hl * 0.7, hw) || opts.onPath(x - ux * hl * 0.7, z - uz * hl * 0.7, hw))) continue;
         cw.addRing([[x + ux * hl + nx * hw, z + uz * hl + nz * hw], [x - ux * hl + nx * hw, z - uz * hl + nz * hw], [x - ux * hl - nx * hw, z - uz * hl - nz * hw], [x + ux * hl - nx * hw, z + uz * hl - nz * hw]]);
       }
     }

@@ -31,27 +31,30 @@ function samplePolyline(pts, step) {
   return out;
 }
 
-// 車道の縦断面で地面の格子をならす。roads: 道路（parse.js）、inWater(x, z): 水の上か。
+// 道の縦断面で地面の格子をならす。roads: 道路（parse.js）、inWater(x, z): 水の上か。
 // 中心線を 5 m ごとに測り、水の上の点は両岸の点の高さを結び、前後 ±window m の三角の重みでならす。
-// 車道の幅の半分 + 1 m までの格子点はその高さに、そこから fringe m かけて元の地面に戻す（重なる道は重みで平均）
-export function conditionRoads(terrain, roads, inWater = () => false, { window = 15, fringe = 6 } = {}) {
+// 3 回に分けて格子に書く（あとの回が優先）:
+//  1. 小道（自転車道・歩行者の通り・歩道・小道・生活道路・サービス道路。階段は除く）: 道の縁から pathShoulder m までの
+//     格子点を、いちばん近い小道の高さに、そこから pathFringe m かけて元の地面に戻す（利用者の指摘: 道がぼこぼこ。
+//     車道だけをならしていたので、自転車道や河岸の遊歩道は 5 m の格子の地面の凸凹・横の傾きのままだった）
+//  2. 車道の路肩: 車道の縁から shoulder m までの格子点を、いちばん近い車道の高さに（その先 fringe m かけて元の地面へ）。
+//     車道の面にかかる格子の三角形の頂点がすべて車道の高さになるので、車道が横に傾かない。小道の芯の上は小道を優先
+//  3. 車道の芯: 幅の半分 + 1 m までの格子点を車道の高さに（重なる道は重みで平均）
+export function conditionRoads(terrain, roads, inWater = () => false, { window = 15, fringe = 6, shoulder = 6.1, pathShoulder = 4.5, pathFringe = 4, paths = true } = {}) {
   if (!terrain || terrain.flat) return 0;
   const g = terrain.near, D = g.data, cols = g.cols, rows = g.rows;
   const DAT = terrain.datum;
-  const sumW = new Float32Array(cols * rows), sumY = new Float32Array(cols * rows), maxW = new Float32Array(cols * rows);
-  terrain.roadW = maxW; // 車道の重み（1: 車道の上、0: 関係なし）。sharpenQuays・despike が車道を避けるのに使う
-  let used = 0;
-  for (const r of roads) {
-    if (!CAR_ROADS.has(r.type) || r.bridge || r.tunnel || (r.layer || 0) < 0) continue;
+  // 縦断面（元の地面から。格子に書く前に全部の道を測る）
+  const profile = (r) => {
     const S = samplePolyline(r.pts, 5);
-    if (S.length < 2) continue;
+    if (S.length < 2) return null;
     for (const p of S) {
       p.wet = inWater(p.x, p.z);
       p.h = terrain.h(p.x, p.z);
     }
     // 水の上の点: 前後の陸の点の高さを結ぶ（片側しかなければその高さ）
     if (S.some((p) => p.wet)) {
-      if (S.every((p) => p.wet)) continue;
+      if (S.every((p) => p.wet)) return null;
       for (let i = 0; i < S.length; i++) {
         if (!S[i].wet) continue;
         let a = i, b = i;
@@ -76,35 +79,109 @@ export function conditionRoads(terrain, roads, inWater = () => false, { window =
       }
       return sy / sw;
     });
-    const inner = (r.width || 6) / 2 + 1, outer = inner + fringe, wid2 = (r.width || 6) ** 2;
-    for (let i = 0; i + 1 < S.length; i++) {
-      const a = S[i], b = S[i + 1];
-      const c0 = Math.max(0, Math.ceil(g.ax * (Math.min(a.x, b.x) - outer) + g.bx)), c1 = Math.min(cols - 1, Math.floor(g.ax * (Math.max(a.x, b.x) + outer) + g.bx));
-      const r0 = Math.max(0, Math.ceil(g.az * (Math.min(a.z, b.z) - outer) + g.bz)), r1 = Math.min(rows - 1, Math.floor(g.az * (Math.max(a.z, b.z) + outer) + g.bz));
-      for (let rr = r0; rr <= r1; rr++) {
-        const z = nodeZ(g, rr);
-        for (let cc = c0; cc <= c1; cc++) {
-          const c = closestOnSegment(nodeX(g, cc), z, a.x, a.z, b.x, b.z);
-          const d = Math.sqrt(c.d2);
-          if (d >= outer) continue;
-          const w = d <= inner ? 1 : 1 - smooth01((d - inner) / fringe);
-          const k = rr * cols + cc;
-          // 重なる道（交差点・並ぶ道）は、幅の広い道と中心に近い道を強く（平均で横に急なうねりができないように）
-          const pw = w * w * wid2;
-          sumW[k] += pw;
-          sumY[k] += pw * (ys[i] + (ys[i + 1] - ys[i]) * c.t);
-          if (w > maxW[k]) maxW[k] = w;
+    return { S, ys, width: r.width || 6 };
+  };
+  const ground = (r) => !r.bridge && !r.tunnel && (r.layer || 0) >= 0 && r.pts && r.pts.length >= 2;
+  const cars = [], minor = [];
+  for (const r of roads) {
+    if (!ground(r)) continue;
+    if (CAR_ROADS.has(r.type) || MOTOR_TYPES.has(r.type)) {
+      const p = profile(r);
+      if (p) cars.push(p);
+    } else if (paths && PATH_TYPES.has(r.type)) {
+      const p = profile({ ...r, width: r.width || 2.5 });
+      if (p) minor.push(p);
+    }
+  }
+  const sumW = new Float32Array(cols * rows), sumY = new Float32Array(cols * rows), maxW = new Float32Array(cols * rows);
+  // 芯: 幅の半分 + 1 m まで重み 1、そこから fr m かけて 0。重なる道は、幅の広い道と中心に近い道を強く
+  // （平均で横に急なうねりができないように）
+  const core = (list, fr) => {
+    for (const { S, ys, width } of list) {
+      const inner = width / 2 + 1, outer = inner + fr, wid2 = width ** 2;
+      for (let i = 0; i + 1 < S.length; i++) {
+        const a = S[i], b = S[i + 1];
+        const c0 = Math.max(0, Math.ceil(g.ax * (Math.min(a.x, b.x) - outer) + g.bx)), c1 = Math.min(cols - 1, Math.floor(g.ax * (Math.max(a.x, b.x) + outer) + g.bx));
+        const r0 = Math.max(0, Math.ceil(g.az * (Math.min(a.z, b.z) - outer) + g.bz)), r1 = Math.min(rows - 1, Math.floor(g.az * (Math.max(a.z, b.z) + outer) + g.bz));
+        for (let rr = r0; rr <= r1; rr++) {
+          const z = nodeZ(g, rr);
+          for (let cc = c0; cc <= c1; cc++) {
+            const c = closestOnSegment(nodeX(g, cc), z, a.x, a.z, b.x, b.z);
+            const d = Math.sqrt(c.d2);
+            if (d >= outer) continue;
+            const w = d <= inner ? 1 : 1 - smooth01((d - inner) / fr);
+            const k = rr * cols + cc;
+            const pw = w * w * wid2;
+            sumW[k] += pw;
+            sumY[k] += pw * (ys[i] + (ys[i + 1] - ys[i]) * c.t);
+            if (w > maxW[k]) maxW[k] = w;
+          }
         }
       }
     }
-    used++;
+  };
+  const apply = () => {
+    for (let k = 0; k < D.length; k++) {
+      if (maxW[k] <= 0 || Number.isNaN(D[k])) continue;
+      D[k] += (sumY[k] / sumW[k] + DAT - D[k]) * maxW[k];
+    }
+  };
+  // いちばん近い道の高さ（sumW: 道の縁 + 1 m からの距離の最小、sumY: その道の高さ）。reach: 調べる距離
+  const nearest = (list, reach) => {
+    sumW.fill(Infinity);
+    for (const { S, ys, width } of list) {
+      const half = width / 2 + 1, outer = half + reach;
+      for (let i = 0; i + 1 < S.length; i++) {
+        const a = S[i], b = S[i + 1];
+        const c0 = Math.max(0, Math.ceil(g.ax * (Math.min(a.x, b.x) - outer) + g.bx)), c1 = Math.min(cols - 1, Math.floor(g.ax * (Math.max(a.x, b.x) + outer) + g.bx));
+        const r0 = Math.max(0, Math.ceil(g.az * (Math.min(a.z, b.z) - outer) + g.bz)), r1 = Math.min(rows - 1, Math.floor(g.az * (Math.max(a.z, b.z) + outer) + g.bz));
+        for (let rr = r0; rr <= r1; rr++) {
+          const z = nodeZ(g, rr);
+          for (let cc = c0; cc <= c1; cc++) {
+            const c = closestOnSegment(nodeX(g, cc), z, a.x, a.z, b.x, b.z);
+            const d = Math.sqrt(c.d2) - half, k = rr * cols + cc;
+            if (d >= reach || d >= sumW[k]) continue;
+            sumW[k] = d;
+            sumY[k] = ys[i] + (ys[i + 1] - ys[i]) * c.t;
+          }
+        }
+      }
+    }
+  };
+  // 1. 小道: 細い道は芯（幅の半分 + 1 m）の中に格子点がほとんどないので、縁から pathShoulder m までの格子点を、いちばん近い
+  //    小道の高さにそろえる（その先 pathFringe m かけて元の地面へ）。maxW に小道の芯の重み（縁 + 1 m まで 1、その先 2 m で 0）を残す
+  if (minor.length) {
+    nearest(minor, pathShoulder + pathFringe);
+    for (let k = 0; k < D.length; k++) {
+      const d = sumW[k];
+      if (d === Infinity || Number.isNaN(D[k])) continue;
+      D[k] += (sumY[k] + DAT - D[k]) * (d <= pathShoulder ? 1 : 1 - smooth01((d - pathShoulder) / pathFringe));
+      maxW[k] = d <= 0 ? 1 : d < 2 ? 1 - d / 2 : 0;
+    }
   }
-  for (let k = 0; k < D.length; k++) {
-    if (maxW[k] <= 0 || Number.isNaN(D[k])) continue;
-    D[k] += (sumY[k] / sumW[k] + DAT - D[k]) * maxW[k];
+  // 2. 車道の路肩（maxW は小道の芯の重み）
+  if (shoulder > 0 && cars.length) {
+    nearest(cars, shoulder + fringe);
+    for (let k = 0; k < D.length; k++) {
+      const d = sumW[k];
+      if (d === Infinity || Number.isNaN(D[k])) continue;
+      const w = (d <= shoulder ? 1 : 1 - smooth01((d - shoulder) / fringe)) * (1 - maxW[k]);
+      D[k] += (sumY[k] + DAT - D[k]) * w;
+    }
   }
-  return used;
+  // 3. 車道の芯
+  sumW.fill(0);
+  sumY.fill(0);
+  maxW.fill(0);
+  core(cars, fringe);
+  apply();
+  terrain.roadW = maxW; // 車道の重み（1: 車道の上、0: 関係なし）。sharpenQuays・despike が車道を避けるのに使う
+  return cars.length;
 }
+// 高速道路とそのランプもならす（走れないが、盛り土の上の路面が 5 m の格子のままだと波打って見える）
+const MOTOR_TYPES = new Set(['motorway', 'motorway_link']);
+// ならす小道の種類（階段 steps は段のままにする）
+const PATH_TYPES = new Set(['cycleway', 'pedestrian', 'living_street', 'service', 'footway', 'path', 'track']);
 
 // 岸壁を立て直す。centre, radius: レンガの岸壁がある範囲（旧市街のまわりのガロンヌ川・ブリエンヌ運河）。
 // inWater(x, z): 水の上か（水の上の格子点は使わない。水辺から near m より遠い点も使わない）。

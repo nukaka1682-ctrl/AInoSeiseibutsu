@@ -3,6 +3,10 @@
 import * as THREE from 'three';
 import { deckEdgeBlocked } from '../world/terrain.js';
 
+// 崖とみなす段: 進む先 1 m の面がこれ以上違えば止まる。岸壁・擁壁は 2 m 以上の垂直の段（地面が線で切れている）なので、
+// 芝の土手や広場の斜面（1 m で 0.5〜0.8 m）は走れるようにする（ドラード広場の川へ下る芝の斜面の縁で動けなくなっていた）
+const CLIFF_STEP = 0.9;
+
 const WHEEL_R = 0.34;
 const WHEELBASE = 1.05;
 const MASS = 85; // 人 + 自転車
@@ -362,7 +366,7 @@ export class Bike {
       }
     }
     this.contact = res.hit;
-    // 崖（岸壁の縁・急な土手）: 進む先 1 m の面が 0.5 m 以上違えば壁と同じに止まる（道路の上と橋の上は止めない）
+    // 崖（岸壁の縁・急な土手）: 進む先 1 m の面が CLIFF_STEP m 以上違えば壁と同じに止まる（道路の上と橋の上は止めない）
     if (world.rideY && !res.hit) {
       const mv = Math.hypot(nx - this.x, nz - this.z);
       if (mv > 1e-5) {
@@ -371,11 +375,43 @@ export class Bike {
         // 橋の上から橋の外へ、または高さの違う隣の橋の面へ 0.5 m 以上落ちる（上がる）所は、下に道路があっても止める（欄干）
         const T = world.terrain;
         const offDeck = T && !T.flat && deckEdgeBlocked(T.deck(this.x, this.z, this.y), T.deck(this.x + ux, this.z + uz, this.y), S, Sa);
-        if (offDeck || (Math.abs(Sa - S) > 0.5 && !(world.roadnet?.onRoad(nx, nz, 0.5)))) {
-          if (!this.contact && sp > 3.5) this.events.push({ type: 'bump', strength: Math.min(1, sp / 8) });
-          nx = this.x;
-          nz = this.z;
-          this.speed *= 0.2;
+        // 道の縁から急な斜面へはみ出したときは、いちばん近い道へ近づく向きにだけ動ける（斜面の上で前にも後ろにも進めなくなって、
+        // 「道路に戻る」を押すしかなかった）
+        const backToRoad = () => {
+          const near = world.roadnet?.nearestSegment?.(this.x, this.z, 6);
+          if (near && (nx - near.x) ** 2 + (nz - near.z) ** 2 < near.d2 - 1e-6) return true;
+          // すでに斜面の途中にいる（後ろ 1 m も 0.5 m 以上違う）なら、そのまま斜面を進める。平らな所から段へ出るときだけ止める
+          return Math.abs(S - world.rideY(this.x - ux, this.z - uz, this.y)) > CLIFF_STEP;
+        };
+        if (offDeck || (Math.abs(Sa - S) > CLIFF_STEP && !(world.roadnet?.onRoad(nx, nz, 0.5)) && !backToRoad())) {
+          // 崖の縁では、壁と同じように縁に沿ってすべる（等高線の向きの成分だけ進み、向きも少しずつ縁に沿わせる）。
+          // 沿う向きにも進めないときだけ止まる（縁に頭を向けたまま前にも後ろにも動けなくなるのを防ぐ）
+          let slid = false;
+          if (!offDeck) {
+            const gx = world.rideY(this.x + 1, this.z, this.y) - world.rideY(this.x - 1, this.z, this.y), gz = world.rideY(this.x, this.z + 1, this.y) - world.rideY(this.x, this.z - 1, this.y);
+            const gl = Math.hypot(gx, gz);
+            if (gl > 1e-3) {
+              let tx = -gz / gl, tz = gx / gl;
+              const along = ux * tx + uz * tz;
+              if (along < 0) [tx, tz] = [-tx, -tz];
+              if (Math.abs(along) > 0.08 && Math.abs(world.rideY(this.x + tx, this.z + tz, this.y) - S) <= CLIFF_STEP) {
+                nx = this.x + tx * mv * Math.abs(along);
+                nz = this.z + tz * mv * Math.abs(along);
+                const dirS = Math.sign(this.speed) || 1;
+                let dh = Math.atan2(tx * dirS, -tz * dirS) - this.heading;
+                dh = Math.atan2(Math.sin(dh), Math.cos(dh));
+                this.heading += dh * Math.min(1, dt * 2.5);
+                this.speed *= Math.exp(-(1 - Math.abs(along)) * 3 * dt);
+                slid = true;
+              }
+            }
+          }
+          if (!slid) {
+            if (!this.contact && sp > 3.5) this.events.push({ type: 'bump', strength: Math.min(1, sp / 8) });
+            nx = this.x;
+            nz = this.z;
+            this.speed *= 0.2;
+          }
           this.contact = true;
         }
       }

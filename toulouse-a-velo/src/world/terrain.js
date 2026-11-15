@@ -17,6 +17,8 @@ export const DECK_TOP = 0.08; // 橋の車道の面（bridges.js の topY と同
 export const TERRAIN_VERSION = 1;
 // 格子の基準: トゥールーズ全体のエリアの原点。どのエリアの地形ファイルもこの格子の一部を切り出したもの
 export const LATTICE = { lat: 43.5994, lon: 1.4395, step: 5 };
+// 岸壁の線を焼き込む範囲（旧市街のまわりのガロンヌ川・運河。data/quaybake.js、ground.js の QUAY_LATLON・QUAY_RADIUS + 150 と同じ円）
+export const QUAY_ZONE = { lat: 43.5994, lon: 1.4364, radius: 1400 };
 const MAGIC = 0x54564154; // 'TAVT'
 
 // 緯度経度の格子 g を、エリアの投影 proj のローカル座標から引けるようにする（列 = ax·x + bx、行 = az·z + bz）
@@ -35,6 +37,53 @@ function planar(g, u, v) {
   const fu = u - c, fv = v - r, i = r * cols + c;
   const h00 = d[i], h10 = d[i + 1], h01 = d[i + cols], h11 = d[i + cols + 1];
   return fu >= fv ? h00 + fu * (h10 - h00) + fv * (h11 - h10) : h00 + fv * (h01 - h00) + fu * (h11 - h01);
+}
+
+// 崖のあるマスの平面補間: 格子点の高さを、崖の下の段（side > 0）か上の段（side < 0）の値（lv: 格子点の番号 → [下, 上]）で読む
+function planarLevel(g, u, v, lv, side) {
+  const cols = g.cols, d = g.data;
+  const c = Math.min(Math.floor(u), cols - 2), r = Math.min(Math.floor(v), g.rows - 2);
+  const fu = u - c, fv = v - r, i = r * cols + c, k = side > 0 ? 0 : 1;
+  const at = (j) => {
+    const e = lv.get(j);
+    return e ? e[k] : d[j];
+  };
+  const h00 = at(i), h11 = at(i + cols + 1);
+  if (fu >= fv) {
+    const h10 = at(i + 1);
+    return h00 + fu * (h10 - h00) + fv * (h11 - h10);
+  }
+  const h01 = at(i + cols);
+  return h00 + fv * (h01 - h00) + fu * (h11 - h01);
+}
+
+// 凸多角形（頂点 [x, y, z, ...属性]）を、点 (ax, az) を通る向き (dx, dz) の直線で 2 つに切る（切れなければ元のまま 1 つ）
+function cutByLine(poly, ax, az, dx, dz, out) {
+  const n = poly.length, ks = new Array(n);
+  let lo = Infinity, hi = -Infinity;
+  for (let i = 0; i < n; i++) {
+    const k = (poly[i][0] - ax) * dz - (poly[i][2] - az) * dx;
+    ks[i] = k;
+    if (k < lo) lo = k;
+    if (k > hi) hi = k;
+  }
+  if (lo > -1e-4 || hi < 1e-4) {
+    out.push(poly);
+    return;
+  }
+  const neg = [], pos = [];
+  for (let i = 0; i < n; i++) {
+    const a = poly[i], ka = ks[i], j = (i + 1) % n, kb = ks[j];
+    if (ka <= 0) neg.push(a);
+    if (ka >= 0) pos.push(a);
+    if ((ka < 0 && kb > 0) || (ka > 0 && kb < 0)) {
+      const p = lerpV(a, poly[j], ka / (ka - kb));
+      neg.push(p);
+      pos.push(p);
+    }
+  }
+  if (neg.length >= 3) out.push(neg);
+  if (pos.length >= 3) out.push(pos);
 }
 
 // 双線形補間（遠くの格子・水面の格子。範囲外は端の値）。NaN の格子点は使わない（すべて NaN なら NaN）
@@ -111,6 +160,8 @@ export class Terrain {
     this.level = data.level ? prepGrid(data.level, proj) : null;
     this.profiles = data.bridges || []; // 事前取得で測った橋の縦断面（緯度経度の両端と、5 m ごとの標高）
     this.report = data.report || null;
+    // 事前取得で見つけた岸壁の線（data/quaybake.js。[{ pts: [[緯度, 経度, 上, 下, 水際か]…] }]。null: 古いファイル → sharpenQuays を使う）
+    this.quayLines = data.quays || null;
     this.flat = false;
     this.datum = DATUM;
     this.conditioned = false; // 道路・岸壁で格子を手直ししたか（terraincond.js、ground.js の buildGroundBase）
@@ -186,10 +237,99 @@ export class Terrain {
   }
 
   // 地面の高さ（y）。5 m の格子の平面。格子の外は遠くの格子
-  h(x, z) {
+  // side: 崖（岸壁）のあるマスで、どちらの段の高さを返すか（1: 下の段、-1: 上の段、なし: その点のある側）
+  h(x, z, side) {
     const g = this.near, u = g.ax * x + g.bx, v = g.az * z + g.bz;
-    if (u >= 0 && v >= 0 && u <= g.cols - 1 && v <= g.rows - 1) return planar(g, u, v) - DATUM;
+    if (u >= 0 && v >= 0 && u <= g.cols - 1 && v <= g.rows - 1) {
+      const cc = this.cliffCells;
+      if (cc && cc[Math.min(Math.floor(v), g.rows - 2) * g.cols + Math.min(Math.floor(u), g.cols - 2)]) {
+        return planarLevel(g, u, v, this.cliffLevels, side || this.cliffSide(x, z)) - DATUM;
+      }
+      return planar(g, u, v) - DATUM;
+    }
     return this.hFar(x, z);
+  }
+
+  // 崖（岸壁の線）を登録する。地面は線の所で上の段と下の段に切れる（5 m の格子のなまった斜面ではなく、垂直の段になる）。
+  // segs: [{ ax, az, bx, bz, nx, nz（下の段へ向く向き）, at, bt（上の段の y）, ab, bb（下の段の y）, ea, eb（端の重み 0〜1。
+  // 線の端・切れ目に向けて 0 にすると、段の高さが 0 へすぼむ）}]。
+  // 格子点ごとに 2 つの高さ（下の段・上の段）を持つ: 線の下の段の側の点は「自分の高さ（壁の足元より高くなまっていれば足元まで
+  // 下げる）」と「上の段を延ばした高さ（壁の上端）」、上の段の側の点は「壁の足元の高さ」と「自分の高さ（なまって低ければ
+  // 壁の上端まで上げる）」。線が通るマスの中では、点のある側（side）の値で平面補間する。
+  // keep(k): false の格子点（車道の芯など）は自分の高さを変えない
+  setCliffs(segs, { reach = 7.5, clampNear = 3.5, keep = null } = {}) {
+    const g = this.near, D = g.data, cols = g.cols, rows = g.rows;
+    this.cliffSegs = segs;
+    this.cliffGrid = new Grid(10);
+    this.cliffLevels = new Map();
+    this.cliffCells = null;
+    if (!segs.length) return;
+    const cells = new Uint8Array(cols * rows);
+    const best = new Map(); // 格子点 → いちばん近い線分 { d2, d, t, q }
+    segs.forEach((q, i) => {
+      this.cliffGrid.insertBounds(Math.min(q.ax, q.bx) - 0.1, Math.min(q.az, q.bz) - 0.1, Math.max(q.ax, q.bx) + 0.1, Math.max(q.az, q.bz) + 0.1, i);
+      // 線が通るマス（0.5 m ごとに調べ、マスの縁の近くは隣も）
+      const L = Math.hypot(q.bx - q.ax, q.bz - q.az), n = Math.max(1, Math.ceil(L / 0.5));
+      for (let j = 0; j <= n; j++) {
+        const u = g.ax * (q.ax + ((q.bx - q.ax) * j) / n) + g.bx, v = g.az * (q.az + ((q.bz - q.az) * j) / n) + g.bz;
+        for (const du of [-0.02, 0.02]) for (const dv of [-0.02, 0.02]) {
+          const c = Math.floor(u + du), r = Math.floor(v + dv);
+          if (c >= 0 && r >= 0 && c < cols - 1 && r < rows - 1) cells[r * cols + c] = 1;
+        }
+      }
+      const c0 = Math.max(0, Math.ceil(g.ax * (Math.min(q.ax, q.bx) - reach) + g.bx)), c1 = Math.min(cols - 1, Math.floor(g.ax * (Math.max(q.ax, q.bx) + reach) + g.bx));
+      const r0 = Math.max(0, Math.ceil(g.az * (Math.min(q.az, q.bz) - reach) + g.bz)), r1 = Math.min(rows - 1, Math.floor(g.az * (Math.max(q.az, q.bz) + reach) + g.bz));
+      for (let r = r0; r <= r1; r++) {
+        const z = (r - g.bz) / g.az;
+        for (let c = c0; c <= c1; c++) {
+          const x = (c - g.bx) / g.ax, cs = closestOnSegment(x, z, q.ax, q.az, q.bx, q.bz);
+          if (cs.d2 > reach * reach) continue;
+          const d = (x - cs.x) * q.nx + (z - cs.z) * q.nz, k = r * cols + c, b = best.get(k);
+          // 同じ距離（折れ線の角）なら、線から離れている方（|d| の大きい方）の向きを使う
+          if (!b || cs.d2 < b.d2 - 1e-6 || (cs.d2 < b.d2 + 1e-6 && Math.abs(d) > Math.abs(b.d))) best.set(k, { d2: cs.d2, d, t: cs.t, q });
+        }
+      }
+    });
+    for (const [k, { d2, d, t, q }] of best) {
+      const orig = D[k];
+      if (Number.isNaN(orig)) continue;
+      const w = (q.ea ?? 1) + ((q.eb ?? 1) - (q.ea ?? 1)) * t;
+      const top = q.at + (q.bt - q.at) * t + DATUM, bot = q.ab + (q.bb - q.ab) * t + DATUM;
+      const dist = Math.sqrt(d2), near = Math.min(1, Math.max(0, (reach - dist) / (reach - clampNear)));
+      const fixed = keep && !keep(k);
+      let lo, hi;
+      if (d > 0) {
+        lo = fixed ? orig : orig - w * near * Math.max(0, orig - bot);
+        hi = lo + w * Math.max(0, top - lo);
+        D[k] = lo;
+      } else {
+        hi = fixed ? orig : orig + w * near * Math.max(0, top - orig);
+        lo = hi - w * Math.max(0, hi - bot);
+        D[k] = hi;
+      }
+      this.cliffLevels.set(k, [lo, hi]);
+    }
+    this.cliffCells = cells;
+  }
+
+  // 点 (x, z) が、崖の線の通るマスの中か
+  inCliffCell(x, z) {
+    const g = this.near, c = Math.floor(g.ax * x + g.bx), r = Math.floor(g.az * z + g.bz);
+    return c >= 0 && r >= 0 && c < g.cols - 1 && r < g.rows - 1 && this.cliffCells[r * g.cols + c] === 1;
+  }
+
+  // 点 (x, z) が、いちばん近い崖の線のどちら側か（1: 下の段、-1: 上の段）。近くに線がなければ 1
+  cliffSide(x, z) {
+    let bd2 = Infinity, bd = 1;
+    this.cliffGrid.queryPoint(x, z, 8, (i) => {
+      const q = this.cliffSegs[i], cs = closestOnSegment(x, z, q.ax, q.az, q.bx, q.bz);
+      const d = (x - cs.x) * q.nx + (z - cs.z) * q.nz;
+      if (cs.d2 < bd2 - 1e-6 || (cs.d2 < bd2 + 1e-6 && Math.abs(d) > Math.abs(bd))) {
+        bd2 = cs.d2;
+        bd = d;
+      }
+    });
+    return bd >= 0 ? 1 : -1;
   }
 
   // 近くの格子の中か（遠くの地面のメッシュが近くの格子を使うか、遠くの格子を使うかを決める）
@@ -208,9 +348,11 @@ export class Terrain {
   }
 
   // 地面の法線（左右前後 2.5 m の差から。なめらかに変わる）
-  normal(x, z, out = [0, 1, 0]) {
+  normal(x, z, out = [0, 1, 0], side) {
     const e = 2.5;
-    const dx = (this.h(x + e, z) - this.h(x - e, z)) / (2 * e), dz = (this.h(x, z + e) - this.h(x, z - e)) / (2 * e);
+    // 崖の近くでは、同じ段の面の傾きを使う（崖をまたいで測ると、平らな河岸が急な斜面の明るさになる）
+    if (side == null && this.cliffCells && (this.inCliffCell(x + e, z) || this.inCliffCell(x - e, z) || this.inCliffCell(x, z + e) || this.inCliffCell(x, z - e))) side = this.cliffSide(x, z);
+    const dx = (this.h(x + e, z, side) - this.h(x - e, z, side)) / (2 * e), dz = (this.h(x, z + e, side) - this.h(x, z - e, side)) / (2 * e);
     const l = Math.hypot(dx, 1, dz);
     out[0] = -dx / l;
     out[1] = 1 / l;
@@ -310,6 +452,13 @@ export class Terrain {
   // 差は、辺と格子の線・対角線の交点と、中の格子点で最大になる（地面は格子の三角形ごとの平面なので）
   flatOver(A, B, C, tol) {
     const g = this.near;
+    if (this.cliffCells) {
+      // 崖のあるマスにかかる三角形は必ず切る
+      const cc = this.cliffCells;
+      const u0 = Math.max(0, Math.floor(g.ax * Math.min(A[0], B[0], C[0]) + g.bx)), u1 = Math.min(g.cols - 2, Math.floor(g.ax * Math.max(A[0], B[0], C[0]) + g.bx));
+      const v0 = Math.max(0, Math.floor(g.az * Math.min(A[2], B[2], C[2]) + g.bz)), v1 = Math.min(g.rows - 2, Math.floor(g.az * Math.max(A[2], B[2], C[2]) + g.bz));
+      for (let r = v0; r <= v1; r++) for (let c = u0; c <= u1; c++) if (cc[r * g.cols + c]) return false;
+    }
     const P = [A, B, C], H = P.map((p) => this.h(p[0], p[2]));
     const fam = [(x, z) => g.ax * x + g.bx, (x, z) => g.az * z + g.bz, (x, z) => g.ax * x + g.bx - g.az * z - g.bz];
     for (let e = 0; e < 3; e++) {
@@ -346,7 +495,50 @@ export class Terrain {
   split(poly) {
     const g = this.near;
     const ku = (v) => g.ax * v[0] + g.bx, kv = (v) => g.az * v[2] + g.bz, kd = (v) => g.ax * v[0] + g.bx - (g.az * v[2] + g.bz);
-    return cutFamily(cutFamily(cutFamily([poly], ku, []), kv, []), kd, []);
+    const polys = cutFamily(cutFamily(cutFamily([poly], ku, []), kv, []), kd, []);
+    if (!this.cliffCells) return polys;
+    // 崖のあるマスの中の切れ端は、崖の線でも切り、どちらの段かの印（side）を付ける（MeshWriter がその段の高さで載せる）
+    const cc = this.cliffCells, out = [];
+    for (const p of polys) {
+      let cx = 0, cz = 0;
+      for (const v of p) {
+        cx += v[0];
+        cz += v[2];
+      }
+      cx /= p.length;
+      cz /= p.length;
+      const c = Math.floor(g.ax * cx + g.bx), r = Math.floor(g.az * cz + g.bz);
+      if (c < 0 || r < 0 || c >= g.cols - 1 || r >= g.rows - 1 || !cc[r * g.cols + c]) {
+        out.push(p);
+        continue;
+      }
+      let parts = [p];
+      let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+      for (const v of p) {
+        if (v[0] < x0) x0 = v[0];
+        if (v[0] > x1) x1 = v[0];
+        if (v[2] < z0) z0 = v[2];
+        if (v[2] > z1) z1 = v[2];
+      }
+      const seen = new Set();
+      this.cliffGrid.query(x0, z0, x1, z1, (i) => {
+        if (seen.has(i)) return;
+        seen.add(i);
+        const q = this.cliffSegs[i], next = [];
+        for (const part of parts) cutByLine(part, q.ax, q.az, q.bx - q.ax, q.bz - q.az, next);
+        parts = next;
+      });
+      for (const part of parts) {
+        let px = 0, pz = 0;
+        for (const v of part) {
+          px += v[0];
+          pz += v[2];
+        }
+        part.side = this.cliffSide(px / part.length, pz / part.length);
+        out.push(part);
+      }
+    }
+    return out;
   }
 }
 
@@ -454,7 +646,7 @@ const GRID_CODING = { near: [0.02, 100], far: [0.1, 0], level: [0.02, 100] };
 
 // data: { near, far, level（{ lat, lon, dLat, dLon, cols, rows, data: Float32Array（標高 m）} ）, bridges, report }
 export async function encodeTerrain(data) {
-  const header = { version: TERRAIN_VERSION, datum: DATUM, lattice: LATTICE, grids: {}, bridges: data.bridges || [], report: data.report || null };
+  const header = { version: TERRAIN_VERSION, datum: DATUM, lattice: LATTICE, grids: {}, bridges: data.bridges || [], quays: data.quays || null, report: data.report || null };
   const blobs = [];
   for (const name of ['near', 'far', 'level']) {
     const g = data[name];
@@ -486,7 +678,7 @@ export async function decodeTerrain(buf) {
   const hl = dv.getUint32(4, true);
   const header = JSON.parse(new TextDecoder().decode(bytes.subarray(8, 8 + hl)));
   if (header.version !== TERRAIN_VERSION) throw new Error(`地形のファイルの版が違います（${header.version}）`);
-  const out = { bridges: header.bridges || [], report: header.report };
+  const out = { bridges: header.bridges || [], quays: header.quays || null, report: header.report };
   let o = 8 + hl;
   for (const name of ['near', 'far', 'level']) {
     const m = header.grids[name];

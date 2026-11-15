@@ -18,6 +18,7 @@ import { PONT_NEUF_HALF, bridgeGroups, buildAbutments, buildBridges, conditionUn
 import { DRAPE_LIFT, FLAT_TERRAIN } from './terrain.js';
 import { buildFarTerrain, createTerrainMaterials, splitGeometry, TERRAIN_ORDER } from './terrainmesh.js';
 import { conditionRoads, despike, sharpenQuays, WALK_DEF } from './terraincond.js';
+import { fillManualHeights, flattenManualQuays, manualChains, manualLawns, nearManualQuay, quayChains, quaySegments } from './quays.js';
 import { buildMetroEntrances, chooseEntrances, createMetroMaterials, fillMetroPits, orientRamps, projectEntrances, writeEntranceMasks } from './metro.js';
 
 export const ORDER = {
@@ -752,6 +753,7 @@ function buildQuayWalls(list, mats, proj = null) {
     // 航空写真の緑を隠す。上の段の地面より 2 cm 下なので、平らな所では地面の下に隠れる）。板の先の縁は 3 m 下まで垂らす
     const cy = (y) => y - 0.02;
     const uax = ax - aex * ka, uaz = az - aez * ka, ubx = bx - bex * kb, ubz = bz - bez * kb;
+    if (ka + kb < 0.01) continue; // 焼き込んだ岸壁の線（地面が線の所で切れている）は板が要らない
     walk.quad([pax, cy(at), paz], [uax, cy(at), uaz], [ubx, cy(bt), ubz], [pbx, cy(bt), pbz], [0, 1, 0], [pax / 2.4, paz / 2.4], [uax / 2.4, uaz / 2.4], [ubx / 2.4, ubz / 2.4], [pbx / 2.4, pbz / 2.4], BANK.quayWalk);
     walk.quad([ubx, cy(bt) - 3, ubz], [uax, cy(at) - 3, uaz], [uax, cy(at), uaz], [ubx, cy(bt), ubz], [-nx, 0, -nz], [0, 0], [L / 2.4, 0], [L / 2.4, 1.25], [0, 1.25], BANK.quayWalk);
     if (q.fill) {
@@ -893,11 +895,34 @@ export function buildGroundBase(parsed, rect, mats, terrain = FLAT_TERRAIN, layo
     const bridgeWays = mounds.length ? parsed.roads.filter((r) => r.bridge && r.pts.length >= 2) : [];
     const underRaisedEnd = (x, z) => mounds.some((m) => Math.hypot(x - m.x, z - m.z) < 24)
       && bridgeWays.some((r) => r.pts.some((p, i) => i + 1 < r.pts.length && closestOnSegment(x, z, ...p, ...r.pts[i + 1]).d2 < (r.width / 2 + 3) ** 2));
-    const quays = sharpenQuays(T, parsed.proj ? parsed.proj.project(...QUAY_LATLON) : [-250, 0], QUAY_RADIUS + 150, { inWater, paths: parsed.roads })
-      .filter((q) => !onBrienne((q.ax + q.bx) / 2, (q.az + q.bz) / 2) && !inBasin0((q.ax + q.bx) / 2, (q.az + q.bz) / 2) && !underRaisedEnd((q.ax + q.bx) / 2, (q.az + q.bz) / 2));
-    const basin = parsed.proj ? lockBasinWalls(T, water, parsed.proj, inWater) : [];
-    const fixedQ = parsed.proj ? fixedQuayWalls(T, parsed.proj, inWater) : [];
-    T.setQuayWalls(parsed.proj ? quays.concat(quayLinks(quays, parsed.proj), basin, fixedQ) : quays);
+    if (T.quayLines && parsed.proj) {
+      // 事前取得で 0.5 m の地形モデルから見つけた岸壁の線（data/quaybake.js）: 地面を線の所で上の段と下の段に切り（terrain.js の
+      // setCliffs）、その線にまっすぐな壁を立てる。手で決めた岸壁（船だまり・Port Saint-Pierre）の近くとブリエンヌ運河の岸は除く
+      const basin = lockBasinWalls(T, water, parsed.proj, inWater);
+      const fixedQ = fixedQuayWalls(T, parsed.proj, inWater);
+      const manual = basin.concat(fixedQ);
+      // 写真で決めた岸壁（ドラード河岸）: まわりの地形を写真どおりに書き直し、地形モデルからなぞった線はそこでは使わない
+      const photo = manualChains(parsed.proj);
+      fillManualHeights(T, photo);
+      flattenManualQuays(T, photo, inWater, (k) => !(T.roadW && T.roadW[k] > 0.99));
+      const skip = (x, z) => onBrienne(x, z) || inBasin0(x, z) || nearManualQuay(photo, x, z) || manual.some((q) => closestOnSegment(x, z, q.ax, q.az, q.bx, q.bz).d2 < 100);
+      const segs = quaySegments(quayChains(T.quayLines, parsed.proj), parsed.roads, { skip }).concat(quaySegments(photo, parsed.roads));
+      T.setCliffs(segs);
+      if (!T.quayMask) T.quayMask = new Uint8Array(T.near.cols * T.near.rows);
+      for (const k of T.cliffLevels.keys()) T.quayMask[k] = 1; // despike が段の縁の点を「とげ」として戻さないように
+      // 壁の上端・下端は、切れた地面の両側の高さ（端へ向けてすぼむ）。壁の上の歩道の板は要らない（wa = wb = 0）
+      const cliffs = segs.map((q) => ({
+        ax: q.ax, az: q.az, bx: q.bx, bz: q.bz, nx: q.nx, nz: q.nz, wa: 0, wb: 0, cliff: true, wet: q.wet, stone: q.stone, setts: q.plain,
+        at: T.h(q.ax, q.az, -1), ab: T.h(q.ax, q.az, 1), bt: T.h(q.bx, q.bz, -1), bb: T.h(q.bx, q.bz, 1),
+      }));
+      T.setQuayWalls(cliffs.concat(manual));
+    } else {
+      const quays = sharpenQuays(T, parsed.proj ? parsed.proj.project(...QUAY_LATLON) : [-250, 0], QUAY_RADIUS + 150, { inWater, paths: parsed.roads })
+        .filter((q) => !onBrienne((q.ax + q.bx) / 2, (q.az + q.bz) / 2) && !inBasin0((q.ax + q.bx) / 2, (q.az + q.bz) / 2) && !underRaisedEnd((q.ax + q.bx) / 2, (q.az + q.bz) / 2));
+      const basin = parsed.proj ? lockBasinWalls(T, water, parsed.proj, inWater) : [];
+      const fixedQ = parsed.proj ? fixedQuayWalls(T, parsed.proj, inWater) : [];
+      T.setQuayWalls(parsed.proj ? quays.concat(quayLinks(quays, parsed.proj), basin, fixedQ) : quays);
+    }
     despike(T);
     conditionUnderpasses(T, parsed.roads, inWater); // 高架の下の擁壁の足元を道の高さに（bridges.js）
   }
@@ -1390,6 +1415,14 @@ function* groundDetailSteps(parsed, clip, mats, waterDepthAt, opts) {
     if (!overlaps(ringBounds(ring))) continue;
     const outer = clipRingToRect(ring, clip.minX, clip.minZ, clip.maxX, clip.maxZ);
     if (outer.length >= 3) writeFlatPolygon(W(ORDER.plaza, 'galets'), outer, [], 0, 2, pb.color);
+  }
+  // ---- 写真で決めた岸壁の足元の芝の帯（ドラード河岸。quays.js の MANUAL_QUAYS）
+  if (parsed.proj && terrain.quayLines) {
+    for (const ring of manualLawns(parsed.proj)) {
+      if (!overlaps(ringBounds(ring))) continue;
+      const outer = clipRingToRect(ring, clip.minX, clip.minZ, clip.maxX, clip.maxZ);
+      if (outer.length >= 3) writeFlatPolygon(W(ORDER.plaza + 0.2, 'grass'), outer, [], 0, 6, GREEN_COLOR.grass);
+    }
   }
   // ---- ポン・ヌフの両端の歩道（橋の花崗岩の歩道の続き）
   writePontNeufAprons(W(ORDER.sidewalk, 'granite'), W(ORDER.sidewalk + 0.1, 'granite'), pontNeufApproaches(parsed.roads), clip);

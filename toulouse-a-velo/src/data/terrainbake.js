@@ -6,7 +6,8 @@
 // 4. 遠くの格子（50 m、エリアの外 6 km まで。ペシュ・ダヴィッドやコート・パヴェの丘を遠景に見せる）
 // 5. 長い橋は表面モデル（MNS）の帯から橋面の縦断面を測る（車・街灯・木を除くため、横 3 本の線の中央値の最小と、外れ値の除去）
 import { LIDAR_LAYERS, fetchElevation } from './lidar.js';
-import { LATTICE } from '../world/terrain.js';
+import { LATTICE, QUAY_ZONE } from '../world/terrain.js';
+import { bakeQuays } from './quaybake.js';
 import { LocalProjection } from '../geo.js';
 import { bridgeGroups, deckHalf, polyFrame } from '../world/bridges.js';
 
@@ -246,7 +247,7 @@ async function bakeBridges(parsed, proj, onStatus, minLen = 30) {
 
 // bbox（緯度経度）の地形を作る。parsed/proj: そのエリアの地図（水域と橋）。step: 格子（m）、sub: 取得の細かさ（step/sub m）
 // withDsm: 橋の縦断面を測るか。戻り値は terrain.js の encodeTerrain / Terrain にそのまま渡せる
-export async function bakeTerrain({ bbox, parsed, proj, step = LATTICE.step, sub = 2, margin = 600, farRadius = 6000, withDsm = true, onStatus = () => {} }) {
+export async function bakeTerrain({ bbox, parsed, proj, step = LATTICE.step, sub = 2, margin = 600, farRadius = 6000, withDsm = true, withQuays = withDsm, onStatus = () => {} }) {
   const g = latticeFor(grow(bbox, margin), step);
   onStatus(`地形モデル ${g.cols} × ${g.rows}（${step} m）を取得中…`);
   const data = await fetchLattice(LIDAR_LAYERS.dtm, g, sub, (f) => onStatus(`地形モデル ${(f * 100).toFixed(0)} %`));
@@ -261,5 +262,14 @@ export async function bakeTerrain({ bbox, parsed, proj, step = LATTICE.step, sub
   const fg = latticeFor(grow(bbox, farRadius), 50);
   const far = { ...fg, data: await fetchLattice(LIDAR_LAYERS.dtm, fg, 1) };
   const bridges = withDsm ? await bakeBridges(parsed, proj, onStatus) : [];
-  return { near: { ...g, data }, far, level, bridges };
+  // 岸壁の線（0.5 m の地形モデルから。旧市街のまわりの川・運河）。失敗しても地形は使える（null → 格子から立て直す）
+  let quays = null;
+  if (withQuays) {
+    try {
+      quays = await bakeQuays({ bbox, centre: [QUAY_ZONE.lat, QUAY_ZONE.lon], radius: QUAY_ZONE.radius, parsed, proj, onStatus });
+    } catch (err) {
+      onStatus(`岸壁の線を作れませんでした: ${err.message}`);
+    }
+  }
+  return { near: { ...g, data }, far, level, bridges, quays };
 }
