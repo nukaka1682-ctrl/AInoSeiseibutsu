@@ -166,6 +166,8 @@ function slopeRange(b, plan) {
   return { minSlope: 0.18, maxSlope: 0.42, slope: 0.33, maxHeight: 4 };
 }
 
+const EXPOSED_MIN = 6; // 隣より上に出た壁を窓のある正面にする高さ（m、2 階分。1 階分の差は旧市街の家並みの窓のない境の壁のまま）
+
 function outwardSign(ring) {
   return signedArea(ring) > 0 ? 1 : -1;
 }
@@ -243,6 +245,9 @@ function writeWalls(W, ring, sign, b, plainColor, facade, covers = null) {
   const bayShift = Math.floor(hash01(b.id, 9) * 4);
   const sv = facadeStyle(b) * 1000; // v に様式の番号を入れる（facades.js）
   const curtain = facadeStyle(b) === STYLE.glass;
+  // 隣より 2 階分以上上に出た壁を窓のある正面にする建物（旧市街の外か、戦後・現代の様式の建物。旧市街の古い家並みの高い家の
+  // 横の壁は、窓のない境の壁のまま）
+  const exposedWindows = !b.oldTown || MODERN_STYLES.has(facadeStyle(b));
   const tint = facadeTint(b);
   const fc = facadeColor(b, y1);
   let along = 0;
@@ -274,6 +279,14 @@ function writeWalls(W, ring, sign, b, plainColor, facade, covers = null) {
           // ガラスのカーテンウォールの建物は、隣より上もガラス（窓のない壁にしない）
           const nb = L / BAY, e0 = (bayShift + 0.5 - nb / 2) / 4, u0 = e0 + t0 / BAY / 4, u1 = e0 + t1 / BAY / 4, v0 = (yc - y0) / floorH, v1 = (y1 - y0) / floorH;
           W.upper.quad(P(t0, yc), P(t1, yc), P(t1, y1), P(t0, y1), nrm, [u0, sv + v0], [u1, sv + v0], [u1, sv + v1], [u0, sv + v1], fc);
+          continue;
+        }
+        if (exposedWindows && L >= 1.6 && l >= 3 && !info.isChurch && !b.blank && info.kind !== 'roof' && y1 - yc >= EXPOSED_MIN && y1 - y0 >= 18) {
+          // 背の高い建物の、低い隣（別棟・低い店）より 2 階分以上上に出た所は窓のある正面（航空写真: Allées Charles de Fitte の
+          // 14 階の集合住宅の長い面が、隣の 16 m の棟より上をまるごと窓のない壁にされていた）。窓の段は 1 階の上からそろえる
+          const nb = L / BAY, e0 = (bayShift + 0.5 - nb / 2) / 4, u0 = e0 + t0 / BAY / 4, u1 = e0 + t1 / BAY / 4;
+          const gb = y0 < 0.5 ? y0 + groundH : y0, va = sv + (yc - gb) / floorH, vb = sv + (y1 - gb) / floorH;
+          W.upper.quad(P(t0, yc), P(t1, yc), P(t1, y1), P(t0, y1), nrm, [u0, va], [u1, va], [u1, vb], [u0, vb], fc);
           continue;
         }
         W.plain.quad(P(t0, yc), P(t1, yc), P(t1, y1), P(t0, y1), nrm, [t0 / 4, yc / 4], [t1 / 4, yc / 4], [t1 / 4, y1 / 4], [t0 / 4, y1 / 4], plainColor);

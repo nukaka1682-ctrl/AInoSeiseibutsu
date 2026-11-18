@@ -183,9 +183,14 @@ const MAP_PLAZA = remap({ [COVER.private]: COVER.public });
 const MAP_PLAZA_MINERAL = remap({ [COVER.private]: COVER.public, [COVER.lawn]: COVER.public, [COVER.trees]: COVER.public });
 const MAP_PAVED_PLAZA = remap({ [COVER.public]: PAVED, [COVER.private]: PAVED, [COVER.trees]: PAVED });
 const MAP_ALLEE = remap({ [COVER.public]: PAVED, [COVER.trees]: PAVED });
+const MAP_PHOTO_PLAZA = remap({ [COVER.public]: PAVED, [COVER.private]: PAVED, [COVER.trees]: PAVED, [COVER.lawn]: PAVED });
 const MAP_STREET = remap({ [COVER.trees]: COVER.public });
 
 // parsed（world/parse.js の結果）から、覆いに描き込む多角形と線を集める（parsed ごとに 1 回）
+// 写真で決める舗装の広場（地面の覆いの芝生・木の下・敷地の中を、舗石にする）。[緯度, 経度, 半径 m]。
+// アレーヌ（Wikimedia Commons「T1Arènes012014」「Station Arènes à Toulouse」と航空写真）: 半円の事務所の建物の中庭は、
+// メトロの駅へ下りる一段低い石の広場（植え込みの緑で芝生と見なされていた）
+const PHOTO_PLAZAS = [[43.59248, 1.41859, 16]];
 const stampCache = new WeakMap();
 export function coverStamps(parsed) {
   let s = stampCache.get(parsed);
@@ -198,6 +203,13 @@ export function coverStamps(parsed) {
   }
   for (const a of parsed.areas || []) {
     if (a.type === 'grass' || a.type === 'forest' || a.type === 'cemetery') s.push({ rings: [a.outer, ...(a.holes || [])], bounds: ringBounds(a.outer, 0), keepOut: true });
+  }
+  if (parsed.proj) {
+    for (const [lat, lon, r] of PHOTO_PLAZAS) {
+      const [x, z] = parsed.proj.project(lat, lon), ring = [];
+      for (let k = 0; k < 20; k++) ring.push([x + Math.cos((k / 20) * Math.PI * 2) * r, z + Math.sin((k / 20) * Math.PI * 2) * r]);
+      s.push({ rings: [ring], bounds: ringBounds(ring, 0), map: MAP_PHOTO_PLAZA, plaza: true });
+    }
   }
   for (const r of parsed.roads || []) {
     if (r.tunnel || r.bridge || !ALLEE_NAME.test(r.name || '')) continue;

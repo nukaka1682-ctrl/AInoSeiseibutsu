@@ -295,3 +295,38 @@ test('屋根: 大きな建物で IGN の屋根の高さがごく低いもの（�
   // 小さな町家は屋根が低くても瓦の傾斜屋根
   assert.deepEqual(await build(mk(3, { building: 'yes', height: '12', 'roof:height': '0.6' }, [[0, 0], [8, 0], [8, 15], [0, 15]])), { pitched: 1, flat: 0, fallback: 0 });
 });
+
+test('隣より 2 階分以上上に出た壁: 旧市街の外・現代の建物は窓のある正面、旧市街の古い家は窓のない境の壁', async () => {
+  const mk = (id, tags, outer, oldTown = false) => {
+    const b = { id, tags, outer, holes: [], bdHeight: 0, oldTown };
+    b.info = buildingInfo(b);
+    b.inside = [(outer[0][0] + outer[2][0]) / 2, (outer[0][1] + outer[2][1]) / 2];
+    b.bounds = { minX: Math.min(...outer.map((p) => p[0])), maxX: Math.max(...outer.map((p) => p[0])), minZ: Math.min(...outer.map((p) => p[1])), maxZ: Math.max(...outer.map((p) => p[1])) };
+    return b;
+  };
+  const mats = new Proxy({}, { get: (_, k) => ({ name: String(k) }) });
+  // 東の壁（x = 10）の、隣の高さ（9 m）より上に描いた面の材料ごとの面積
+  const eastAbove = async (tall, low) => {
+    const { group } = await buildBuildings({ buildings: [tall, low], parts: [] }, mats);
+    const area = {};
+    group.traverse((o) => {
+      const p = o.geometry?.attributes?.position;
+      if (!p || !o.material?.name) return;
+      for (let i = 0; i < p.count; i += 3) {
+        const xs = [p.getX(i), p.getX(i + 1), p.getX(i + 2)], ys = [p.getY(i), p.getY(i + 1), p.getY(i + 2)], zs = [p.getZ(i), p.getZ(i + 1), p.getZ(i + 2)];
+        if (!xs.every((x) => Math.abs(x - 10) < 0.01) || Math.min(...ys) < 8.95) continue;
+        const a = Math.abs((ys[1] - ys[0]) * (zs[2] - zs[0]) - (ys[2] - ys[0]) * (zs[1] - zs[0])) / 2;
+        area[o.material.name] = (area[o.material.name] || 0) + a;
+      }
+    });
+    return area;
+  };
+  const tower = (oldTown) => mk(1, { building: 'yes', height: '30', 'building:levels': '10' }, [[0, 0], [10, 0], [10, 20], [0, 20]], oldTown);
+  const annex = mk(2, { building: 'yes', height: '9', 'building:levels': '3' }, [[10.2, 0], [20, 0], [20, 20], [10.2, 20]]);
+  const modern = await eastAbove(tower(false), annex);
+  assert.ok((modern.upper || 0) > 150 && !(modern.plain > 1), JSON.stringify(modern));
+  // 旧市街の 6 階建ての古い家（20 m）と 3 階の隣: 上に出た所は窓のない境の壁
+  const house = mk(3, { building: 'yes', height: '20', 'building:levels': '6', 'building:material': 'brick' }, [[0, 0], [10, 0], [10, 20], [0, 20]], true);
+  const old = await eastAbove(house, annex);
+  assert.ok((old.plain || 0) > 100 && !(old.upper > 1), JSON.stringify(old));
+});
