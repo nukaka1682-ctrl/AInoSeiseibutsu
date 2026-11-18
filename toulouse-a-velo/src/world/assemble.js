@@ -125,7 +125,9 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   const surf = surfaceFns(terrain, liftAt);
   group.add(ground.group);
   for (const [x, z] of ground.posts) if (!roadnet.onRoad(x, z, 0.3)) collision.addCircle(x, z, POST_HIT); // 横断歩道の脇の車止め（小道の線の上は見た目だけ）
-  for (const q of terrain.quayWalls || []) collision.addSegment(q.ax, q.az, q.bx, q.bz); // 岸壁（垂直のレンガの壁）
+  // 岸壁（垂直のレンガの壁）。手すり壁のない壁（橋面の下の橋台）は当たり判定にしない（上の橋面を走る自転車を止めていた。
+  // 下からは崖の段で止まる）
+  for (const q of terrain.quayWalls || []) if (!q.noParapet) collision.addSegment(q.ax, q.az, q.bx, q.bz);
   for (const q of terrain.abutments || []) collision.addSegment(q.ax, q.az, q.bx, q.bz); // 高架の下の擁壁
   for (const e of terrain.metro || []) for (const s of entranceWalls(e)) collision.addSegment(...s); // メトロの出入口の吹き抜け
   group.add(buildEnclosures(walls, buildingMats, collision, terrain));

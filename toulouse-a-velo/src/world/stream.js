@@ -273,6 +273,7 @@ class TileStreamer {
     group.add(buildEnclosures(walls, this.materials, cw, T));
     for (const [x, z] of ground.posts) if (!this.roadnet.onRoad(x, z, 0.3)) cw.addCircle(x, z, POST_HIT); // 横断歩道の脇の車止め（小道の線の上は見た目だけ）
     for (const q of [...(T.quayWalls || []), ...(T.abutments || [])]) {
+      if (q.noParapet) continue; // 手すり壁のない壁（橋面の下の橋台）は当たり判定にしない（上の橋面を走る自転車を止めていた）
       const mx = (q.ax + q.bx) / 2, mz = (q.az + q.bz) / 2;
       if (mx >= B.minX && mx < B.maxX && mz >= B.minZ && mz < B.maxZ) cw.addSegment(q.ax, q.az, q.bx, q.bz); // 岸壁・高架の下の擁壁（タイルに中点が入る壁だけ）
     }
