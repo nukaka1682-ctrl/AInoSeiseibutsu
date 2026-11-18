@@ -392,12 +392,13 @@ export const MANUAL_QUAYS = [
   // 地面（標高 134.9 m）なので、道が斜路の上（140.5 m）から 5 m の穴へ落ちて、橋（142.4 m）へ登り直していた。
   // 道の両側（中心から 6.3 m。橋面の幅は約 13 m）に壁を立て、そのあいだを表面モデルの路面の高さまで埋める。
   // early: 道路をならす前（conditionRoads・raiseBridgeEnds の前）にも埋める（道の縦断面が穴をなぞらない・橋の端を盛り上げない）
-  // 東の壁は斜路の壁（地形モデルからなぞった線）の端から。橋のはじまり（43.601243）の 1 m 先で、橋台の壁（psp-bout）が両側の
-  // 壁をつなぐ: その先の橋の最初の径間の下は川沿いの地面（134.4 m）まで平らに（橋の端の盛り上げ raiseBridgeEnds はしない）
-  { id: 'psp-est', line: [[43.600838, 1.433902], [43.601225, 1.434195]], top: [140.5, 142.45], bottom: 134.9, front: 3, back: 12, raiseRoads: true, plain: true, early: true },
-  { id: 'psp-ouest', line: [[43.601277, 1.434057], [43.600892, 1.43378]], top: [142.45, 140.5], bottom: 134.9, front: 3, back: 12, raiseRoads: true, plain: true, early: true },
+  // 東の壁は斜路の壁（地形モデルからなぞった線）の端から。橋のはじまり（IGN 43.601243・OSM はその 2.7 m 先）の 4 m 先で、
+  // 橋台の壁（psp-bout）が両側の壁をつなぐ: その先の橋の最初の径間の下は川沿いの地面（134.4 m）まで平らに（橋の端の盛り上げ
+  // raiseBridgeEnds はしない）。壁が OSM の橋のはじまりより手前だと、橋面の端が下の地面に合わせて 2.4 m 下がっていた
+  { id: 'psp-est', line: [[43.600838, 1.433902], [43.601249, 1.434212]], top: [140.5, 142.55], bottom: 134.9, front: 3, back: 12, raiseRoads: true, plain: true, early: true },
+  { id: 'psp-ouest', line: [[43.601301, 1.434074], [43.600892, 1.43378]], top: [142.55, 140.5], bottom: 134.9, front: 3, back: 12, raiseRoads: true, plain: true, early: true },
   // parapet: false: 壁の上の手すり壁を立てない（橋台の壁は橋面の下。手すり壁が道をふさいでいた）
-  { id: 'psp-bout', line: [[43.601225, 1.434195], [43.601277, 1.434057]], top: [142.45, 142.45], bottom: 134.4, front: 10, back: 4, raiseRoads: true, plain: true, early: true, bridge: true, parapet: false },
+  { id: 'psp-bout', line: [[43.601249, 1.434212], [43.601301, 1.434074]], top: [142.55, 142.55], bottom: 134.4, front: 10, back: 6, raiseRoads: true, plain: true, early: true, bridge: true, parapet: false },
 ];
 
 // 手で決めた岸壁をローカル座標の折れ線にする（quayChains と同じ形。solid: 小道では切らない・端をすぼめない）
