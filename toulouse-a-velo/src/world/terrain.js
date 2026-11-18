@@ -23,7 +23,12 @@ export const QUAY_ZONE = { lat: 43.5994, lon: 1.4364, radius: 1400 };
 // Pont Saint-Pierre の左岸の取り付けは、両側を垂直の擁壁で囲んだ盛り土の道（橋の端で約 5 m、南西へ下って地面につながる）。
 // 5 m の格子ではなだらかな灰色の丘になっていた。壁は南西へ 0.5 m まで低くなって終わるので、円の中は 0.6 m のしきい値でなぞる
 // （円は斜路だけを囲む。広げると La Grave の中庭の段まで壁になる）
-export const EMBANKMENT_ZONES = [{ lat: 43.60052, lon: 1.43347, radius: 62, minDrop: 0.6, minLen: 16 }];
+// アレーヌ（航空写真・0.5 m の地形モデル）: 駅前の道は両側が垂直の擁壁の切り通し（深さ約 4 m）で、5 m の格子では草の
+// くぼみになり、縁の道が横に傾いていた（円は切り通しだけ。西の地下鉄の中庭は除く）
+export const EMBANKMENT_ZONES = [
+  { lat: 43.60052, lon: 1.43347, radius: 62, minDrop: 0.6, minLen: 16 },
+  { lat: 43.59360, lon: 1.41908, radius: 36, minDrop: 1.5, minLen: 16 },
+];
 const MAGIC = 0x54564154; // 'TAVT'
 
 // 緯度経度の格子 g を、エリアの投影 proj のローカル座標から引けるようにする（列 = ax·x + bx、行 = az·z + bz）

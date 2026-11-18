@@ -305,21 +305,23 @@ export async function bakeQuays({ bbox, centre, radius, parsed, proj, cell = 0.5
     }
   };
   await Promise.all([worker(), worker(), worker()]);
-  let lines = quayLines(H, cols, rows, { nw: [box.n, box.w], dLat, dLon, cell, wet, near, inZone });
-  // minDrop のある円: 低い擁壁（斜路の下の方で 0.5〜2 m に低くなる壁）も、円の中だけ低いしきい値でなぞり直す
+  // 円の外の点で始まる・終わる線はそのまま（円の縁で切らない）。中心から遠い線は捨てる
+  let lines = quayLines(H, cols, rows, { nw: [box.n, box.w], dLat, dLon, cell, wet, near, inZone })
+    .filter((l) => l.pts.some(([lat, lon]) => Math.hypot((lat - centre[0]) * ky, (lon - centre[1]) * kx) < radius));
+  // minDrop のある円: 低い擁壁（斜路の下の方で 0.5〜2 m に低くなる壁）・水辺から遠い切り通しの擁壁も、円の中だけ低いしきい値で
+  // なぞり直す（円ごとに地形モデルを取る。旧市街の円の外でもよい）
   for (const zn of zones) {
     if (!zn.minDrop) continue;
+    const zb = { s: zn.lat - zn.radius / ky, n: zn.lat + zn.radius / ky, w: zn.lon - zn.radius / kx, e: zn.lon + zn.radius / kx };
+    if (zb.n < bbox.s || zb.s > bbox.n || zb.e < bbox.w || zb.w > bbox.e) continue; // エリアの外
     const inside = ([lat, lon]) => Math.hypot((lat - zn.lat) * ky, (lon - zn.lon) * kx) < zn.radius;
-    const c0 = Math.max(0, Math.floor((zn.lon - zn.radius / kx - box.w) / dLon)), c1 = Math.min(cols, Math.ceil((zn.lon + zn.radius / kx - box.w) / dLon));
-    const r0 = Math.max(0, Math.floor((box.n - zn.lat - zn.radius / ky) / dLat)), r1 = Math.min(rows, Math.ceil((box.n - zn.lat + zn.radius / ky) / dLat));
-    if (c1 - c0 < 8 || r1 - r0 < 8) continue;
-    const sub = new Float32Array((c1 - c0) * (r1 - r0));
-    for (let r = r0; r < r1; r++) sub.set(H.subarray(r * cols + c0, r * cols + c1), (r - r0) * (c1 - c0));
-    const local = quayLines(sub, c1 - c0, r1 - r0, { nw: [box.n - r0 * dLat, box.w + c0 * dLon], dLat, dLon, cell, near: 0, minDrop: zn.minDrop, minLen: zn.minLen || 16, inZone: () => true });
+    const zc = Math.ceil((zb.e - zb.w) / dLon), zr = Math.ceil((zb.n - zb.s) / dLat);
+    const { data: ZH } = await fetchElevation(LIDAR_LAYERS.dtm, zb, zc, zr, { concurrency: 1 });
+    const local = quayLines(ZH, zc, zr, { nw: [zb.n, zb.w], dLat, dLon, cell, near: 0, minDrop: zn.minDrop, minLen: zn.minLen || 16, inZone: () => true });
     lines = clipLines(lines, (p) => !inside(p)).concat(clipLines(local, inside));
+    onStatus(`岸壁の線: 擁壁の円 ${zn.lat.toFixed(4)}, ${zn.lon.toFixed(4)}`);
   }
-  // 円の外の点で始まる・終わる線はそのまま（円の縁で切らない）。中心から遠い線は捨てる
-  return lines.filter((l) => l.pts.some(([lat, lon]) => Math.hypot((lat - centre[0]) * ky, (lon - centre[1]) * kx) < radius));
+  return lines;
 }
 
 // 線（[{ pts: [[緯度, 経度, …]…] }]）を、keep(点) が true の点の続く部分（2 点以上）に切り分ける

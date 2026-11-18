@@ -696,7 +696,8 @@ export function quayLinks(walls, proj) {
 const QUAY_PARAPET = 1.0; // 岸壁の上のレンガの手すり壁の高さ（m）
 // 石の岸壁（利用者の写真 NCM_0111・0112: ポン・ヌフの南の左岸、Cours Dillon の下の岸壁は、レンガでなく淡い灰色の
 // 切石の壁と手すり壁）。[緯度, 経度, 半径 m] の円の中の岸壁
-const STONE_QUAYS = [[43.598547, 1.437515, 55]];
+// アレーヌの駅前の切り通しの擁壁は淡いコンクリート（航空写真）
+const STONE_QUAYS = [[43.598547, 1.437515, 55], [43.59360, 1.41908, 40]];
 const STONE_QUAY = c3('#c6bca8', 1.16);
 function buildQuayWalls(list, mats, proj = null) {
   const stoneDiscs = proj ? STONE_QUAYS.map(([lat, lon, r]) => [...proj.project(lat, lon), r]) : [];
