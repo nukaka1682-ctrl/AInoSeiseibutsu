@@ -101,6 +101,10 @@ export const MONUMENTS = [
   // 回り、軒の深く張り出した赤茶の瓦の寄棟屋根。入口の上に小さな切妻。データの外形（商業施設の箱）の代わりに描く
   { id: 'marche-saint-cyprien', kind: 'halls', at: [[43.59755, 1.430203], [43.59787, 1.430189]], minArea: 120 },
   { id: 'dalbade', kind: 'gothic', lat: 43.597632, lon: 1.442584, r: 15, minArea: 1000, front: [43.59763, 1.44222] },
+  // レ・ザバトワール（サン・シプリアンの近現代美術館。旧屠畜場。写真: Wikimedia Commons「Les abattoirs - Musée d'art moderne de
+  // Toulouse」「Abattoirs de Toulouse 02」）: 東の広場に向いた正面はバシリカの形（高い身廊の切妻と大きな半円アーチの窓、低い両翼）。
+  // データの外形（63 × 31 m の箱）が 2 階建ての家の様式で描かれていたので、専用の形で描く。front: 正面の前の広場
+  { id: 'abattoirs', kind: 'hall', lat: 43.600879, lon: 1.429539, r: 15, minArea: 1200, front: [43.60115, 1.43020] },
   // カルム市場（Marché des Carmes。写真: Wikimedia Commons「Façade Carmes」「Carmes-panorama」）: 円い 1964 年の建物で、1 階が
   // ガラスの店先の市場、その上の 4 層が駐車場（コンクリートの床の帯と、金属の格子とガラスの外装）、屋上も駐車場（低い胸壁）。
   // データの外形（円い商業施設）がレンガの集合住宅の様式で描かれていたので、専用の形で描く
@@ -619,7 +623,7 @@ export function findMonuments(proj, { buildings = [], areas = [], facade = null,
         if (best) halls.push({ ...orientedBox(best.b.outer), bld: best.b }); // b は箱の半分の幅（orientedBox）なので建物は bld に
       }
       if (halls.length) out.push({ spec, kind: 'halls', halls, replaced: halls.map((h) => h.bld) });
-    } else if (spec.kind === 'gothic') {
+    } else if (spec.kind === 'gothic' || spec.kind === 'hall') {
       let best = null;
       for (const b of buildings) {
         const d = Math.hypot(b.inside[0] - x, b.inside[1] - z);
@@ -631,7 +635,7 @@ export function findMonuments(proj, { buildings = [], areas = [], facade = null,
       const [fx, fz] = proj.project(...spec.front);
       // e1: 正面（u = −a）から奥へ
       const e1 = (fx - ob.cx) * ob.e1[0] + (fz - ob.cz) * ob.e1[1] > 0 ? [-ob.e1[0], -ob.e1[1]] : ob.e1;
-      out.push({ spec, kind: 'gothic', cx: ob.cx, cz: ob.cz, e1, e2: [-e1[1], e1[0]], a: ob.a, b: ob.b, replaced: [best.b] });
+      out.push({ spec, kind: spec.kind, cx: ob.cx, cz: ob.cz, e1, e2: [-e1[1], e1[0]], a: ob.a, b: ob.b, replaced: [best.b] });
     } else if (spec.kind === 'market') {
       let best = null;
       for (const b of buildings) {
@@ -3170,6 +3174,137 @@ function writeGothic(m, W, groundAt) {
   cylinder(w, tx, tz, 0.5, 0.05, y0 + PT + TR + 3.3, y0 + PT + TR + 4.6, { seg: 8, color: STONE });
 }
 
+// ---- 正面がバシリカの形の大きな建物（レ・ザバトワール）。写真（Wikimedia Commons「Les abattoirs - Musée d'art moderne de Toulouse」）:
+// 真ん中の高い身廊（幅約 11.6 m、軒 10 m・棟 12.9 m）の瓦の切妻は、木の持ち送りで正面へ深く張り出す。妻の壁にレンガの大きな
+// 半円アーチ（径 9.6 m、起拱 6.2 m）の窓（2 本のレンガの方立てで 3 つ）、1 階は半円アーチの 3 つのガラスの扉。両側の低い翼
+// （軒 7.2 m）は、軒下の窓の帯（3 つずつ、レンガの柱の間）と 1 階の大きな盲アーチ、ほとんど平らな瓦の寄棟屋根。1 階から 3 m は
+// クリーム色の漆喰、上はレンガで、5.6 m の高さにレンガの帯。横の壁（写真「Abattoirs de Toulouse 02」）は、1 階にレンガの
+// アーチの窓、上に横長の窓。m: { cx, cz, e1（正面から奥へ）, e2, a（奥行きの半分）, b（幅の半分） }
+function writeHall(m, W, groundAt) {
+  const { cx, cz, e1, e2, a, b } = m, w = W.main;
+  const y0 = groundAt(cx - e1[0] * (a + 3), cz - e1[1] * (a + 3)) - 0.1; // 正面の広場の高さ
+  const BR = col('#d9876a'), BR_D = col('#bd6a50'), RENDER = col('#f3e3bd'), PLINTH = col('#d6d1c6'), TILE = col('#bf7052');
+  const DARK = col('#2b3036'), FRAME = col('#3c4146'), WOOD = col('#5e3f2b');
+  const P = (u, v, y) => [cx + e1[0] * u + e2[0] * v, y0 + y, cz + e1[1] * u + e2[1] * v];
+  const P2 = (u, v) => [cx + e1[0] * u + e2[0] * v, cz + e1[1] * u + e2[1] * v];
+  const N = (du, dv) => [e1[0] * du + e2[0] * dv, 0, e1[1] * du + e2[1] * dv];
+  const unit = (n) => {
+    const l = Math.hypot(...n) || 1;
+    return n.map((t) => t / l);
+  };
+  const side = (p, q2, ya, yb, n, c = BR) => wall(w, P2(...p), P2(...q2), y0 + ya, y0 + yb, n, CELL.brick, BRICK_CW, BRICK_CW, c);
+  const q = (A, B, C, D, n, c) => w.quad(A, B, C, D, n, PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, c);
+  const bx = (u0, u1, ya, yb, v0, v1, color) => box(w, P((u0 + u1) / 2, (v0 + v1) / 2, (ya + yb) / 2), [e1[0] * Math.abs(u1 - u0) / 2, 0, e1[1] * Math.abs(u1 - u0) / 2], [0, (yb - ya) / 2, 0], [e2[0] * Math.abs(v1 - v0) / 2, 0, e2[1] * Math.abs(v1 - v0) / 2], color);
+  const NV = Math.min(5.8, b * 0.38), HA = 7.2, HN = 10.0, HR = 12.9, BAND = 5.6, BASE = 3.0, YA = 8.1; // YA: 翼の屋根が身廊の壁に当たる高さ
+  // ---- 壁: 翼の外の横の壁、前後の壁（翼・身廊の妻）、翼の屋根より上の身廊の横の壁
+  for (const sg of [1, -1]) {
+    side([-a, sg * b], [a, sg * b], 0, HA, N(0, sg));
+    side([-a, sg * NV], [a, sg * NV], YA - 0.3, HN, N(0, sg));
+  }
+  for (const su of [-1, 1]) {
+    const u = su * a, n = N(su, 0);
+    side([u, -b], [u, -NV], 0, HA, n);
+    side([u, NV], [u, b], 0, HA, n);
+    side([u, -NV], [u, NV], 0, HN, n);
+    w.tri(P(u, -NV, HN), P(u, NV, HN), P(u, 0, HR), n, PLAIN_UV, PLAIN_UV, PLAIN_UV, BR);
+  }
+  // ---- 身廊の切妻屋根（正面へ 1.3 m・奥へ 0.6 m・横へ 0.9 m 張り出す）と、張り出しの下の板・縁の板・木の持ち送り
+  const uf = -a - 1.3, ub = a + 0.6, ve = NV + 0.9, ye = HN - 0.15, yr = HR + 0.15;
+  const roofY = (v) => yr - ((yr - ye) * Math.abs(v)) / ve;
+  for (const sg of [1, -1]) {
+    const n = unit([...N(0, sg * (yr - ye))].map((t, i) => (i === 1 ? ve : t)));
+    q(P(uf, 0, yr), P(ub, 0, yr), P(ub, sg * ve, ye), P(uf, sg * ve, ye), n, TILE);
+    q(P(uf, sg * ve, ye - 0.22), P(ub, sg * ve, ye - 0.22), P(ub, 0, yr - 0.22), P(uf, 0, yr - 0.22), n.map((t) => -t), WOOD); // 裏
+    q(P(uf, sg * ve, ye - 0.22), P(uf, 0, yr - 0.22), P(uf, 0, yr), P(uf, sg * ve, ye), N(-1, 0), WOOD); // 縁の板
+    q(P(ub, 0, yr - 0.22), P(ub, sg * ve, ye - 0.22), P(ub, sg * ve, ye), P(ub, 0, yr), N(1, 0), WOOD);
+    q(P(uf, sg * ve, ye - 0.22), P(ub, sg * ve, ye - 0.22), P(ub, sg * ve, ye), P(uf, sg * ve, ye), N(0, sg), WOOD);
+    // 持ち送り（妻の縁の下に 1.5 m おき、正面の壁から張り出しの先まで）
+    for (let v = 0.9; v < ve - 0.2; v += 1.5) {
+      const yv = roofY(v) - 0.22;
+      bx(uf + 0.15, -a, yv - 0.45, yv, sg * v - 0.11, sg * v + 0.11, WOOD);
+    }
+  }
+  // ---- 翼の屋根（ほとんど平らな瓦の寄棟。外と前後の 3 方に 0.8 m の軒、身廊の壁に当たる）
+  for (const sg of [1, -1]) {
+    const vo = sg * (b + 0.8), vi = sg * NV, ue0 = -a - 0.8, ue1 = a + 0.8, run = Math.abs(vo - vi), yo = HA - 0.1;
+    const top0 = ue0 + run, top1 = ue1 - run;
+    const n = unit([...N(0, sg * (YA - yo))].map((t, i) => (i === 1 ? run : t)));
+    q(P(ue0, vo, yo), P(ue1, vo, yo), P(top1, vi, YA), P(top0, vi, YA), n, TILE);
+    const nf = unit([...N(-(YA - yo), 0)].map((t, i) => (i === 1 ? run : t))), nb = unit([...N(YA - yo, 0)].map((t, i) => (i === 1 ? run : t)));
+    w.tri(P(ue0, vi, yo), P(ue0, vo, yo), P(top0, vi, YA), nf, PLAIN_UV, PLAIN_UV, PLAIN_UV, TILE);
+    w.tri(P(ue1, vo, yo), P(ue1, vi, yo), P(top1, vi, YA), nb, PLAIN_UV, PLAIN_UV, PLAIN_UV, TILE);
+    // 軒の裏（外の横と正面）
+    q(P(ue0, vo, yo - 0.18), P(ue1, vo, yo - 0.18), P(ue1, sg * b, yo - 0.18), P(ue0, sg * b, yo - 0.18), [0, -1, 0], WOOD);
+    q(P(ue0, vo, yo - 0.18), P(ue0, vi, yo - 0.18), P(-a, vi, yo - 0.18), P(-a, vo, yo - 0.18), [0, -1, 0], WOOD);
+    q(P(ue0, vo, yo - 0.18), P(ue1, vo, yo - 0.18), P(ue1, vo, yo), P(ue0, vo, yo), N(0, sg), WOOD);
+    q(P(ue0, vi, yo - 0.18), P(ue0, vo, yo - 0.18), P(ue0, vo, yo), P(ue0, vi, yo), N(-1, 0), WOOD);
+  }
+  // ---- 正面（u = −a）。F(v, y, d): 面より d m 手前の点
+  const uF = -a, nF = N(-1, 0), sF = [e2[0], e2[1]];
+  const F = (v, y, d = 0.02) => P(uF - d, v, y);
+  const rect = (v0, v1, ya, yb, d, color) => q(F(v0, ya, d), F(v1, ya, d), F(v1, yb, d), F(v0, yb, d), nF, color);
+  // アーチの形: 幅 wd、足元 yb から頂 yt まで（yt − yb は幅の半分以上）
+  const arch = (vc, wd, yt, yb, d, color) => vpoly(w, P2(uF - d, vc), sF, archShape(wd, yt - yb, y0 + yb, 12), nF, color);
+  // 腰の漆喰（3 m）と淡い石の台座、5.6 m のレンガの帯、身廊の両端の付け柱
+  rect(-b, b, 0, BASE, 0.03, RENDER);
+  rect(-b, b, 0, 0.45, 0.05, PLINTH);
+  bx(uF - 0.22, uF, BAND - 0.15, BAND + 0.2, -b, b, BR_D);
+  for (const sg of [1, -1]) bx(uF - 0.3, uF, BASE, HN, sg * NV - 0.35, sg * NV + 0.35, BR_D);
+  // 1 階の 3 つの扉: レンガのアーチの縁、ガラスの扉（暗い金属の枠、扉の上の欄間）
+  for (const vc of [-3.15, 0, 3.15]) {
+    arch(vc, 2.85, 4.95, BASE, 0.04, BR_D);
+    arch(vc, 2.25, 4.6, 0, 0.06, DARK);
+    rect(vc - 1.43, vc + 1.43, BASE - 0.02, BASE + 0.08, 0.05, RENDER); // 漆喰の上の縁
+    rect(vc - 1.12, vc + 1.12, 2.45, 2.6, 0.08, FRAME);
+    rect(vc - 0.05, vc + 0.05, 0, 2.45, 0.08, FRAME);
+    rect(vc - 1.12, vc - 1.0, 0, 3.4, 0.08, FRAME);
+    rect(vc + 1.0, vc + 1.12, 0, 3.4, 0.08, FRAME);
+  }
+  // 翼の 1 階の大きな盲アーチ（レンガの縁と、少し奥のレンガ）と、軒下の窓の帯（3 つずつ、あいだはレンガの柱）
+  for (const sg of [1, -1]) {
+    const vm = sg * (NV + (b - NV) / 2);
+    arch(vm, 3.9, 5.3, BASE, 0.05, BR_D);
+    arch(vm, 3.2, 4.95, BASE + 0.02, 0.07, BR);
+    for (let k = 0; k < 3; k++) {
+      const vc = sg * (NV + 1.6 + k * ((b - NV - 3.0) / 2));
+      rect(vc - 1.0, vc + 1.0, BAND + 0.3, HA - 0.25, 0.04, DARK);
+      rect(vc - 1.0, vc + 1.0, BAND + 1.1, BAND + 1.18, 0.06, FRAME);
+      for (const dv of [-0.33, 0.33]) rect(vc + dv - 0.03, vc + dv + 0.03, BAND + 0.3, HA - 0.25, 0.06, FRAME);
+    }
+  }
+  // 身廊の大きな半円アーチの窓: レンガのアーチの縁（張り出す）、暗いガラス、2 本のレンガの方立て、横の桟
+  const RA = 4.8, YS = 6.2;
+  arch(0, 2 * (RA + 0.6), YS + RA + 0.6, BAND + 0.2, 0.12, BR_D);
+  arch(0, 2 * RA, YS + RA, BAND + 0.2, 0.14, BR);
+  arch(0, 2 * RA - 0.4, YS + RA - 0.2, BAND + 0.35, 0.16, DARK);
+  for (const sg of [1, -1]) {
+    const vm = sg * 1.6, top = YS + Math.sqrt(Math.max(0, (RA - 0.2) ** 2 - (Math.abs(vm) + 0.5) ** 2));
+    bx(uF - 0.24, uF, BAND + 0.35, top, vm - 0.5, vm + 0.5, BR);
+    rect(sg * 2.1, sg * (RA - 0.2), 8.3, 8.38, 0.18, FRAME);
+    for (const dv of [3.0, 3.9]) {
+      const v = sg * dv, tv = YS + Math.sqrt(Math.max(0, (RA - 0.2) ** 2 - dv * dv));
+      rect(v - 0.03, v + 0.03, BAND + 0.35, tv, 0.18, FRAME);
+    }
+  }
+  rect(-1.1, 1.1, 8.3, 8.38, 0.18, FRAME);
+  // ---- 横の壁: 1 階のレンガのアーチの窓と、上の横長の窓（6.3 m おき）。後ろの妻にも小さなアーチの窓
+  for (const sg of [1, -1]) {
+    const nS = N(0, sg), sS = [e1[0], e1[1]];
+    const n2 = Math.max(2, Math.round((2 * a - 6) / 6.3));
+    for (let k = 0; k < n2; k++) {
+      const u = -a + 3 + ((2 * a - 6) * (k + 0.5)) / n2;
+      vpoly(w, P2(u, sg * (b + 0.04)), sS, archShape(3.0, 4.3, y0 + 0.4, 10), nS, BR_D);
+      vpoly(w, P2(u, sg * (b + 0.06)), sS, archShape(2.4, 3.95, y0 + 0.45, 10), nS, DARK);
+      const p0 = P2(u - 1.3, sg * (b + 0.05)), p1 = P2(u + 1.3, sg * (b + 0.05));
+      q([p0[0], y0 + BAND, p0[1]], [p1[0], y0 + BAND, p1[1]], [p1[0], y0 + HA - 0.5, p1[1]], [p0[0], y0 + HA - 0.5, p0[1]], nS, DARK);
+    }
+    bx(-a, a, 0, 0.45, sg * b - 0.05, sg * (b + 0.05), PLINTH);
+  }
+  const nB = N(1, 0), sB = [e2[0], e2[1]];
+  vpoly(w, P2(a + 0.05, 0), sB, archShape(4.6, 3.6, y0 + BAND + 0.6, 12), nB, DARK);
+  for (const vc of [-3.5, 3.5]) vpoly(w, P2(a + 0.05, vc), sB, archShape(2.2, 3.8, y0 + 0.45, 10), nB, DARK);
+}
+
 // ---- 市場と駐車場の円い建物（カルム市場）: 外形 outer、高さ height
 function writeMarket(m, W, groundAt) {
   const w = W.main, R0 = m.outer;
@@ -3668,7 +3803,7 @@ function writeBikeracks(m, W, groundAt, colliders) {
   colliders.push([a[0], a[1], b[0], b[1]]);
 }
 
-const WRITERS = { halls: writeHalls, gothic: writeGothic, market: writeMarket, barracks: writeBarracks, memorial: writeMemorial, bikeracks: writeBikeracks, shopstreet: writeShopstreet, trinite: writeTrinite, bollards: writeBollards, hgate: writeHospitalGate, lift: writeLift, pavilion: writePavilion, lock: writeLock, equestrian: writeEquestrian, wallFountain: writeWallFountain, capitainerie: writeCapitainerie, moorings: writeMoorings, riverfront: writeRiverfront, arcades: writeArcades, choir: writeChoir, ramblas: writeRamblas, basilica: writeBasilica, island: writeIsland, roundabout: writeRoundabout, portico: writePortico, donjon: writeDonjon, statue: writeStatue, dome: writeDome, chateau: writeChateau, stadium: writeStadium, cabanis: writeCabanis, coq: writeCoq, cross: writeCross, fastfood: writeFastfood, jgarden: writeJgarden, parterre: writeParterre };
+const WRITERS = { halls: writeHalls, gothic: writeGothic, hall: writeHall, market: writeMarket, barracks: writeBarracks, memorial: writeMemorial, bikeracks: writeBikeracks, shopstreet: writeShopstreet, trinite: writeTrinite, bollards: writeBollards, hgate: writeHospitalGate, lift: writeLift, pavilion: writePavilion, lock: writeLock, equestrian: writeEquestrian, wallFountain: writeWallFountain, capitainerie: writeCapitainerie, moorings: writeMoorings, riverfront: writeRiverfront, arcades: writeArcades, choir: writeChoir, ramblas: writeRamblas, basilica: writeBasilica, island: writeIsland, roundabout: writeRoundabout, portico: writePortico, donjon: writeDonjon, statue: writeStatue, dome: writeDome, chateau: writeChateau, stadium: writeStadium, cabanis: writeCabanis, coq: writeCoq, cross: writeCross, fastfood: writeFastfood, jgarden: writeJgarden, parterre: writeParterre };
 
 // 名所のモデルを作る。colliders: 足す当たり判定の円 [x, z, r] か線分 [ax, az, bx, bz]、
 // keepOut: 街の小物を置かない円 [x, z, r]（像の台・シャトー・ドーの柵の内側。monumentSolid）

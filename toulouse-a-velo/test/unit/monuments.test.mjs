@@ -317,7 +317,7 @@ test('自転車置き場: 線に沿って 1 m ごとの輪と自転車、当た�
   assert.ok(top > 0.75 && top < 1.1, `輪の高さ ${top}`);
 });
 
-test('写真から作った名所のモデル（市場のハレット・ダルバード・カルム市場・凱旋門・ニエル兵舎）が組み立てられる', async () => {
+test('写真から作った名所のモデル（市場のハレット・ダルバード・カルム市場・凱旋門・ニエル兵舎・レ・ザバトワール）が組み立てられる', async () => {
   const THREE = await import('three');
   const { MONUMENTS, buildMonuments, findMonuments } = await import('../../src/world/monuments.js');
   const { LocalProjection } = await import('../../src/geo.js');
@@ -332,13 +332,18 @@ test('写真から作った名所のモデル（市場のハレット・ダル�
     rect(43.597632, 1.442584, 50, 32, { isChurch: true, height: 28 }), // ダルバード
     rect(43.597639, 1.44481, 50, 45, { height: 20 }), // カルム市場
     rect(43.57744, 1.444198, 70, 14, { height: 13 }), // ニエル兵舎
+    rect(43.600879, 1.429539, 63, 31, { height: 11.8 }), // レ・ザバトワール
   ];
-  const ids = new Set(['marche-saint-cyprien', 'dalbade', 'marche-carmes', 'caserne-niel', 'monument-combattants']);
+  const ids = new Set(['marche-saint-cyprien', 'dalbade', 'marche-carmes', 'caserne-niel', 'monument-combattants', 'abattoirs']);
   const saved = MONUMENTS.splice(0, MONUMENTS.length, ...MONUMENTS.filter((m) => ids.has(m.id)));
   try {
     const list = findMonuments(proj, { buildings });
     const kinds = new Set(list.map((m) => m.kind));
-    for (const k of ['halls', 'gothic', 'market', 'barracks', 'memorial']) assert.ok(kinds.has(k), `${k} がない（${[...kinds].join(', ')}）`);
+    for (const k of ['halls', 'gothic', 'market', 'barracks', 'memorial', 'hall']) assert.ok(kinds.has(k), `${k} がない（${[...kinds].join(', ')}）`);
+    // レ・ザバトワールの正面は広場（東）の側: e1（正面から奥へ）は西向き
+    const hall = list.find((m) => m.kind === 'hall');
+    const [fx, fz] = proj.project(43.60115, 1.43020);
+    assert.ok((fx - hall.cx) * hall.e1[0] + (fz - hall.cz) * hall.e1[1] < 0, '正面は広場の側');
     const halls = list.find((m) => m.kind === 'halls');
     assert.equal(halls.halls.length, 2);
     assert.ok(halls.replaced.every((b) => b && b.outer));
