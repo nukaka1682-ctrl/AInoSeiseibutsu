@@ -358,7 +358,7 @@ class TileStreamer {
     const ms = performance.now() - t0;
     const roofs = built.stats.roofs;
     console.info(`タイル ${t.key}: 建物 ${buildings.length} 棟（傾斜屋根 ${roofs.pitched}・陸屋根 ${roofs.flat}・作れず陸屋根 ${roofs.fallback}）・三角形 ${tris}・小物 ${furniture.count}（車 ${furniture.stats.cars}・街灯 ${furniture.stats.lights + furniture.stats.discs}・車止め ${furniture.stats.bollards}）・組み立て ${ms.toFixed(0)} ms（建物の計算 ${built.stats.ms.toFixed(0)} ms、待ちを含め ${buildingMs.toFixed(0)} ms）`);
-    Object.assign(t, { group, cw, furniture, heightAt: ground.heightAt, buildings: buildings.length, trees: treePts.length, walls: walls.length, triangles: tris, buildMs: ms, state: 'ready' });
+    Object.assign(t, { group, cw, furniture, heightAt: ground.heightAt, buildingList: buildings, buildings: buildings.length, trees: treePts.length, walls: walls.length, triangles: tris, buildMs: ms, state: 'ready' });
     this.group.add(group);
     this.collision.add(cw);
     this.far?.setTile(t.i, t.j, true); // 遠くの地面はこのタイルの中を描かない

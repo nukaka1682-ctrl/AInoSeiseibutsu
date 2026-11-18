@@ -123,6 +123,7 @@ function roofColor(b, material) {
 // 灰色の陸屋根は、コンクリートの屋根・IGN が平らとする屋根・大きな工場や商業施設だけにする
 const BIG_FLAT_KINDS = /^(industrial|warehouse|retail|supermarket|parking|hangar|garages|greenhouse|service|office)$/;
 const POINTY = new Set(['pyramidal', 'dome', 'onion', 'cone', 'round']);
+const MODERN_STYLES = new Set([STYLE.residence, STYLE.whiteModern, STYLE.modern, STYLE.glass, STYLE.brickGrid]);
 export function roofPlan(b) {
   const info = b.info, t = b.tags;
   const mat = t['roof:material'];
@@ -141,6 +142,10 @@ export function roofPlan(b) {
     // 屋根の高さが分かっていれば傾斜屋根。情報がなければ、教会・小さな建物は傾斜屋根、大きな建物・工場・商業施設は陸屋根
     if (info.roofHeight > 0 || info.isChurch || (info.area < 2500 && !BIG_FLAT_KINDS.test(info.kind) && !(info.roofHeight === 0))) shape = 'pitched';
     else shape = 'flat';
+    // 背の高い戦後の集合住宅・現代の建物（ファサードが戦後・現代の様式になる建物）は陸屋根。IGN の屋根の高低差（0.7〜3.5 m）は
+    // 胸壁・階段室・機械室の分で、傾斜屋根ではない（航空写真: アレーヌの曲がった建物・半円の事務所、サン・シプリアンの高い
+    // 集合住宅の屋根は白や灰色の平らな屋根。寄棟の瓦・スレートの屋根が載っていた）。瓦の材料の分かる屋根は除く
+    if (shape === 'pitched' && !info.isChurch && !(mat && /tile|slate/.test(mat)) && !(info.roofHeight > 3.5) && MODERN_STYLES.has(facadeStyle(b))) shape = 'flat';
   } else {
     shape = 'pitched'; // gabled・hipped・half-hipped・mansard など
   }

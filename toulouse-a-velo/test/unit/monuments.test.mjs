@@ -316,3 +316,45 @@ test('自転車置き場: 線に沿って 1 m ごとの輪と自転車、当た�
   for (let i = 0; i < pos.count; i++) top = Math.max(top, pos.getY(i));
   assert.ok(top > 0.75 && top < 1.1, `輪の高さ ${top}`);
 });
+
+test('写真から作った名所のモデル（市場のハレット・ダルバード・カルム市場・凱旋門・ニエル兵舎）が組み立てられる', async () => {
+  const THREE = await import('three');
+  const { MONUMENTS, buildMonuments, findMonuments } = await import('../../src/world/monuments.js');
+  const { LocalProjection } = await import('../../src/geo.js');
+  const proj = new LocalProjection(43.5975, 1.44);
+  const rect = (lat, lon, w, d, extra = {}) => {
+    const [x, z] = proj.project(lat, lon);
+    const outer = [[x - w / 2, z - d / 2], [x + w / 2, z - d / 2], [x + w / 2, z + d / 2], [x - w / 2, z + d / 2]];
+    return { id: Math.round(lat * 1e5 + lon * 1e5), outer, holes: [], inside: [x, z], bounds: { minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2 }, tags: {}, info: { area: w * d, height: 12, ...extra } };
+  };
+  const buildings = [
+    rect(43.59755, 1.430203, 30, 12), rect(43.59787, 1.430189, 20, 11), // サン・シプリアンの市場
+    rect(43.597632, 1.442584, 50, 32, { isChurch: true, height: 28 }), // ダルバード
+    rect(43.597639, 1.44481, 50, 45, { height: 20 }), // カルム市場
+    rect(43.57744, 1.444198, 70, 14, { height: 13 }), // ニエル兵舎
+  ];
+  const ids = new Set(['marche-saint-cyprien', 'dalbade', 'marche-carmes', 'caserne-niel', 'monument-combattants']);
+  const saved = MONUMENTS.splice(0, MONUMENTS.length, ...MONUMENTS.filter((m) => ids.has(m.id)));
+  try {
+    const list = findMonuments(proj, { buildings });
+    const kinds = new Set(list.map((m) => m.kind));
+    for (const k of ['halls', 'gothic', 'market', 'barracks', 'memorial']) assert.ok(kinds.has(k), `${k} がない（${[...kinds].join(', ')}）`);
+    const halls = list.find((m) => m.kind === 'halls');
+    assert.equal(halls.halls.length, 2);
+    assert.ok(halls.replaced.every((b) => b && b.outer));
+    const mat = new THREE.MeshBasicMaterial();
+    const { group, colliders } = buildMonuments(list, { monument: mat, monumentMetal: mat, monumentInlay: mat }, { groundAt: () => 0 });
+    let tris = 0, bad = 0;
+    group.traverse((o) => {
+      const p = o.geometry?.attributes?.position;
+      if (!p) return;
+      tris += p.count / 3;
+      for (let i = 0; i < p.count; i++) if (!Number.isFinite(p.getX(i)) || !Number.isFinite(p.getY(i)) || !Number.isFinite(p.getZ(i))) bad++;
+    });
+    assert.ok(tris > 2000, `三角形 ${tris}`);
+    assert.equal(bad, 0, 'NaN の頂点');
+    assert.ok(colliders.length > 0);
+  } finally {
+    MONUMENTS.splice(0, MONUMENTS.length, ...saved);
+  }
+});
