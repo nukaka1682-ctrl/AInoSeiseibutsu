@@ -123,7 +123,7 @@ export function markBrickSites(proj, buildings, areas = []) {
   for (const s of BRICK_SITES) {
     const [x, z] = proj.project(s.lat, s.lon);
     for (const b of buildings) {
-      if (b.info.area > 150 && Math.hypot(b.inside[0] - x, b.inside[1] - z) < s.r) {
+      if (b.info.area > 150 && !b.fixed && Math.hypot(b.inside[0] - x, b.inside[1] - z) < s.r) {
         b.tags['building:material'] = 'brick';
         b.style = STYLE.brickStone;
         b.plainGround = true; // 1 階に店・馬車門を並べない（利用者の写真 211104: オテル・デューの 1 階は窓の並び）

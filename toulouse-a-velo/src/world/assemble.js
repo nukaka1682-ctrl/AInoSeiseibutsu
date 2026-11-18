@@ -156,7 +156,16 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   const clear = monumentClearance(monuments, proj);
   treePts = liftQuayTrees(treePts, terrain); // 岸壁の下の段の木は上の段へ
   const treeless = treelessTest(parsed.areas);
-  treePts = treePts.filter((p) => !clear(p.x ?? p[0], p.z ?? p[1]) && !treeless(p.x ?? p[0], p.z ?? p[1])); // 像・塔のまわり・木のない広場には植えない
+  // 建物の中（中庭は除く）に立つ木は植えない（屋根を幹が突き抜ける。LiDAR の木は取得したときの外形で建物の上を除いてあるが、
+  // 隣のタイルの建物・写真で決めた木・岸壁の上へ動かした木が建物にかかることがある）
+  const inBuildingSolid = (x, z) => {
+    let hit = false;
+    bGrid.queryPoint(x, z, 0, (i) => {
+      if (!hit && pointInPolygon(x, z, parsed.buildings[i])) hit = true;
+    });
+    return hit;
+  };
+  treePts = treePts.filter((p) => !clear(p.x ?? p[0], p.z ?? p[1]) && !treeless(p.x ?? p[0], p.z ?? p[1]) && !inBuildingSolid(p.x ?? p[0], p.z ?? p[1])); // 像・塔のまわり・木のない広場・建物の中には植えない
   const skip = new Set(monuments.flatMap((m) => m.replaced));
   const buildings = await buildBuildings(parsed, buildingMats, (p) => progress(`建物を建てています… ${Math.round(p * 100)}%`, 0.3 + p * 0.6), facade, { towers, groundAt: liftAt, skip, terrain });
   group.add(buildings.group);

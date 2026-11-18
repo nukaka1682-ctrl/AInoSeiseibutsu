@@ -4,7 +4,7 @@
 // - 地面の板と川はエリア全体で 1 つ。緑地・道路・線路・橋はタイルごとに切り分けて作る
 // - 当たり判定は、読み込んだタイルのものを合わせて使う
 import * as THREE from 'three';
-import { Grid, pointInRing } from '../geo.js';
+import { Grid, pointInPolygon, pointInRing } from '../geo.js';
 import { CAR_ROADS, parseOsm } from './parse.js';
 import { manualChains, nearManualQuay, quayChains, snapPathsToQuays } from './quays.js';
 let photoQuays = null;
@@ -297,6 +297,19 @@ class TileStreamer {
       };
     };
     const insideBuilding = insideOf(buildings);
+    // 建物の中（中庭は除く）か。木を植えない所（屋根を幹が突き抜ける。assemble.js と同じ）
+    const solidOf = (list) => {
+      const grid = new Grid(30);
+      list.forEach((b, k) => grid.insertBounds(b.bounds.minX, b.bounds.minZ, b.bounds.maxX, b.bounds.maxZ, k));
+      return (x, z) => {
+        let hit = false;
+        grid.queryPoint(x, z, 0, (k) => {
+          if (!hit && pointInPolygon(x, z, list[k])) hit = true;
+        });
+        return hit;
+      };
+    };
+    const inBuildingSolid = solidOf(buildings), inContextSolid = solidOf(context);
     const insideContext = insideOf(context); // 隣のタイルの、境の近くの建物
     const inB = (x, z) => x >= B.minX && x < B.maxX && z >= B.minZ && z < B.maxZ;
     let treePts;
@@ -315,7 +328,7 @@ class TileStreamer {
     const clear = monumentClearance(monuments, this.proj);
     treePts = liftQuayTrees(treePts, T); // 岸壁の下の段の木は上の段へ
     this.treeless ||= treelessTest(this.parsed.areas);
-    treePts = treePts.filter((p) => !clear(p.x ?? p[0], p.z ?? p[1]) && !this.treeless(p.x ?? p[0], p.z ?? p[1]) && !T.clearAt?.(p.x ?? p[0], p.z ?? p[1])); // 像・塔のまわり・木のない広場には植えない
+    treePts = treePts.filter((p) => !clear(p.x ?? p[0], p.z ?? p[1]) && !this.treeless(p.x ?? p[0], p.z ?? p[1]) && !T.clearAt?.(p.x ?? p[0], p.z ?? p[1]) && !inBuildingSolid(p.x ?? p[0], p.z ?? p[1]) && !inContextSolid(p.x ?? p[0], p.z ?? p[1])); // 像・塔のまわり・木のない広場には植えない
     // 街路・運河沿いはプラタナス。横に広い LiDAR の塊を分けた木は、道路・水・建物の上には置かない
     const trees = buildTrees(treePts, {
       isPlane: planeTreeTest(this.roadnet, this.inWater),

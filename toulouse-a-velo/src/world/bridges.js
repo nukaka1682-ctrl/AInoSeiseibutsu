@@ -364,7 +364,8 @@ export function archRise(a, depth, ring, ratio = 0.3) {
 // 本物は橋面のまま道へ続くので、地形より測った橋面を信じて、端のまわり（半径 inner m は橋面の高さ、outer m までで元の地面へ）
 // を盛り上げる。その後の conditionRoads が、続く道をこの高さからなだらかにつなぐ。
 // 対象: 測った縦断面があり、端が橋でない道につながり、端の地面が橋面より minDrop〜maxDrop m 低い橋。返り値: 上げた端の一覧
-export function raiseBridgeEnds(terrain, roads, proj, { minDrop = 1.5, maxDrop = 8.5, inner = 10, outer = 18 } = {}) {
+// skip(x, z): 盛り上げない橋の端（写真で決めた盛り土の取り付けの端。quays.js の early）
+export function raiseBridgeEnds(terrain, roads, proj, { minDrop = 1.5, maxDrop = 8.5, inner = 10, outer = 18, skip = null } = {}) {
   if (!terrain || terrain.flat || !terrain.near || !proj) return [];
   const g = terrain.near, D = g.data, DAT = terrain.datum;
   const land = new Grid(20);
@@ -383,7 +384,7 @@ export function raiseBridgeEnds(terrain, roads, proj, { minDrop = 1.5, maxDrop =
     if (!ys) continue;
     for (const [ll, y] of [[b.a, ys[0]], [b.b, ys[ys.length - 1]]]) {
       const p = proj.project(...ll), drop = y - terrain.h(p[0], p[1]);
-      if (!(drop > minDrop && drop < maxDrop) || !onLand(p)) continue;
+      if (!(drop > minDrop && drop < maxDrop) || !onLand(p) || (skip && skip(p[0], p[1]))) continue;
       const c0 = Math.max(0, Math.floor(g.ax * (p[0] - outer) + g.bx)), c1 = Math.min(g.cols - 1, Math.ceil(g.ax * (p[0] + outer) + g.bx));
       const r0 = Math.max(0, Math.floor(g.az * (p[1] - outer) + g.bz)), r1 = Math.min(g.rows - 1, Math.ceil(g.az * (p[1] + outer) + g.bz));
       for (let r = r0; r <= r1; r++) {

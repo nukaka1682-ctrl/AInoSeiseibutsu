@@ -218,7 +218,8 @@ function splitRuns(n, keep, minPts = 2) {
 // wet(lat, lon): 水の上か。near: 水辺からこの距離（m）までの線だけ。lowAbove: 下の段が水面（いちばん近い水の高さ）+ これ以下。
 // 壁の足元が水の中（水際から立つ護岸）の部分も残す（wet の印を付ける）。
 // 返り値: [{ pts: [[緯度, 経度, 上, 下, 水際か 0/1]…] }]（上の段を左に見る向き。高さは標高 m）
-export function quayLines(H, cols, rows, { nw, dLat, dLon, cell, wet = () => false, near = 90, minDrop = 2.2, minLen = 16, step = 4 }) {
+// inZone(lat, lon): 水辺から遠くても崖の線を残す所（橋の取り付けの、擁壁で囲んだ盛り土の道など。EMBANKMENT_ZONES）
+export function quayLines(H, cols, rows, { nw, dLat, dLon, cell, wet = () => false, near = 90, minDrop = 2.2, minLen = 16, step = 4, inZone = () => false }) {
   const lines = traceCliffs(H, cols, rows, cell, { minDrop, minLen: 4 });
   const ll = (x, y) => [nw[0] - y * dLat, nw[1] + x * dLon];
   const out = [];
@@ -244,7 +245,7 @@ export function quayLines(H, cols, rows, { nw, dLat, dLon, cell, wet = () => fal
           }
         }
       }
-      return { water, ok: water <= near && hs[i].top - hs[i].bottom >= minDrop * 0.8 };
+      return { water, ok: (water <= near || inZone(...ll(p[0], p[1]))) && hs[i].top - hs[i].bottom >= minDrop * 0.8 };
     });
     for (const [a, b] of splitRuns(dense.length, (i) => info[i].ok)) {
       let len = 0;
@@ -264,7 +265,9 @@ export function quayLines(H, cols, rows, { nw, dLat, dLon, cell, wet = () => fal
 
 // centre（[緯度, 経度]）から radius m の円と bbox の重なる範囲で、川・運河の水辺のまわりの地形モデル（cell m）を取得して
 // 岸壁の線を返す。parsed/proj: そのエリアの地図（水域）。tile m 四方ずつ取得し、水辺から遠い区画は取得しない
-export async function bakeQuays({ bbox, centre, radius, parsed, proj, cell = 0.5, tile = 400, near = 90, onStatus = () => {} }) {
+// zones: [{ lat, lon, radius, minDrop?, minLen? }] 水辺から遠くても崖の線（擁壁）を残す円（inZone）。minDrop のある円の中は、
+// そのしきい値（m）でなぞり直した線に置き換える（低くなっていく擁壁の先まで）
+export async function bakeQuays({ bbox, centre, radius, parsed, proj, cell = 0.5, tile = 400, near = 90, zones = [], onStatus = () => {} }) {
   const ky = 111320, kx = 111320 * Math.cos((centre[0] * Math.PI) / 180);
   const box = {
     s: Math.max(bbox.s, centre[0] - radius / ky), n: Math.min(bbox.n, centre[0] + radius / ky),
@@ -275,6 +278,7 @@ export async function bakeQuays({ bbox, centre, radius, parsed, proj, cell = 0.5
   if (!water.length) return [];
   const wetXZ = (x, z) => water.some((a) => x >= a.bounds.minX && x <= a.bounds.maxX && z >= a.bounds.minZ && z <= a.bounds.maxZ && pointInPolygon(x, z, a));
   const wet = (lat, lon) => wetXZ(...proj.project(lat, lon));
+  const inZone = (lat, lon) => zones.some((zn) => Math.hypot((lat - zn.lat) * ky, (lon - zn.lon) * kx) < zn.radius);
   const dLat = cell / ky, dLon = cell / kx;
   const cols = Math.ceil((box.e - box.w) / dLon), rows = Math.ceil((box.n - box.s) / dLat);
   const H = new Float32Array(cols * rows).fill(NaN);
@@ -285,7 +289,7 @@ export async function bakeQuays({ bbox, centre, radius, parsed, proj, cell = 0.5
       const r1 = Math.min(rows, r0 + tn), c1 = Math.min(cols, c0 + tn);
       let hit = false;
       const m = (near + 20) / cell, st = 10 / cell;
-      for (let r = r0 - m; r <= r1 + m && !hit; r += st) for (let c = c0 - m; c <= c1 + m && !hit; c += st) hit = wet(box.n - r * dLat, box.w + c * dLon);
+      for (let r = r0 - m; r <= r1 + m && !hit; r += st) for (let c = c0 - m; c <= c1 + m && !hit; c += st) hit = wet(box.n - r * dLat, box.w + c * dLon) || inZone(box.n - r * dLat, box.w + c * dLon);
       if (hit) tiles.push([r0, c0, r1, c1]);
     }
   }
@@ -301,7 +305,26 @@ export async function bakeQuays({ bbox, centre, radius, parsed, proj, cell = 0.5
     }
   };
   await Promise.all([worker(), worker(), worker()]);
-  const lines = quayLines(H, cols, rows, { nw: [box.n, box.w], dLat, dLon, cell, wet, near });
+  let lines = quayLines(H, cols, rows, { nw: [box.n, box.w], dLat, dLon, cell, wet, near, inZone });
+  // minDrop のある円: 低い擁壁（斜路の下の方で 0.5〜2 m に低くなる壁）も、円の中だけ低いしきい値でなぞり直す
+  for (const zn of zones) {
+    if (!zn.minDrop) continue;
+    const inside = ([lat, lon]) => Math.hypot((lat - zn.lat) * ky, (lon - zn.lon) * kx) < zn.radius;
+    const c0 = Math.max(0, Math.floor((zn.lon - zn.radius / kx - box.w) / dLon)), c1 = Math.min(cols, Math.ceil((zn.lon + zn.radius / kx - box.w) / dLon));
+    const r0 = Math.max(0, Math.floor((box.n - zn.lat - zn.radius / ky) / dLat)), r1 = Math.min(rows, Math.ceil((box.n - zn.lat + zn.radius / ky) / dLat));
+    if (c1 - c0 < 8 || r1 - r0 < 8) continue;
+    const sub = new Float32Array((c1 - c0) * (r1 - r0));
+    for (let r = r0; r < r1; r++) sub.set(H.subarray(r * cols + c0, r * cols + c1), (r - r0) * (c1 - c0));
+    const local = quayLines(sub, c1 - c0, r1 - r0, { nw: [box.n - r0 * dLat, box.w + c0 * dLon], dLat, dLon, cell, near: 0, minDrop: zn.minDrop, minLen: zn.minLen || 16, inZone: () => true });
+    lines = clipLines(lines, (p) => !inside(p)).concat(clipLines(local, inside));
+  }
   // 円の外の点で始まる・終わる線はそのまま（円の縁で切らない）。中心から遠い線は捨てる
   return lines.filter((l) => l.pts.some(([lat, lon]) => Math.hypot((lat - centre[0]) * ky, (lon - centre[1]) * kx) < radius));
+}
+
+// 線（[{ pts: [[緯度, 経度, …]…] }]）を、keep(点) が true の点の続く部分（2 点以上）に切り分ける
+export function clipLines(lines, keep) {
+  const out = [];
+  for (const l of lines) for (const [a, b] of splitRuns(l.pts.length, (i) => keep(l.pts[i]))) out.push({ ...l, pts: l.pts.slice(a, b + 1) });
+  return out;
 }

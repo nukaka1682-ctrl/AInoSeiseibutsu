@@ -19,6 +19,11 @@ export const TERRAIN_VERSION = 1;
 export const LATTICE = { lat: 43.5994, lon: 1.4395, step: 5 };
 // 岸壁の線を焼き込む範囲（旧市街のまわりのガロンヌ川・運河。data/quaybake.js、ground.js の QUAY_LATLON・QUAY_RADIUS + 150 と同じ円）
 export const QUAY_ZONE = { lat: 43.5994, lon: 1.4364, radius: 1400 };
+// 水辺から遠くても崖の線（擁壁）を焼き込む円。Rue du Pont Saint-Pierre（サン・シプリアン。航空写真と 0.5 m の地形モデル）:
+// Pont Saint-Pierre の左岸の取り付けは、両側を垂直の擁壁で囲んだ盛り土の道（橋の端で約 5 m、南西へ下って地面につながる）。
+// 5 m の格子ではなだらかな灰色の丘になっていた。壁は南西へ 0.5 m まで低くなって終わるので、円の中は 0.6 m のしきい値でなぞる
+// （円は斜路だけを囲む。広げると La Grave の中庭の段まで壁になる）
+export const EMBANKMENT_ZONES = [{ lat: 43.60052, lon: 1.43347, radius: 62, minDrop: 0.6, minLen: 16 }];
 const MAGIC = 0x54564154; // 'TAVT'
 
 // 緯度経度の格子 g を、エリアの投影 proj のローカル座標から引けるようにする（列 = ax·x + bx、行 = az·z + bz）

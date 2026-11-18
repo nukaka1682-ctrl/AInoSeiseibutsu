@@ -6,7 +6,7 @@
 // 4. 遠くの格子（50 m、エリアの外 6 km まで。ペシュ・ダヴィッドやコート・パヴェの丘を遠景に見せる）
 // 5. 長い橋は表面モデル（MNS）の帯から橋面の縦断面を測る（車・街灯・木を除くため、横 3 本の線の中央値の最小と、外れ値の除去）
 import { LIDAR_LAYERS, fetchElevation } from './lidar.js';
-import { LATTICE, QUAY_ZONE } from '../world/terrain.js';
+import { EMBANKMENT_ZONES, LATTICE, QUAY_ZONE } from '../world/terrain.js';
 import { bakeQuays } from './quaybake.js';
 import { LocalProjection } from '../geo.js';
 import { bridgeGroups, deckHalf, polyFrame } from '../world/bridges.js';
@@ -266,7 +266,7 @@ export async function bakeTerrain({ bbox, parsed, proj, step = LATTICE.step, sub
   let quays = null;
   if (withQuays) {
     try {
-      quays = await bakeQuays({ bbox, centre: [QUAY_ZONE.lat, QUAY_ZONE.lon], radius: QUAY_ZONE.radius, parsed, proj, onStatus });
+      quays = await bakeQuays({ bbox, centre: [QUAY_ZONE.lat, QUAY_ZONE.lon], radius: QUAY_ZONE.radius, zones: EMBANKMENT_ZONES, parsed, proj, onStatus });
     } catch (err) {
       onStatus(`岸壁の線を作れませんでした: ${err.message}`);
     }

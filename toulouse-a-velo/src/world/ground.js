@@ -740,12 +740,13 @@ function buildQuayWalls(list, mats, proj = null) {
     const am = Math.min(1.6, 1 / Math.max(0.3, aex * nx + aez * nz)), bm = Math.min(1.6, 1 / Math.max(0.3, bex * nx + bez * nz));
     const [anx, anz, bnx, bnz] = [aex * am, aez * am, bex * bm, bez * bm];
     // 壁の面は上の河岸の高さ + 胸壁（QUAY_PARAPET m）まで（写真: ドラード河岸・トゥニ河岸は上の歩道の縁にレンガの手すり壁）
-    const P = QUAY_PARAPET, ta = at + P, tb = bt + P;
+    // noParapet: 手すり壁なし（橋面の下の橋台の壁。壁の面は上の段の高さまで）
+    const P = q.noParapet ? 0 : QUAY_PARAPET, ta = at + P, tb = bt + P;
     w.quad([ax, h0, az], [bx, h0, bz], [bx, tb, bz], [ax, ta, az], [nx, 0, nz], [0, 0], [L * us, 0], [L * us, (hb + P) * vs], [0, (ha + P) * vs], brick);
     // 手すり壁の内側の面と上面（厚さ 0.45 m、レンガの笠）
     const T = 0.45, pax = ax - anx * T, paz = az - anz * T, pbx = bx - bnx * T, pbz = bz - bnz * T;
-    w.quad([pbx, bt, pbz], [pax, at, paz], [pax, ta, paz], [pbx, tb, pbz], [-nx, 0, -nz], [0, 0], [L * us, 0], [L * us, P * vs], [0, P * vs], brick);
-    w.quad([ax, ta, az], [pax, ta, paz], [pbx, tb, pbz], [bx, tb, bz], [0, 1, 0], [0, 0], [0, T * vs], [L * us, T * vs], [L * us, 0], brick.map((c) => c * (stone ? 0.95 : 0.85)));
+    if (P > 0) w.quad([pbx, bt, pbz], [pax, at, paz], [pax, ta, paz], [pbx, tb, pbz], [-nx, 0, -nz], [0, 0], [L * us, 0], [L * us, P * vs], [0, P * vs], brick);
+    if (P > 0) w.quad([ax, ta, az], [pax, ta, paz], [pbx, tb, pbz], [bx, tb, bz], [0, 1, 0], [0, 0], [0, T * vs], [L * us, T * vs], [L * us, 0], brick.map((c) => c * (stone ? 0.95 : 0.85)));
     // 足元の石積みの帯（遊歩道から 1.3 m。写真では淡い石の切石の土台の上にレンガが積まれている）。壁の面より 3 cm 手前
     const sa = Math.min(at, ab + 1.3), sb = Math.min(bt, bb + 1.3), ox = nx * 0.03, oz = nz * 0.03;
     if (!stone && sa > h0 + 0.5 && sb > h0 + 0.5) w.quad([ax + ox, h0, az + oz], [bx + ox, h0, bz + oz], [bx + ox, sb, bz + oz], [ax + ox, sa, az + oz], [nx, 0, nz], [0, 0], [L / 2, 0], [L / 2, (sb - h0) / 2], [0, (sa - h0) / 2], BANK.quayBase);
@@ -885,12 +886,24 @@ export function buildGroundBase(parsed, rect, mats, terrain = FLAT_TERRAIN, layo
     orientRamps(T.metro, parsed.roads);
     fillMetroPits(T, T.metro);
     T.metroAdjust?.(T.metro); // メトロのゲーム: 出入口の階段の深さを駅の改札階にそろえる
-    const mounds = raiseBridgeEnds(T, parsed.roads, parsed.proj); // 橋の端の地面を測った橋面の高さに（bridges.js。地形より橋面を信じる）
-    conditionRoads(T, parsed.roads, inWater);
+    // 写真で決めた盛り土（early。Pont Saint-Pierre の取り付けの高架）: 道路をならす前に埋める（道の縦断面が地形モデルの穴を
+    // なぞらない・橋の端を盛り上げない）。壁の段は下の setCliffs の前にもう一度書き直す
+    const early = T.quayLines && parsed.proj ? manualChains(parsed.proj).filter((c) => c.spec.early) : [];
+    if (early.length) flattenManualQuays(T, early, inWater);
+    // 橋の端の地面を測った橋面の高さに（bridges.js。地形より橋面を信じる）。写真で決めた盛り土の端は除く
+    const mounds = raiseBridgeEnds(T, parsed.roads, parsed.proj, { skip: early.length ? (x, z) => nearManualQuay(early, x, z) : null });
     // ブリエンヌ運河の岸は草の土手（利用者の写真 NCM_0186）。地形の段を岸壁にしない
     const brienne = parsed.proj ? BRIENNE.line.map((ll) => parsed.proj.project(...ll)) : [];
     const inBasin0 = parsed.proj ? lockBasinTest(parsed.proj) : () => false; // 船だまりの岸壁は lockBasinWalls
     const onBrienne = (x, z) => brienne.some((p, i) => i + 1 < brienne.length && closestOnSegment(x, z, ...p, ...brienne[i + 1]).d2 < 25 * 25);
+    // 焼き込んだ岸壁・擁壁の線（下の setCliffs と同じ線。道が横切る所は切れている）を越えて、道の高さを地面に広げない
+    let barrier = [];
+    if (T.quayLines && parsed.proj) {
+      const photo0 = manualChains(parsed.proj);
+      barrier = quaySegments(quayChains(T.quayLines, parsed.proj), parsed.roads, { skip: (x, z) => onBrienne(x, z) || inBasin0(x, z) || nearManualQuay(photo0, x, z) })
+        .concat(quaySegments(photo0, parsed.roads));
+    }
+    conditionRoads(T, parsed.roads, inWater, { barrier });
     // 盛り上げた橋の端（raiseBridgeEnds）の縁を岸壁にしたもののうち、橋の下を横切る壁は作らない（橋の上の当たり判定になる）
     const bridgeWays = mounds.length ? parsed.roads.filter((r) => r.bridge && r.pts.length >= 2) : [];
     const underRaisedEnd = (x, z) => mounds.some((m) => Math.hypot(x - m.x, z - m.z) < 24)
@@ -912,7 +925,7 @@ export function buildGroundBase(parsed, rect, mats, terrain = FLAT_TERRAIN, layo
       for (const k of T.cliffLevels.keys()) T.quayMask[k] = 1; // despike が段の縁の点を「とげ」として戻さないように
       // 壁の上端・下端は、切れた地面の両側の高さ（端へ向けてすぼむ）。壁の上の歩道の板は要らない（wa = wb = 0）
       const cliffs = segs.map((q) => ({
-        ax: q.ax, az: q.az, bx: q.bx, bz: q.bz, nx: q.nx, nz: q.nz, wa: 0, wb: 0, cliff: true, wet: q.wet, stone: q.stone, setts: q.plain,
+        ax: q.ax, az: q.az, bx: q.bx, bz: q.bz, nx: q.nx, nz: q.nz, wa: 0, wb: 0, cliff: true, wet: q.wet, stone: q.stone, setts: q.plain, noParapet: q.noParapet,
         at: T.h(q.ax, q.az, -1), ab: T.h(q.ax, q.az, 1), bt: T.h(q.bx, q.bz, -1), bb: T.h(q.bx, q.bz, 1),
       }));
       T.setQuayWalls(cliffs.concat(manual));
