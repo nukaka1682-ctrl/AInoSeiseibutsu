@@ -271,8 +271,24 @@ function contextOf(parsed, plan) {
 // inOldTown: 旧市街の小物にする所か（右岸の歴史的な中心。config.js の historicCoreTest）。
 // heightAt: 一段高い歩道の高さ、onRoad(x, z, margin): 道路の上か、solid(x, z): 建物・水の中か、trunks: 木の幹 [x, z]。
 // 戻り値: 種類ごとの { x, y, z, a（向き）, sx, sy（大きさ）, color } の列と、当たり判定（colliders）
-export function planFurniture({ parsed, plan, clip, curbs = [], inOldTown = () => false, heightAt = () => 0, onRoad = () => false, solid = () => false, trunks = [] }) {
+// terrain: 地形（あれば、車の 4 隅の地面の高さが CAR_TILT m より違う所には車を置かない。Cours Dillon の駐車場の、擁壁の裏の
+// 土手の斜面に置いた車が横に傾いて半分埋まっていた）
+const CAR_TILT = 0.5;
+export function planFurniture({ parsed, plan, clip, curbs = [], inOldTown = () => false, heightAt = () => 0, onRoad = () => false, solid = () => false, trunks = [], terrain = null }) {
   const ctx = contextOf(parsed, plan);
+  const T = terrain && !terrain.flat ? terrain : null;
+  // 車（中心 x, z、前後の向き ux, uz、長さの半分 hl）の下の地面が平らか
+  const flatUnder = (x, z, ux, uz, hl) => {
+    if (!T) return true;
+    const nx = -uz * (CAR_W / 2), nz = ux * (CAR_W / 2);
+    let lo = Infinity, hi = -Infinity;
+    for (const [u, v] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+      const y = T.h(x + ux * hl * u + nx * v, z + uz * hl * u + nz * v);
+      lo = Math.min(lo, y);
+      hi = Math.max(hi, y);
+    }
+    return hi - lo <= CAR_TILT;
+  };
   const out = { lights: [], discs: [], candelabra: [], bollards: [], blocks: [], planters: [], cars: [], bins: [], containers: [], terraces: [], shelters: [], columns: [], colliders: [] };
   const inClip = (x, z) => x >= clip.minX && x < clip.maxX && z >= clip.minZ && z < clip.maxZ;
   // バス・自転車レーンの帯（markings.js の断面）にかかる車は、どこから置いた車でも置かない（縁石の列は隣の区間の車道・
@@ -402,7 +418,7 @@ export function planFurniture({ parsed, plan, clip, curbs = [], inOldTown = () =
             roll = Math.atan2(hs, 1.55) * (sideR ? -1 : 1);
             for (const t of [-1, 0, 1]) take(ix + hx * t * 0.8, iz + hz * t * 0.8, 0.5);
           }
-          if (solid(x, z)) continue; // 名所のまわりの置かない範囲（monuments.js の keepOut。サン・シプリアンの島のまわりの車道）
+          if (solid(x, z) || !flatUnder(x, z, p.ux, p.uz, (CAR_L / 2) * sl)) continue; // 名所のまわりの置かない範囲（monuments.js の keepOut。サン・シプリアンの島のまわりの車道）・斜面
           out.cars.push({ x, z, y, a: yaw(p.ux * fwd, p.uz * fwd), roll, sx: sl, sy: 0.94 + hash01(h, 66) * 0.16, color: carColor(hash01(h, 67)) });
           boxC(x, z, p.ux, p.uz, (CAR_L / 2) * sl, CAR_W / 2);
         }
@@ -602,6 +618,7 @@ export function planFurniture({ parsed, plan, clip, curbs = [], inOldTown = () =
       if (ends.some(([x, z]) => onRoad(x, z, 0.3) || solid(x, z)) || near(st.x, st.z, 1.4) || onLane(st.x, st.z)) continue;
       const nx = -st.uz * CAR_W / 2, nz = st.ux * CAR_W / 2;
       if ([[1, 1], [1, -1], [-1, 1], [-1, -1]].some(([u, v]) => heightAt(st.x + hx * u + nx * v, st.z + hz * u + nz * v) > 0.02)) continue;
+      if (!flatUnder(st.x, st.z, st.ux, st.uz, CAR_L / 2)) continue;
       const sl = 0.93 + hash01(h, 82) * 0.12;
       out.cars.push({ x: st.x, z: st.z, y: 0, a: yaw(st.ux, st.uz), sx: sl, sy: 0.94 + hash01(h, 83) * 0.16, color: carColor(hash01(h, 84)) });
       boxC(st.x, st.z, st.ux, st.uz, (CAR_L / 2) * sl, CAR_W / 2);

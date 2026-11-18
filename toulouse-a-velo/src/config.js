@@ -64,6 +64,15 @@ export function greySquareTest(proj) {
   return (x, z) => discs.some(([cx, cz, r]) => (x - cx) ** 2 + (z - cz) ** 2 < r * r);
 }
 
+// 岸壁の下の段を石の板の河岸にする円（ドラード・ポン・ヌフ・トゥニ・Cours Dillon・Port Saint-Pierre の旧市街の河岸。
+// 利用者の写真 NCM_0136・0137）。外の岸壁（バザクルの北・川上）の下は、地面の覆いのまま（木の茂る土手・草地）。
+// 航空写真: Pont des Catalans の南西の左岸（Ramier du Bazacle）は、高い擁壁の下が木の茂る斜面なのに石の広場になっていた
+export const PAVED_QUAYS = [43.5994, 1.4385, 700];
+export function pavedQuayTest(proj) {
+  const [cx, cz] = proj.project(PAVED_QUAYS[0], PAVED_QUAYS[1]), r = PAVED_QUAYS[2];
+  return (x, z) => (x - cx) ** 2 + (z - cz) ** 2 < r * r;
+}
+
 // ガロンヌ川の流れの真ん中の線 [緯度, 経度]（南から北へ。地図データの水面の両岸の真ん中から）。旧市街のうち
 // この線より東（右岸）が歴史的な中心。左岸のサン・シプリアン（Place Olivier・Château d'eau の角）は街の小物を
 // 旧市街の外と同じにする（ユーザーの写真のメモ 1・5・7: 灰色の横向きの灯具の街灯、路上駐車の車、ごみ収集容器）
