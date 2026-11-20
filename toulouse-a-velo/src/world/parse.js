@@ -120,6 +120,18 @@ export const BUILDING_SPLITS = [
   { at: [43.60105, 1.43380], box: [43.6008, 1.43352, 43.6014, 1.43415], tags: { building: 'yes', height: '5.5', 'roof:shape': 'hipped', 'roof:height': '1.5', 'roof:material': 'roof_tiles', 'building:material': 'brick' } },
 ];
 
+// 屋根だけの構造物にする所（IGN では壁のある建物）: 円 [緯度, 経度, 半径 m] の中の、高さ maxHeight m 以下の陸屋根の建物を
+// building=roof（柱の上の屋根。自転車はくぐれる）に。アレーヌのバスターミナル（写真 Commons「Gare routière des Arènes 1〜3」）:
+// バスの乗り場の上は暗い灰色の鉄の骨組みののこぎり屋根の上屋で、壁のない吹き放し。窓と扉のあるピンクの家になっていた
+export const CANOPY_ZONES = [{ at: [43.59362, 1.41845], r: 40, maxHeight: 4.6 }];
+export function canopyTags(tags, lat, lon) {
+  if (!tags?.building || tags['roof:shape'] !== 'flat' || !(parseLength(tags.height) > 0)) return null;
+  for (const z of CANOPY_ZONES) {
+    if (Math.hypot((lat - z.at[0]) * 111320, (lon - z.at[1]) * 80600) < z.r && parseLength(tags.height) <= z.maxHeight) return { ...tags, building: 'roof', 'roof:colour': '#4a4d50' };
+  }
+  return null;
+}
+
 // 建物 b（{ outer, holes }。ローカル座標）を、ローカル座標の箱 [x0, z0, x1, z1] の中と外に分ける。返り値: { inside, outside }
 // （それぞれ [{ outer, holes }…]。輪は閉じない）
 export function splitByBox(b, [x0, z0, x1, z1]) {
@@ -397,6 +409,7 @@ export function parseOsm(osm, proj, rect, bdtopo = []) {
     const b = { id: p.id, tags: t, outer, holes: p.holes.map((h) => simplifyRing(h, 0.2)).filter((h) => h.length >= 3), isPart };
     b.bounds = ringBounds(outer);
     b.inside = interiorPoint(outer);
+    if (isBuilding && !isPart) b.tags = canopyTags(t, ...proj.unproject(...b.inside)) || t; // 屋根だけの上屋（CANOPY_ZONES）
     (isPart ? parts : buildings).push(b);
   }
 

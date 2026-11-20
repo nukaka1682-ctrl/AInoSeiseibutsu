@@ -444,3 +444,17 @@ test('公園の中の高さのない建物は 1 階建て（高さ・階数の�
   assert.equal(tall.tags['building:levels'], undefined);
   assert.equal(outside.tags['building:levels'], undefined);
 });
+
+test('屋根だけの上屋にする所（アレーヌのバスターミナル）: 円の中の低い陸屋根の建物だけ building=roof に', async () => {
+  const { canopyTags, buildingInfo } = await import('../../src/world/parse.js');
+  const t = { building: 'yes', height: '4.1', 'roof:shape': 'flat' };
+  const c = canopyTags(t, 43.593668, 1.418429);
+  assert.equal(c.building, 'roof');
+  const sq = [[0, 0], [10, 0], [10, 10], [0, 10]];
+  const info = buildingInfo({ id: 1, tags: c, outer: sq, holes: [] });
+  assert.equal(info.collide, false); // 自転車はくぐれる
+  assert.ok(info.minHeight >= 2.6);
+  assert.equal(canopyTags({ ...t, 'roof:shape': undefined }, 43.593668, 1.418429), null, '陸屋根でない売店');
+  assert.equal(canopyTags({ ...t, height: '9' }, 43.593668, 1.418429), null, '高い建物');
+  assert.equal(canopyTags(t, 43.6, 1.44), null, '円の外');
+});

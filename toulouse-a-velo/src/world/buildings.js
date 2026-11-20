@@ -235,11 +235,35 @@ function coverIntervals(L, covers) {
 const STONE_CHOIR = [0.7, 0.65, 0.59]; // 石の内陣の壁（風雨にさらされた灰色がかったベージュの石灰岩 #b3a696）
 
 // covers: 辺ごとの、隣の建物に接している区間（makePartyIndex の結果）
+// 屋根だけの構造物（building=roof。バスターミナルの上屋など）の柱: 外形の角と、辺に沿って POST_STEP m ごとに、地面から屋根の下まで
+const POST_STEP = 6, POST_W = 0.12;
+function writePosts(W, ring, y0, color) {
+  const n = ring.length;
+  for (let i = 0; i < n; i++) {
+    const a = ring[i], c = ring[(i + 1) % n], L = Math.hypot(c[0] - a[0], c[1] - a[1]);
+    if (L < 0.05) continue;
+    const k = Math.max(1, Math.round(L / POST_STEP));
+    for (let j = 0; j < k; j++) {
+      const x = a[0] + ((c[0] - a[0]) * j) / k, z = a[1] + ((c[1] - a[1]) * j) / k, w = POST_W;
+      const V = [[x - w, z - w], [x + w, z - w], [x + w, z + w], [x - w, z + w]];
+      for (let m = 0; m < 4; m++) {
+        const p = V[m], q = V[(m + 1) % 4], nx = q[1] - p[1], nz = -(q[0] - p[0]), nl = Math.hypot(nx, nz) || 1;
+        W.plain.quad([p[0], 0, p[1]], [q[0], 0, q[1]], [q[0], y0, q[1]], [p[0], y0, p[1]], [nx / nl, 0, nz / nl], [0, 0], [0.1, 0], [0.1, 0.1], [0, 0.1], color);
+      }
+    }
+  }
+}
+
 function writeWalls(W, ring, sign, b, plainColor, facade, covers = null) {
   const info = b.info;
   const y0 = info.minHeight;
   const y1 = info.height;
   if (y1 - y0 < 0.3) return;
+  if (info.kind === 'roof') {
+    // 上屋の縁と柱は屋根の色（暗い灰色の鉄。CANOPY_ZONES）。色の指定がなければ壁の色
+    plainColor = colorFromTag(b.tags['roof:colour']) || plainColor;
+    if (y0 > 1.5) writePosts(W, ring, y0, plainColor);
+  }
   const floorH = info.floorHeight;
   const groundH = Math.max(3.4, floorH * 1.15);
   const bayShift = Math.floor(hash01(b.id, 9) * 4);
@@ -686,8 +710,9 @@ export async function buildBuildings(parsed, materials, onProgress, facade = nul
     writeWalls(W, rings[0], outwardSign(rings[0]), b, color, facade, covers[0]);
     for (let k = 1; k < rings.length; k++) writeWalls(W, rings[k], -outwardSign(rings[k]), b, color, null, covers[k]); // 中庭の壁は内向き
     if (b.info.minHeight > 0.5) {
-      // 浮いているパーツ（張り出しなど）の底面
-      writeFlatPolygon(W.plain, rings[0], rings.slice(1), b.info.minHeight, 4, color, false);
+      // 浮いているパーツ（張り出しなど）の底面。上屋（building=roof）の裏は屋根の色（暗い灰色の鉄の骨組み）
+      const under = b.info.kind === 'roof' ? colorFromTag(b.tags['roof:colour'])?.map((c) => c * 0.8) || color : color;
+      writeFlatPolygon(W.plain, rings[0], rings.slice(1), b.info.minHeight, 4, under, false);
     }
     stats.roofs[writeRoof(W, rings, b, color, covers, plan)]++;
     if (T) setBase(W, 0);
