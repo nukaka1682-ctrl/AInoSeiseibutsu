@@ -197,7 +197,7 @@ export const LANDMARKS = [
     id: 'wilson',
     name: 'Place Wilson',
     ja: 'ウィルソン広場',
-    lat: 43.60490, lon: 1.44860,
+    lat: 43.60485, lon: 1.44738, // 庭の噴水（航空写真。前は 90 m 東の Allées Roosevelt の上だった）
     match: /^(Place (du Président Thomas (Woodrow )?)?Wilson|Jardin Pierre Goudouli)$/i,
     text: '楕円形の広場。中央の噴水にはオック語詩人ピエール・グドゥリの像が立つ。',
   },

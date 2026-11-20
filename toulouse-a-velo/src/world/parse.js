@@ -4,6 +4,7 @@ import {
   Grid, centroid, clipRingToRect, closestOnSegment, hash01, pointInPolygon, pointInRing, ringBounds, signedArea, simplifyRing,
 } from '../geo.js';
 import { reshapeRoads } from './ramblas.js';
+import { gardenPaths } from './squares.js';
 import polygonClipping from 'polygon-clipping';
 
 export const FLOOR_HEIGHT = 3.1;
@@ -586,6 +587,7 @@ export function parseOsm(osm, proj, rect, bdtopo = []) {
   }
 
   reshapeRoads(roads, proj); // ジャン・ジョレス通りの 2023 年の車道の位置（ramblas.js）
+  gardenPaths(roads, proj); // 広場の真ん中の庭の砂の園路（squares.js。Place Wilson）
   unifyWaterLevels(areas);
   fillWaterUnderBridges(areas, roads);
   parkPavilions(buildings, areas);

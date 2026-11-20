@@ -44,7 +44,7 @@ const RAMP_PORTAL_H = 2.3; // 駐車場のトンネルの口の高さ（m。高�
 const ENTRANCE_WIDTHS = [[43.6046415, 1.4454812, 5.5]];
 // 事前取得の出入口（緯度経度）をローカル座標に。len・wid は扱える範囲に収める
 export function projectEntrances(list, proj) {
-  return (list || []).filter((e) => e.kind !== 'elevator').map((e) => { // エレベーター（地上の小屋。monuments.js の addLiftKiosks）は吹き抜けにしない
+  return (list || []).filter((e) => e.kind !== 'elevator' && e.kind !== 'fill').map((e) => { // エレベーター（地上の小屋。monuments.js の addLiftKiosks）は吹き抜けにしない
     const [x, z] = proj.project(e.lat, e.lon);
     const parking = e.kind === 'parking';
     const fix = ENTRANCE_WIDTHS.find(([lat, lon]) => Math.abs(lat - e.lat) < 2e-6 && Math.abs(lon - e.lon) < 2e-6);
@@ -56,6 +56,35 @@ export function projectEntrances(list, proj) {
       ...(e.esc != null ? { esc: e.esc } : {}), ...(e.covered ? { covered: true } : {}), ...(e.level != null ? { level: e.level } : {}), ...(e.src ? { src: e.src } : {}),
     };
   });
+}
+
+// OpenStreetMap の階段から作った出入口（toulouse-metro-osm.json の stations の bouches。metro/osmentrances.js）を、LiDAR の吹き抜け
+// （<エリア>-metro.json）の代わりに使う。LiDAR の吹き抜けの向きは穴の形から決めていて、ほぼ正方形の穴では 90° 違うことがあった
+// （利用者の指摘「出入口の方向がおかしい」。Jean-Jaurès の Allées Roosevelt の側の出入口は、本物は北東へ下りるのに南東へ下りていた）。
+// OSM の出入口は階段の上の端から下の端への向き（LiDAR の穴と同じ所・同じ向きのものはその形）。list のうち、OSM の出入口のある駅
+// （このエリアにある駅だけ）の metro の項目は kind: 'fill'（地形の穴を埋めるだけ。ground.js）にして残し、OSM の出入口と
+// エレベーターの小屋（elevator。face: 駅の中心）を足す。どちらもなければ list のまま
+export function mergeOsmBouches(list, osmStations) {
+  if (!osmStations || !list) return list || [];
+  const present = new Set(list.filter((e) => e.kind === 'metro' || e.kind === 'elevator').map((e) => e.station));
+  const use = Object.values(osmStations).filter((o) => present.has(o.bd) && (o.bouches || []).some((b) => b.kind === 'metro'));
+  if (!use.length) return list;
+  const names = new Set(use.map((o) => o.bd));
+  const out = list.map((e) => (e.kind === 'metro' && names.has(e.station) ? (e.synthetic ? null : { ...e, kind: 'fill' }) : e)).filter(Boolean);
+  const near = (a, b, r) => Math.hypot((a.lat - b.lat) * 111200, (a.lon - b.lon) * 80500) < r;
+  for (const o of use) {
+    for (const b of o.bouches) {
+      if (b.kind === 'metro') {
+        out.push({
+          kind: 'metro', station: o.bd, src: b.src || 'osm', lat: b.lat, lon: b.lon, len: b.len, wid: b.wid, ang: b.ang, down: b.down, depth: b.depth ?? 3.8,
+          ...(b.esc != null ? { esc: b.esc } : {}), ...(b.covered ? { covered: true } : {}), ...(b.level != null ? { level: b.level } : {}),
+        });
+      } else if (b.kind === 'elevator' && !out.some((q) => q.kind === 'elevator' && near(q, b, 6))) {
+        out.push({ kind: 'elevator', station: o.bd, lat: b.lat, lon: b.lon, face: o.c });
+      }
+    }
+  }
+  return out;
 }
 
 // 代わりの出入口（data/metro.js の placeEntrance。synthetic）は、本物の出入口が 1 つも残らない駅にだけ使う（メトロのゲーム）。

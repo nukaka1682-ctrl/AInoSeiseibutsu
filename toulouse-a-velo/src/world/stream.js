@@ -16,6 +16,7 @@ const offshore = (inWater, x, z) => inWater(x, z) && inWater(x + 8, z) && inWate
 const PATH_SEG = (s) => s.bike && !CAR_ROADS.has(s.road.type) && s.road.type !== 'service' && s.road.type !== 'living_street' && s.road.type !== 'pedestrian';
 import { loadTileData, tileAt, tileBounds, tileLayout } from '../data/tiles.js';
 import { buildBuildings } from './buildings.js';
+import { onRamblasCarriageway } from './ramblas.js';
 import { buildTrees, fillParkTrees, planeTreeTest, streetTrees, treelessTest, magnoliaTest, liftQuayTrees, underDeck, addPhotoTrees, curbTrees } from './trees.js';
 import { buildEnclosures, clearNamedAreas, clearRoads, fixedWalls, projectTrees, projectWalls, tameWalls } from './enclosures.js';
 import { clearEntrances, entranceWalls, inEntrance } from './metro.js';
@@ -321,7 +322,8 @@ class TileStreamer {
     if (data.trees.length) {
       const free = (x, z) => !this.inWater(x, z) && !underDeck(this.terrain, x, z) && !inEntrance(this.terrain.metro || [], x, z);
       // 車道・小道の上に立つ木（樹冠のてっぺんが道の上）は縁石の外の歩道へ寄せる（assemble.js と同じ）
-      treePts = curbTrees(projectTrees(data.trees, this.proj).filter((p) => free(p.x, p.z)), this.roadnet, (x, z) => free(x, z) && !insideBuilding(x, z) && !insideContext(x, z));
+      const onRamblas = onRamblasCarriageway(this.parsed.roads); // ジャン・ジョレス通りの車道の際の古い並木は植えない（ramblas.js）
+      treePts = curbTrees(projectTrees(data.trees, this.proj).filter((p) => free(p.x, p.z) && !onRamblas(p.x, p.z)), this.roadnet, (x, z) => free(x, z) && !insideBuilding(x, z) && !insideContext(x, z));
     } else {
       const free = (x, z) => inB(x, z) && !this.roadnet.onRoad(x, z, 1.5) && !this.inWater(x, z) && !insideBuilding(x, z);
       const parks = this.parsed.areas.filter((a) => a.bounds.maxX > B.minX && a.bounds.minX < B.maxX && a.bounds.maxZ > B.minZ && a.bounds.minZ < B.maxZ);

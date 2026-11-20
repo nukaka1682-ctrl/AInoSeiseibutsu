@@ -108,3 +108,14 @@ export function inRamblasBed(layout, x, z) {
   }
   return false;
 }
+
+// 遊歩道の両側の車道（動かしたあと）とその縁石から margin m 以内か。LiDAR の木（2021〜22 年の工事の前・最中の並木）が、
+// 動かした車道の上や縁石の際に残っていた（利用者の Street View 212441: 車道の際に木はなく、若い木は植え込みの中）
+export function onRamblasCarriageway(roads, margin = 1.6) {
+  const segs = [];
+  for (const r of roads) {
+    if (!RAMBLAS.name.test(r.name || '') || r.bridge || r.tunnel) continue;
+    for (let i = 0; i + 1 < r.pts.length; i++) segs.push([r.pts[i][0], r.pts[i][1], r.pts[i + 1][0], r.pts[i + 1][1], r.width / 2 + margin]);
+  }
+  return (x, z) => segs.some(([ax, az, bx, bz, h]) => closestOnSegment(x, z, ax, az, bx, bz).d2 < h * h);
+}

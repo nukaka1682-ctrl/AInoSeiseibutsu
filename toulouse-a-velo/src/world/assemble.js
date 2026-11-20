@@ -12,6 +12,7 @@ import { FLAT_TERRAIN, surfaceFns } from './terrain.js';
 import { buildTerrainTile } from './terrainmesh.js';
 import { buildCoverMesh } from './cover.js';
 import { tileBounds, tileLayout } from '../data/tiles.js';
+import { onRamblasCarriageway } from './ramblas.js';
 import { buildTrees, fillParkTrees, planeTreeTest, streetTrees, treelessTest, magnoliaTest, liftQuayTrees, underDeck, addPhotoTrees, curbTrees } from './trees.js';
 import { buildEnclosures, clearNamedAreas, clearRoads, fixedWalls, projectTrees, projectWalls, tameWalls } from './enclosures.js';
 import { clearEntrances, entranceWalls, inEntrance, projectEntrances } from './metro.js';
@@ -140,7 +141,8 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
     // LiDAR で見つけた木（水の上は除く）
     const free = (x, z) => !inWater(x, z) && !underDeck(terrain, x, z) && !inEntrance(terrain.metro || [], x, z);
     // 車道・小道の上に立つ木（樹冠のてっぺんが道の上）は縁石の外の歩道へ寄せる
-    treePts = curbTrees(projectTrees(data.trees, proj).filter((p) => free(p.x, p.z)), roadnet, (x, z) => free(x, z) && !insideBuilding(x, z));
+    const onRamblas = onRamblasCarriageway(parsed.roads); // ジャン・ジョレス通りの車道の際の古い並木は植えない（ramblas.js）
+    treePts = curbTrees(projectTrees(data.trees, proj).filter((p) => free(p.x, p.z) && !onRamblas(p.x, p.z)), roadnet, (x, z) => free(x, z) && !insideBuilding(x, z));
   } else {
     const m = 30;
     const inRect = ([x, z]) => x > rect.minX - m && x < rect.maxX + m && z > rect.minZ - m && z < rect.maxZ + m;

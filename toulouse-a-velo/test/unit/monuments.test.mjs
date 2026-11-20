@@ -363,3 +363,40 @@ test('写真から作った名所のモデル（市場のハレット・ダル�
     MONUMENTS.splice(0, MONUMENTS.length, ...saved);
   }
 });
+
+test('Place Wilson の庭: 地図の小道を砂の園路に、入口は小道が縁を横切る所。噴水（水盤の当たり判定）・回転木馬（円い建物を置き換え）・木を植えない所', async () => {
+  const { SQUARES, gardenGates, gardenPaths, inSquareGarden, squaresLocal } = await import('../../src/world/squares.js');
+  const proj = new LocalProjection(43.6048, 1.4474);
+  const [sq] = squaresLocal(proj);
+  assert.equal(sq.id, 'wilson');
+  assert.ok(inSquareGarden(sq, sq.fx, sq.fz) && !inSquareGarden(sq, sq.cx + sq.r + 1, sq.cz));
+  // 庭の中心から西の入口へ（環状の車道の芯線まで）の小道と、庭の外の歩道
+  const inner = { type: 'footway', width: 2.5, pts: [[sq.fx, sq.fz], [sq.cx - sq.r - 2.5, sq.cz]] };
+  const outside = { type: 'footway', width: 2.5, pts: [[sq.cx + sq.r + 8, sq.cz], [sq.cx + sq.r + 8, sq.cz + 30]] };
+  const road = { type: 'tertiary', width: 5, pts: [[sq.cx - 40, sq.cz], [sq.cx + 40, sq.cz]] };
+  gardenPaths([inner, outside, road], proj);
+  assert.equal(inner.surface, 'fine_gravel');
+  assert.equal(inner.width, SQUARES[0].pathWidth);
+  assert.ok(!outside.surface && !road.surface);
+  const gates = gardenGates(sq, [inner]);
+  assert.equal(gates.length, 1);
+  assert.ok(Math.abs(Math.abs(gates[0]) - Math.PI) < 0.05, '西の入口');
+  // 噴水と回転木馬（地図の円い 6 m の建物を置き換える）
+  const carousel = bld(circle(sq.kx, sq.kz, 5.3, 16), { height: 6 });
+  const list = findMonuments(proj, { buildings: [carousel], roads: [inner, road] }).filter((m) => m.kind === 'square' || m.kind === 'carousel');
+  assert.equal(list.length, 2);
+  assert.deepEqual(list.find((m) => m.kind === 'carousel').replaced, [carousel]);
+  const { group, colliders, keepOut } = buildMonuments(list, { monument: new THREE.MeshBasicMaterial(), monumentMetal: new THREE.MeshBasicMaterial(), monumentInlay: new THREE.MeshBasicMaterial() }, { groundAt: () => 0 });
+  let bad = 0;
+  group.traverse((o) => {
+    const p = o.geometry?.attributes?.position;
+    if (p) for (let i = 0; i < p.count; i++) if (!Number.isFinite(p.getX(i) + p.getY(i) + p.getZ(i))) bad++;
+  });
+  assert.equal(bad, 0, 'NaN の頂点');
+  assert.ok(colliders.some((c) => c.length === 3 && Math.hypot(c[0] - sq.fx, c[1] - sq.fz) < 0.01 && Math.abs(c[2] - (sq.basin + 0.06)) < 1e-9), '水盤の外の縁');
+  assert.ok(colliders.some((c) => c.length === 3 && Math.hypot(c[0] - sq.kx, c[1] - sq.kz) < 0.01), '回転木馬');
+  assert.ok(keepOut.length >= 2);
+  // 木を植えない所: 噴水と回転木馬のまわり（隣のタイルの名所の一覧が空でも）
+  const clear = monumentClearance([], proj);
+  assert.ok(clear(sq.fx + 3, sq.fz) && clear(sq.kx, sq.kz + 4) && !clear(sq.cx - 25, sq.cz));
+});

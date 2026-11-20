@@ -571,6 +571,78 @@ export function despike(terrain, { min = 1, roadMax = 0.3 } = {}) {
   return n;
 }
 
+// 地形モデルの細かいでこぼこをならす所。LiDAR HD は 2021〜22 年の測りで、工事中の所が写っている: ジャン・ジョレス通りの
+// 遊歩道（2019〜23 年の工事）の植え穴と盛り土が、5 m の格子に 0.5 m ほどの穴と山の列になって残り、遊歩道と車道が波打っていた
+// （利用者の指摘「道がぼこぼこ」）。Place Wilson の庭（木の下の測りの乱れ）・Allées Roosevelt・Jean-Jaurès の駅前も同じ。
+// line: 軸の線 [[緯度, 経度]…] と半分の幅 half m、または中心 c と半径 r m
+export const SMOOTH_ZONES = [
+  { line: [[43.605571, 1.448741], [43.609102, 1.453765]], half: 32 }, // Allées Jean-Jaurès（ランブラ）
+  { line: [[43.60512, 1.44766], [43.60567, 1.44862]], half: 17 }, // Allées Roosevelt
+  { c: [43.604854, 1.44738], r: 47 }, // Place Wilson（庭と環状の車道）
+  { c: [43.60585, 1.44900], r: 36 }, // Jean-Jaurès の交差点と駅前
+];
+
+// zones の中の格子点を、まわり ±2 点（±10 m）の中央値（坂の面はそのまま残る）の 3 × 3 の平均に置き換える。
+// 縁の fade m で元の高さへ戻す。動かした格子点の数を返す
+export function smoothZones(terrain, zones, proj, { fade = 10 } = {}) {
+  if (!terrain || terrain.flat || !proj) return 0;
+  const g = terrain.near, D = g.data, cols = g.cols, rows = g.rows;
+  let n = 0;
+  for (const zn of zones) {
+    let weight, x0, x1, z0, z1;
+    if (zn.c) {
+      const [cx, cz] = proj.project(zn.c[0], zn.c[1]);
+      weight = (x, z) => Math.min(1, Math.max(0, (zn.r - Math.hypot(x - cx, z - cz)) / fade));
+      [x0, x1, z0, z1] = [cx - zn.r, cx + zn.r, cz - zn.r, cz + zn.r];
+    } else {
+      const pts = zn.line.map((ll) => proj.project(ll[0], ll[1]));
+      weight = (x, z) => {
+        let d2 = Infinity;
+        for (let i = 0; i + 1 < pts.length; i++) d2 = Math.min(d2, closestOnSegment(x, z, pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1]).d2);
+        return Math.min(1, Math.max(0, (zn.half - Math.sqrt(d2)) / fade));
+      };
+      x0 = Math.min(...pts.map((p) => p[0])) - zn.half; x1 = Math.max(...pts.map((p) => p[0])) + zn.half;
+      z0 = Math.min(...pts.map((p) => p[1])) - zn.half; z1 = Math.max(...pts.map((p) => p[1])) + zn.half;
+    }
+    const c0 = Math.max(3, Math.floor(g.ax * x0 + g.bx)), c1 = Math.min(cols - 4, Math.ceil(g.ax * x1 + g.bx));
+    const r0 = Math.max(3, Math.floor(g.az * z0 + g.bz)), r1 = Math.min(rows - 4, Math.ceil(g.az * z1 + g.bz));
+    const med = new Map(), buf = [];
+    for (let r = r0; r <= r1; r++) {
+      for (let c = c0; c <= c1; c++) {
+        const k = r * cols + c;
+        if (Number.isNaN(D[k])) continue;
+        const w = weight((c - g.bx) / g.ax, (r - g.bz) / g.az);
+        if (!w) continue;
+        buf.length = 0;
+        for (let dr = -2; dr <= 2; dr++) for (let dc = -2; dc <= 2; dc++) {
+          const v = D[k + dr * cols + dc];
+          if (!Number.isNaN(v)) buf.push(v);
+        }
+        if (buf.length < 13) continue;
+        buf.sort((a, b) => a - b);
+        med.set(k, [(buf[(buf.length - 1) >> 1] + buf[buf.length >> 1]) / 2, w]);
+      }
+    }
+    const next = [];
+    for (const [k, [, w]] of med) {
+      let sum = 0, cnt = 0;
+      for (const dk of [-cols - 1, -cols, -cols + 1, -1, 0, 1, cols - 1, cols, cols + 1]) {
+        const q = med.get(k + dk), v = q ? q[0] : D[k + dk];
+        if (!Number.isNaN(v)) {
+          sum += v;
+          cnt++;
+        }
+      }
+      next.push([k, sum / cnt, w]);
+    }
+    for (const [k, v, w] of next) {
+      D[k] += (v - D[k]) * w;
+      n++;
+    }
+  }
+  return n;
+}
+
 // 3 元の連立一次方程式（ガウスの消去法）
 function solve3(M, v) {
   const a = M.map((row, i) => [...row, v[i]]);

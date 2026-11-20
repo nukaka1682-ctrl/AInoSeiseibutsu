@@ -10,6 +10,7 @@ import { MeshWriter, triangulate, writeFlatPolygon } from './meshwriter.js';
 import { COVER_COLORS, createCoverShared } from './cover.js';
 import { Grid, centroid, clipPolylineToRect, clipRingToRect, closestOnSegment, freeRects, hash01, pointInPolygon, ringBounds, signedArea } from '../geo.js';
 import { ramblasLayout } from './ramblas.js';
+import { gardenPlazaRings, squaresLocal } from './squares.js';
 import { LOCKS, lockFrame } from './locks.js';
 import { RaisedIndex, oldTownBase, planStreets, streetSteps, writePrism } from './streets.js';
 import { CAR_ROADS } from './parse.js';
@@ -17,7 +18,7 @@ import { catenaryStations, mergeIntervals, slicePolyline, subtract, tramCrossCut
 import { PONT_NEUF_HALF, bridgeGroups, buildAbutments, buildBridges, conditionUnderpasses, pontNeufApproaches, raiseBridgeEnds, setupDecks } from './bridges.js';
 import { DRAPE_LIFT, FLAT_TERRAIN } from './terrain.js';
 import { buildFarTerrain, createTerrainMaterials, splitGeometry, TERRAIN_ORDER } from './terrainmesh.js';
-import { conditionRoads, despike, sharpenQuays, WALK_DEF } from './terraincond.js';
+import { conditionRoads, despike, sharpenQuays, SMOOTH_ZONES, smoothZones, WALK_DEF } from './terraincond.js';
 import { fillManualHeights, flattenManualQuays, manualChains, manualLawns, nearManualQuay, quayChains, quaySegments } from './quays.js';
 import { buildMetroEntrances, chooseEntrances, createMetroMaterials, fillMetroPits, orientRamps, projectEntrances, writeEntranceMasks } from './metro.js';
 
@@ -885,7 +886,11 @@ export function buildGroundBase(parsed, rect, mats, terrain = FLAT_TERRAIN, layo
     T.metro = chooseEntrances(projectEntrances(T.metroRaw, T.proj).filter((e) => !inWater(e.x, e.z) && !(e.kind === 'metro' && !e.src && inCarriageway(e.x, e.z))), !!T.metroWalk);
     T.metroPrepare?.(T.metro); // メトロのゲーム: ホームが浅い駅の出入口を長くする・反対側に足す
     orientRamps(T.metro, parsed.roads);
-    fillMetroPits(T, T.metro);
+    // 工事中に測った所などの細かいでこぼこをならす（terraincond.js の SMOOTH_ZONES。出入口の穴は中央値でほぼ消え、残りは下で埋める）
+    if (parsed.proj) smoothZones(T, SMOOTH_ZONES, parsed.proj);
+    // OpenStreetMap の出入口に替えた駅の LiDAR の吹き抜け（metro.js の mergeOsmBouches の kind: 'fill'）は、地形の穴を埋めるだけ
+    const fills = projectEntrances((T.metroRaw || []).filter((e) => e.kind === 'fill').map((e) => ({ ...e, kind: 'metro' })), T.proj);
+    fillMetroPits(T, T.metro.concat(fills));
     T.metroAdjust?.(T.metro); // メトロのゲーム: 出入口の階段の深さを駅の改札階にそろえる
     // 写真で決めた盛り土（early。Pont Saint-Pierre の取り付けの高架）: 道路をならす前に埋める（道の縦断面が地形モデルの穴を
     // なぞらない・橋の端を盛り上げない）。壁の段は下の setCliffs の前にもう一度書き直す
@@ -1450,6 +1455,16 @@ function* groundDetailSteps(parsed, clip, mats, waterDepthAt, opts) {
     }
     for (const line of rl.beds) {
       for (const pts of clipPolylineToRect(line, ...clipRect)) writeRibbon(W(ORDER.plaza + 0.1, 'grass'), pts, rl.bedHalf, 0, c3('#8a7a5a'), 3);
+    }
+  }
+  // ---- 広場の真ん中の庭（squares.js。Place Wilson）: 噴水と回転木馬のまわりの固めた砂の広場（園路と同じ砂。園路の下に描く）
+  if (parsed.proj) {
+    for (const sq of squaresLocal(parsed.proj)) {
+      for (const ring of gardenPlazaRings(sq)) {
+        if (!overlaps(ringBounds(ring))) continue;
+        const outer = clipRingToRect(ring, clip.minX, clip.minZ, clip.maxX, clip.maxZ);
+        if (outer.length >= 3) writeFlatPolygon(W(ORDER.footway - 0.2, 'gravel'), outer, [], 0, 4, c3('#ffffff'));
+      }
     }
   }
   // ---- 道路 ----

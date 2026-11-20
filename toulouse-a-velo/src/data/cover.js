@@ -6,6 +6,7 @@
 // - 木の下: 植物で、地面からの高さが高い所（樹冠）。下の地面は見えないので、周りの地面から推定する
 // 結果は 1 m 格子の種類の配列で、ランレングス符号化して base64 の文字列にし、タイルのデータに入れる（encodeCover）。
 import { ELEVATION_WMS } from './lidar.js';
+import { squaresLocal } from '../world/squares.js';
 
 export const COVER = { public: 0, private: 1, lawn: 2, trees: 3 };
 // 読み込むときだけ使う種類: 並木道の灰色のコンクリートの舗石（焼き込んだデータには入らない。4 はランレングスの記号）
@@ -191,6 +192,9 @@ const MAP_STREET = remap({ [COVER.trees]: COVER.public });
 // （利用者の写真: Square Charles-de-Gaulle は平らな舗装）
 const MEADOW_PARK = /^(Prairie|Parc)\b/i;
 const MAP_MEADOW = remap({ [COVER.public]: COVER.lawn, [COVER.private]: COVER.lawn });
+// 広場の真ん中の庭（world/squares.js。Place Wilson の Jardin Pierre-Goudouli）: 地図に庭の外形がなく、公道（石畳）になっていた。
+// 木の下はそのまま、ほかは芝（園路と噴水・回転木馬のまわりの砂の広場は ground.js が上に描く）。通りの線の付け替えは入れない
+const MAP_GARDEN = remap({ [COVER.public]: COVER.lawn, [COVER.private]: COVER.lawn, [PAVED]: COVER.lawn });
 
 // parsed（world/parse.js の結果）から、覆いに描き込む多角形と線を集める（parsed ごとに 1 回）
 // 写真で決める舗装の広場（地面の覆いの芝生・木の下・敷地の中を、舗石にする）。[緯度, 経度, 半径 m]。
@@ -212,6 +216,11 @@ export function coverStamps(parsed) {
     if (a.type === 'grass' && a.tags?.leisure === 'park' && MEADOW_PARK.test(a.name || '')) s.push({ rings: [a.outer, ...(a.holes || [])], bounds: ringBounds(a.outer, 0), map: MAP_MEADOW });
   }
   if (parsed.proj) {
+    for (const sq of squaresLocal(parsed.proj)) {
+      const ring = [];
+      for (let k = 0; k < 48; k++) ring.push([sq.cx + Math.cos((k / 48) * Math.PI * 2) * sq.r, sq.cz + Math.sin((k / 48) * Math.PI * 2) * sq.r]);
+      s.push({ rings: [ring], bounds: ringBounds(ring, 0), keepOut: true }, { rings: [ring], bounds: ringBounds(ring, 0), map: MAP_GARDEN });
+    }
     for (const [lat, lon, r] of PHOTO_PLAZAS) {
       const [x, z] = parsed.proj.project(lat, lon), ring = [];
       for (let k = 0; k < 20; k++) ring.push([x + Math.cos((k / 20) * Math.PI * 2) * r, z + Math.sin((k / 20) * Math.PI * 2) * r]);

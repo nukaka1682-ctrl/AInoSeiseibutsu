@@ -458,3 +458,17 @@ test('屋根だけの上屋にする所（アレーヌのバスターミナル�
   assert.equal(canopyTags({ ...t, height: '9' }, 43.593668, 1.418429), null, '高い建物');
   assert.equal(canopyTags(t, 43.6, 1.44), null, '円の外');
 });
+
+test('ジャン・ジョレス通りの車道の際の古い並木（LiDAR の木）: 動かした車道とその縁石から 1.6 m 以内は植えない', async () => {
+  const { onRamblasCarriageway } = await import('../../src/world/ramblas.js');
+  const roads = [
+    { name: 'Allées Jean Jaurès', width: 7, pts: [[0, 0], [100, 0]] },
+    { name: 'Allées Jean Jaurès', width: 7, bridge: true, pts: [[0, 50], [100, 50]] },
+    { name: 'Rue Riquet', width: 7, pts: [[0, -40], [100, -40]] },
+  ];
+  const on = onRamblasCarriageway(roads);
+  assert.ok(on(50, 4.9), '縁石の際（中心線から 4.9 m）');
+  assert.ok(!on(50, 5.3), '植え込みの中（中心線から 5.3 m）');
+  assert.ok(!on(50, 50), '橋の上の同じ名前の道は見ない');
+  assert.ok(!on(50, -40), 'ほかの通り');
+});

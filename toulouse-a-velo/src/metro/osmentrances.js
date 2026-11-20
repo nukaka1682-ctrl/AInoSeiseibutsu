@@ -101,7 +101,7 @@ export function stationBouches(st, lidar = [], facts = {}) {
     // LiDAR の吹き抜け（同じ所で同じ向き）があれば、その形
     let best = null;
     for (const e of lidar) {
-      if (e.kind !== 'metro' || e.synthetic) continue;
+      if (e.kind !== 'metro' || e.synthetic || e.src) continue; // src: OSM から作って足した出入口（data/metro.js）は LiDAR ではない
       const [ex, ez] = P([e.lat, e.lon]);
       const d = Math.hypot(ex - cx, ez - cz);
       const ed = [Math.cos(e.ang), Math.sin(e.ang)];
@@ -137,13 +137,19 @@ export function stationBouches(st, lidar = [], facts = {}) {
     // LiDAR の吹き抜け（15 m 以内）
     let best = null;
     for (const q of lidar) {
-      if (q.kind !== 'metro' || q.synthetic) continue;
+      if (q.kind !== 'metro' || q.synthetic || q.src) continue;
       const d = Math.hypot(...P([q.lat, q.lon]).map((v, i) => v - [x, z][i]));
       if (d < 15 && (!best || d < best.d)) best = { d, q };
     }
     if (best && !near(...P([best.q.lat, best.q.lon]), ['metro'], 4)) {
       const q = best.q;
-      out.push({ kind: 'metro', station: st.bd, lat: q.lat, lon: q.lon, len: q.len, wid: q.wid, ang: q.ang, down: q.down, depth: q.depth, esc: q.wid >= 4.2, covered: facts.hall === 'surface', level: lowest(e), src: 'lidar@osm' });
+      // 下りる向き: 出入口の印の階で決める。トゥールーズの OSM の印はたいてい地下の階（level=-1。階段の下の端の扉）で、その
+      // ときは印の方へ下りる。地上の階（level=0）だけの印は階段の上の端なので、印から遠ざかる。地上と地下の両方の階の印・
+      // 印が穴の横（軸の向きに 1 m 未満）のときは LiDAR の穴の向きのまま
+      const [qx, qz] = P([q.lat, q.lon]), along = (x - qx) * Math.cos(q.ang) + (z - qz) * Math.sin(q.ang);
+      const atBottom = e.levels.length > 0 && e.levels.every((l) => l < 0), atTop = e.levels.length === 1 && e.levels[0] === 0;
+      const down = Math.abs(along) < 1 || (!atBottom && !atTop) ? q.down : (along > 0) === atBottom ? 1 : -1;
+      out.push({ kind: 'metro', station: st.bd, lat: q.lat, lon: q.lon, len: q.len, wid: q.wid, ang: q.ang, down, depth: q.depth, esc: q.wid >= 4.2, covered: facts.hall === 'surface', level: lowest(e), src: 'lidar@osm' });
       return;
     }
     if (e.levels.length === 1 && e.levels[0] === 0 && facts.hall !== 'surface') {
