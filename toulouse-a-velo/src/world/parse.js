@@ -575,7 +575,29 @@ export function parseOsm(osm, proj, rect, bdtopo = []) {
   reshapeRoads(roads, proj); // ジャン・ジョレス通りの 2023 年の車道の位置（ramblas.js）
   unifyWaterLevels(areas);
   fillWaterUnderBridges(areas, roads);
+  parkPavilions(buildings, areas);
   return { nodePos, buildings, parts, roads: dropPontNeufLanes(roads), areas, rails, waterLines, trees, named, proj };
+}
+
+// 公園・庭園・芝生の中の、高さのない建物（IGN の高さなしが 1 % ほど。売店・物置・温室・あずまや）は 1 階建てにする。
+// 推定（面積 60 m² 以上は 3〜5 階）のままだと、プレリー・デ・フィルトルの真ん中に 5 階建てが立っていた（航空写真・表面モデル:
+// 高さ 3〜4 m の小屋と温室）。建物の中の点が多角形の中なら（穴は除く）
+const PARK_TAGS = (t) => t.leisure === 'park' || t.leisure === 'garden' || t.landuse === 'grass' || t.landuse === 'village_green' || t.landuse === 'recreation_ground';
+export function parkPavilions(buildings, areas) {
+  const parks = areas.filter((a) => a.type === 'grass' && a.tags && PARK_TAGS(a.tags));
+  if (!parks.length) return 0;
+  let n = 0;
+  for (const b of buildings) {
+    const t = b.tags;
+    if (!t || parseLength(t.height) > 0 || parseLength(t['building:levels']) > 0 || b.bdHeight > 0 || CHURCH.has(t.building)) continue;
+    const [x, z] = b.inside;
+    const inPark = parks.some((a) => x >= a.bounds.minX && x <= a.bounds.maxX && z >= a.bounds.minZ && z <= a.bounds.maxZ && pointInRing(x, z, a.outer) && !(a.holes || []).some((h) => pointInRing(x, z, h)));
+    if (!inPark) continue;
+    b.tags = { ...t, 'building:levels': '1' };
+    if (b.info) b.info = { ...b.info, ...buildingInfo(b) }; // 高さは解析のときに決めてあるので、決め直す
+    n++;
+  }
+  return n;
 }
 
 // 水面の高さをそろえる: 長い継ぎ目（合わせて minSeam m 以上）で接している水は、いちばん深い水と同じ深さ・種類にする。

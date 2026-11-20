@@ -185,6 +185,12 @@ const MAP_PAVED_PLAZA = remap({ [COVER.public]: PAVED, [COVER.private]: PAVED, [
 const MAP_ALLEE = remap({ [COVER.public]: PAVED, [COVER.trees]: PAVED });
 const MAP_PHOTO_PLAZA = remap({ [COVER.public]: PAVED, [COVER.private]: PAVED, [COVER.trees]: PAVED, [COVER.lawn]: PAVED });
 const MAP_STREET = remap({ [COVER.trees]: COVER.public });
+// 草地の大きな公園（名前が Prairie・Parc の leisure=park）: 植物でない地面（公道・敷地。公園は市の 1 つの敷地）を芝に。
+// 赤外線写真が夏の枯れ草のときで、プレリー・デ・フィルトル（航空写真: 木の茂る西の帯と、草地に砂利の小道）が一面の石畳と
+// コンクリートになっていた。小道は地図の道で描く。「Square …」「Place …」の公園は舗装の広場が多いので変えない
+// （利用者の写真: Square Charles-de-Gaulle は平らな舗装）
+const MEADOW_PARK = /^(Prairie|Parc)\b/i;
+const MAP_MEADOW = remap({ [COVER.public]: COVER.lawn, [COVER.private]: COVER.lawn });
 
 // parsed（world/parse.js の結果）から、覆いに描き込む多角形と線を集める（parsed ごとに 1 回）
 // 写真で決める舗装の広場（地面の覆いの芝生・木の下・敷地の中を、舗石にする）。[緯度, 経度, 半径 m]。
@@ -203,6 +209,7 @@ export function coverStamps(parsed) {
   }
   for (const a of parsed.areas || []) {
     if (a.type === 'grass' || a.type === 'forest' || a.type === 'cemetery') s.push({ rings: [a.outer, ...(a.holes || [])], bounds: ringBounds(a.outer, 0), keepOut: true });
+    if (a.type === 'grass' && a.tags?.leisure === 'park' && MEADOW_PARK.test(a.name || '')) s.push({ rings: [a.outer, ...(a.holes || [])], bounds: ringBounds(a.outer, 0), map: MAP_MEADOW });
   }
   if (parsed.proj) {
     for (const [lat, lon, r] of PHOTO_PLAZAS) {

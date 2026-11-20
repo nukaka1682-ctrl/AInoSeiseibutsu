@@ -427,3 +427,20 @@ test('建物の一部を別の建物に分ける（splitByBox）: 箱の中と�
   const o = outside[0].outer;
   assert.notDeepEqual(o[0], o[o.length - 1]);
 });
+
+test('公園の中の高さのない建物は 1 階建て（高さ・階数のある建物、公園の外、Square の外の建物はそのまま）', async () => {
+  const { parkPavilions, buildingInfo } = await import('../../src/world/parse.js');
+  const sq = (x, z, s) => [[x, z], [x + s, z], [x + s, z + s], [x, z + s]];
+  const bld = (x, z, s, tags) => {
+    const b = { id: x * 100 + z, tags: { building: 'yes', ...tags }, outer: sq(x, z, s), holes: [], inside: [x + s / 2, z + s / 2] };
+    b.info = buildingInfo(b);
+    return b;
+  };
+  const park = { type: 'grass', tags: { leisure: 'park' }, name: 'Prairie des Filtres', outer: sq(0, 0, 100), holes: [], bounds: { minX: 0, minZ: 0, maxX: 100, maxZ: 100 } };
+  const shed = bld(10, 10, 15, {}), tall = bld(40, 40, 15, { height: '12' }), outside = bld(150, 10, 15, {});
+  assert.equal(parkPavilions([shed, tall, outside], [park]), 1);
+  assert.equal(shed.info.levels, 1); // 解析のときに決めた高さも決め直す
+  assert.ok(shed.info.height < 4.5);
+  assert.equal(tall.tags['building:levels'], undefined);
+  assert.equal(outside.tags['building:levels'], undefined);
+});

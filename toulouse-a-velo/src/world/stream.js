@@ -5,7 +5,7 @@
 // - 当たり判定は、読み込んだタイルのものを合わせて使う
 import * as THREE from 'three';
 import { Grid, pointInPolygon, pointInRing } from '../geo.js';
-import { CAR_ROADS, parseOsm } from './parse.js';
+import { CAR_ROADS, parkPavilions, parseOsm } from './parse.js';
 import { manualChains, nearManualQuay, quayChains, snapPathsToQuays } from './quays.js';
 let photoQuays = null;
 const PHOTO_QUAYS = (proj) => (photoQuays && photoQuays.proj === proj ? photoQuays.list : (photoQuays = { proj, list: manualChains(proj) }).list);
@@ -230,6 +230,9 @@ class TileStreamer {
     const buildings = (tp.buildings = tp.buildings.filter(keep));
     tp.parts = (tp.parts || []).filter(keep);
     const context = parseOsm(data.ctx, this.proj, this.rect, []).buildings.filter(keep);
+    // 公園の中の高さのない建物は 1 階建て（公園の外形はエリア全体の地図にある。タイルの地図には建物だけ）
+    parkPavilions(buildings, this.parsed.areas);
+    parkPavilions(context, this.parsed.areas);
     const group = new THREE.Group();
     group.name = `tile-${t.key}`;
     const walls = clearNamedAreas(clearEntrances(clearRoads(tameWalls(projectWalls(data.walls, this.proj), buildings.concat(context)), (x, z) => this.roadnet.onRoad(x, z, 0.3)), this.terrain.metro || []), this.parsed.areas, this.proj).concat(fixedWalls(this.proj, B));

@@ -286,3 +286,25 @@ test('道から離れた公道（盛り土・法面）は芝にする（greenVer
   assert.equal(at(5, 50), C.public); // 旧市街
   assert.equal(at(90, 50), C.private);
 });
+
+test('草地の大きな公園（Prairie・Parc の名前の leisure=park）: 植物でない地面を芝に。Square の公園・木はそのまま', () => {
+  const rect = { minX: 0, minZ: 0, maxX: 60, maxZ: 30 }, cols = 60, rows = 30;
+  const grid = { cols, rows, data: new Uint8Array(cols * rows).fill(COVER.public) };
+  grid.data[5 * cols + 5] = COVER.trees;
+  grid.data[6 * cols + 6] = COVER.private;
+  const sq = (x, z, s) => [[x, z], [x + s, z], [x + s, z + s], [x, z + s]];
+  const parsed = {
+    areas: [
+      { type: 'grass', name: 'Prairie des Filtres', tags: { leisure: 'park' }, outer: sq(0, 0, 20), holes: [] },
+      { type: 'grass', name: 'Square Charles de Gaulle', tags: { leisure: 'park' }, outer: sq(30, 0, 20), holes: [] },
+    ],
+    roads: [],
+  };
+  stampCover(grid, rect, coverStamps(parsed));
+  const at = (x, z) => grid.data[z * cols + x];
+  assert.equal(at(10, 10), COVER.lawn);
+  assert.equal(at(5, 5), COVER.trees);
+  assert.equal(at(6, 6), COVER.lawn); // 公園の敷地の植物でない所も
+  assert.equal(at(40, 10), COVER.public); // Square は舗装のまま
+  assert.equal(at(25, 25), COVER.public); // 公園の外
+});
