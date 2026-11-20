@@ -149,6 +149,18 @@ test('ファサード: 旧市街のレンガ・材料不明の建物は 8 割が
   }
   assert.equal(seen.size, 3);
   assert.ok(![STYLE.residence].includes(facadeStyle({ id: 3, tags: { 'building:material': 'brick' }, oldTown: false, info: { levels: 9, height: 28 } })));
+  // 旧市街の外の陸屋根の 4 階以上は戦後の建物（Avenue de Grande-Bretagne。レンガは現代のレンガの様式）。勾配屋根・旧市街・3 階は今まで
+  const old = new Set([STYLE.brickStone, STYLE.brickShutters, STYLE.rose, STYLE.faubourg]);
+  for (let id = 1; id <= 40; id++) {
+    assert.ok(tall.includes(facadeStyle({ id, tags: { 'roof:shape': 'flat' }, oldTown: false, info: { levels: 5, height: 15 } })));
+    assert.ok(tall.includes(facadeStyle({ id, tags: { 'roof:material': 'concrete' }, oldTown: false, info: { levels: 3, height: 12 } })));
+    assert.equal(facadeStyle({ id, tags: { 'roof:shape': 'flat', 'building:material': 'brick' }, oldTown: false, info: { levels: 5, height: 15 } }), STYLE.brickGrid);
+    assert.ok(!tall.includes(facadeStyle({ id, tags: { 'roof:shape': 'flat' }, oldTown: true, info: { levels: 5, height: 15 } })));
+    assert.ok(!tall.includes(facadeStyle({ id, tags: { 'roof:shape': 'flat' }, oldTown: false, info: { levels: 3, height: 9 } })));
+  }
+  let oldShare = 0;
+  for (let id = 1; id <= 400; id++) if (old.has(facadeStyle({ id, tags: { 'building:material': 'brick' }, oldTown: false, info: { levels: 5, height: 15 } }))) oldShare++;
+  assert.ok(oldShare > 200, '勾配屋根のレンガの 5 階は古い様式のまま');
   assert.equal(stylePlainColor(STYLE.brickShutters), null);
   assert.match(stylePlainColor(STYLE.ochre), /^#[0-9a-f]{6}$/);
 

@@ -400,3 +400,27 @@ test('Place Wilson の庭: 地図の小道を砂の園路に、入口は小道�
   const clear = monumentClearance([], proj);
   assert.ok(clear(sq.fx + 3, sq.fz) && clear(sq.kx, sq.kz + 4) && !clear(sq.cx - 25, sq.cz));
 });
+
+test('Place Wilson の庭の縁: 楕円の環状の車道の内側の縁石に沿い、車止め（当たり判定）は車道の上に立たない', async () => {
+  const { gardenOutline, inSquareGarden, squaresLocal } = await import('../../src/world/squares.js');
+  const proj = new LocalProjection(43.6048, 1.4474);
+  const [sq] = squaresLocal(proj);
+  // 楕円の環状の車道（芯線の半径 東西 42 m・南北 36 m、幅 5 m）を 4 本の道に分けて
+  const ell = (a) => [sq.cx + Math.cos(a) * 42, sq.cz + Math.sin(a) * 36];
+  const name = 'Place du Président Thomas Woodrow Wilson';
+  const roads = [0, 1, 2, 3].map((q) => ({ name, type: 'tertiary', width: 5, pts: Array.from({ length: 13 }, (_, i) => ell(((q + i / 12) * Math.PI) / 2)) }));
+  const o = gardenOutline(sq, roads);
+  assert.ok(Math.abs(o.rAt(0) - (42 - 2.5 - 0.4)) < 0.2, `東 ${o.rAt(0).toFixed(2)}`);
+  assert.ok(Math.abs(o.rAt(Math.PI / 2) - (36 - 2.5 - 0.4)) < 0.2, `南 ${o.rAt(Math.PI / 2).toFixed(2)}`);
+  assert.ok(inSquareGarden(sq, sq.cx + 38, sq.cz, 0, roads) && !inSquareGarden(sq, sq.cx, sq.cz + 34, 0, roads));
+  const list = findMonuments(proj, { buildings: [], roads }).filter((m) => m.kind === 'square');
+  const { colliders } = buildMonuments(list, {}, { groundAt: () => 0 });
+  const seg = roads.flatMap((r) => r.pts.slice(1).map((p, i) => [...r.pts[i], ...p]));
+  const d = (x, z) => Math.min(...seg.map(([ax, az, bx, bz]) => {
+    const dx = bx - ax, dz = bz - az, t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz)));
+    return Math.hypot(x - ax - dx * t, z - az - dz * t);
+  }));
+  const posts = colliders.filter((c) => c.length === 3 && Math.abs(c[2] - 0.12) < 1e-9);
+  assert.ok(posts.length > 60, `車止め ${posts.length}`);
+  for (const [x, z, r] of posts) assert.ok(d(x, z) > 2.5 + r - 0.01, `車止めが車道の上（芯線から ${d(x, z).toFixed(2)} m）`);
+});

@@ -17,7 +17,7 @@ import { ORDER } from './ground.js';
 import { TERRAIN_ORDER } from './terrainmesh.js';
 import { CAR_ROADS } from './parse.js';
 import { ramblasLayout } from './ramblas.js';
-import { gardenGates, squaresLocal } from './squares.js';
+import { gardenGates, gardenOutline, gardenPathSegments, squaresLocal } from './squares.js';
 import { LOCKS, lockFrame } from './locks.js';
 
 export const MONUMENTS = [
@@ -753,7 +753,7 @@ export function findMonuments(proj, { buildings = [], areas = [], facade = null,
       if (!sq) continue;
       if (inB(sq.cx, sq.cz)) {
         const [tx, tz] = proj.project(...spec.facing);
-        out.push({ spec, kind: 'square', sq, gates: gardenGates(sq, roads), angle: Math.atan2(tz - sq.fz, tx - sq.fx), replaced: [] });
+        out.push({ spec, kind: 'square', sq, outline: gardenOutline(sq, roads), gates: gardenGates(sq, roads), paths: gardenPathSegments(sq, roads), angle: Math.atan2(tz - sq.fz, tx - sq.fx), replaced: [] });
       }
       // 回転木馬: 地図の円い建物（高さ 6 m の箱）を置き換える（庭の中心と別のタイルのこともあるので別に）
       if (inB(sq.kx, sq.kz)) {
@@ -3849,27 +3849,32 @@ function gardenLamp(w, x, z, y, colliders) {
   colliders.push([x, z, 0.22]);
 }
 function writeSquare(m, W, groundAt, colliders, onRoad, keepOut) {
-  const { sq, gates } = m, w = W.main, rnd = mulberry32(1580);
-  const { cx, cz, r, fx, fz, basin: RB } = sq;
+  const { sq, gates, outline, paths = [] } = m, w = W.main, rnd = mulberry32(1580);
+  const { cx, cz, fx, fz, basin: RB } = sq;
+  const r = sq.r, Rk = (a) => (outline ? outline.rAt(a) : r); // 向き a の庭の縁の半径
+  // 園路の上か（園路の縁から pad m 以内）
+  const onPath = (x, z, pad) => paths.some(([ax, az, bx, bz, h]) => closestOnSegment(x, z, ax, az, bx, bz).d2 < (h + pad) ** 2);
   const KERB = col('#b8b2a8'), SHRUB = [col('#3f5c2e'), col('#486a33'), col('#35512a'), col('#55703a')], POST = col('#1e2122');
   const STONE = col('#ddd6c8'), STONE_D = col('#c6bead'), ROCK = col('#d3ccbf'), ROCK_D = col('#bfb7a8');
   const MARBLE = col('#ece8e0'), WATER = col('#86aca6'), SPRAY = col('#f1f6f6');
   const angDiff = (a, b) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
   const nearGate = (a, half) => gates.some((g) => angDiff(a, g) < half);
-  // 縁石（高さ 12 cm・幅 26 cm）。入口（地図の小道が縁を横切る所）で切る
-  const nK = Math.round((2 * Math.PI * r) / 1.4), segL = (Math.PI * r) / nK;
+  // 縁石（高さ 12 cm・幅 26 cm、庭の縁に沿って 1.4 m ごと）。入口（地図の小道が縁を横切る所）で切る
+  const nK = Math.round((2 * Math.PI * r) / 1.4);
   for (let k = 0; k < nK; k++) {
-    const a = ((k + 0.5) / nK) * Math.PI * 2;
-    if (nearGate(a, 2.3 / r)) continue;
-    const px = cx + Math.cos(a) * r, pz = cz + Math.sin(a) * r, g = groundAt(px, pz);
-    box(w, [px, g + 0.05, pz], [-Math.sin(a) * segL, 0, Math.cos(a) * segL], [0, 0.08, 0], [Math.cos(a) * 0.13, 0, Math.sin(a) * 0.13], KERB);
+    const a0 = (k / nK) * Math.PI * 2, a1 = ((k + 1) / nK) * Math.PI * 2, a = (a0 + a1) / 2;
+    if (nearGate(a, 2.6 / r)) continue;
+    const p0 = [cx + Math.cos(a0) * Rk(a0), cz + Math.sin(a0) * Rk(a0)], p1 = [cx + Math.cos(a1) * Rk(a1), cz + Math.sin(a1) * Rk(a1)];
+    const L = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]) || 1, ux = (p1[0] - p0[0]) / L, uz = (p1[1] - p0[1]) / L;
+    const px = (p0[0] + p1[0]) / 2, pz = (p0[1] + p1[1]) / 2, g = groundAt(px, pz);
+    box(w, [px, g + 0.05, pz], [ux * (L / 2 + 0.02), 0, uz * (L / 2 + 0.02)], [0, 0.08, 0], [-uz * 0.13, 0, ux * 0.13], KERB);
   }
-  // 外の車道の縁の黒い車止め（2.2 m ごと。入口の前は空ける）
-  const nP = Math.round((2 * Math.PI * (r + 0.7)) / 2.2);
+  // 縁石の外の黒い車止め（縁石と車道の縁のあいだ、2.2 m ごと。入口の前は空ける）
+  const nP = Math.round((2 * Math.PI * (r + 0.2)) / 2.2);
   for (let k = 0; k < nP; k++) {
     const a = (k / nP) * Math.PI * 2;
-    if (nearGate(a, 1.9 / r)) continue;
-    const px = cx + Math.cos(a) * (r + 0.7), pz = cz + Math.sin(a) * (r + 0.7), g = groundAt(px, pz);
+    if (nearGate(a, 2.8 / r)) continue;
+    const rr = Rk(a) + 0.22, px = cx + Math.cos(a) * rr, pz = cz + Math.sin(a) * rr, g = groundAt(px, pz);
     cylinder(w, px, pz, 0.09, 0.09, g, g + 0.85, { seg: 7, color: POST });
     cylinder(w, px, pz, 0.1, 0.06, g + 0.85, g + 0.92, { seg: 7, color: POST });
     colliders.push([px, pz, 0.12]);
@@ -3879,14 +3884,18 @@ function writeSquare(m, W, groundAt, colliders, onRoad, keepOut) {
   for (let k = 0; k < nS; k++) {
     const a = (k / nS) * Math.PI * 2 + (rnd() - 0.5) * 0.02;
     if (nearGate(a, 4.2 / r)) continue;
-    const rr = r - 1.3 - rnd() * 0.9, px = cx + Math.cos(a) * rr, pz = cz + Math.sin(a) * rr;
+    const rr = Rk(a) - 1.3 - rnd() * 0.9, px = cx + Math.cos(a) * rr, pz = cz + Math.sin(a) * rr;
     const sz = 0.6 + rnd() * 0.5, h = 0.45 + rnd() * 0.55;
     blob(w, [px, groundAt(px, pz) + h * 0.75, pz], [sz * 1.2, h, sz], a, 8, 4, (f) => SHRUB[(k + f) % SHRUB.length]);
   }
-  // 入口ごとに街灯 1 本（庭の中、入口の脇）
+  // 入口ごとに街灯 1 本（庭の中、入口の脇。園路の上には立てない）
   for (const g of gates) {
-    const a = g + 3.2 / r, rr = r - 2.2, px = cx + Math.cos(a) * rr, pz = cz + Math.sin(a) * rr;
-    gardenLamp(w, px, pz, groundAt(px, pz), colliders);
+    for (const off of [4.2, -4.2]) {
+      const a = g + off / r, rr = Rk(a) - 2.2, px = cx + Math.cos(a) * rr, pz = cz + Math.sin(a) * rr;
+      if (onPath(px, pz, 1.0)) continue;
+      gardenLamp(w, px, pz, groundAt(px, pz), colliders);
+      break;
+    }
   }
   // ---- 噴水
   const y0 = groundAt(fx, fz), yW = y0 + 0.26;
@@ -3977,6 +3986,7 @@ function writeSquare(m, W, groundAt, colliders, onRoad, keepOut) {
     const a = (k / 14) * Math.PI * 2 + 0.11;
     if (toward.some((t) => angDiff(a, t) < 0.42) || angDiff(a, kAng) < 0.5) continue;
     const bx = fx + Math.cos(a) * 8.4, bz = fz + Math.sin(a) * 8.4;
+    if (onPath(bx, bz, 1.2)) continue; // 噴水のまわりを回る園路の上には置かない
     if (k % 3 === 2) gardenLamp(w, bx, bz, groundAt(bx, bz), colliders);
     else gardenBench(w, bx, bz, groundAt(bx, bz), a + Math.PI, colliders);
   }

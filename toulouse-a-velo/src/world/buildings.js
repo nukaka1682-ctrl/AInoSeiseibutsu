@@ -88,6 +88,15 @@ export function facadeStyle(b) {
     const r = hash01(b.id, 21);
     return r < 0.55 ? STYLE.residence : r < 0.85 ? STYLE.whiteModern : STYLE.modern;
   }
+  // 旧市街の外の、陸屋根（IGN: コンクリートの屋根・屋根の高低差なし）の 4 階以上（11 m 以上）の建物は戦後の集合住宅・事務所
+  // （利用者の Street View 225323・210635: Avenue de Grande-Bretagne の赤レンガ・白い漆喰の集合住宅が、19 世紀の家の様式
+  // 〔レンガの壁に半円アーチの扉と鎧戸〕で描かれていた）。レンガは現代のレンガの様式、ほかは集合住宅の様式
+  const flat = b.tags['roof:shape'] === 'flat' || b.tags['roof:material'] === 'concrete';
+  if (!b.oldTown && flat && mat !== 'stone' && (lv >= 4 || h >= 11)) {
+    if (mat === 'brick') return STYLE.brickGrid;
+    const r = hash01(b.id, 21);
+    return r < 0.45 ? STYLE.residence : r < 0.8 ? STYLE.whiteModern : STYLE.modern;
+  }
   const key = mat === 'sandstone' || mat === 'limestone' ? 'stone' : mat === 'plaster' || mat === 'render' ? 'other' : mat;
   const mix = (b.oldTown && (key === 'brick' || !STYLE_MIX[key]) ? STYLE_MIX.oldTown : STYLE_MIX[key]) || STYLE_MIX.other;
   let r = hash01(b.id, 21);

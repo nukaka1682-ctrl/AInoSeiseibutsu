@@ -6,7 +6,7 @@
 // - 木の下: 植物で、地面からの高さが高い所（樹冠）。下の地面は見えないので、周りの地面から推定する
 // 結果は 1 m 格子の種類の配列で、ランレングス符号化して base64 の文字列にし、タイルのデータに入れる（encodeCover）。
 import { ELEVATION_WMS } from './lidar.js';
-import { squaresLocal } from '../world/squares.js';
+import { gardenOutline, squaresLocal } from '../world/squares.js';
 
 export const COVER = { public: 0, private: 1, lawn: 2, trees: 3 };
 // 読み込むときだけ使う種類: 並木道の灰色のコンクリートの舗石（焼き込んだデータには入らない。4 はランレングスの記号）
@@ -217,8 +217,7 @@ export function coverStamps(parsed) {
   }
   if (parsed.proj) {
     for (const sq of squaresLocal(parsed.proj)) {
-      const ring = [];
-      for (let k = 0; k < 48; k++) ring.push([sq.cx + Math.cos((k / 48) * Math.PI * 2) * sq.r, sq.cz + Math.sin((k / 48) * Math.PI * 2) * sq.r]);
+      const ring = gardenOutline(sq, parsed.roads || []).ring;
       s.push({ rings: [ring], bounds: ringBounds(ring, 0), keepOut: true }, { rings: [ring], bounds: ringBounds(ring, 0), map: MAP_GARDEN });
     }
     for (const [lat, lon, r] of PHOTO_PLAZAS) {

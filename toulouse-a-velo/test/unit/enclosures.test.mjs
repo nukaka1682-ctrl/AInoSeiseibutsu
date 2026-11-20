@@ -52,3 +52,19 @@ test('盛り土の脇の塀は土留め: 上端は盛り土の上 + 胸壁（低
   const mats = { enclosureBrick: {}, enclosureRender: {}, roof: {} };
   assert.ok(buildEnclosures([[-20, 0, 20, 0, 2]], mats, null, emb).children.length >= 3);
 });
+
+test('写真で決めた塀に沿う LiDAR の塀の切れ端は除く（Purpan の病院の塀の脇の 6.8 m のレンガの切れ端）。離れた塀・直角の塀は残す', async () => {
+  const { clearNamedAreas, fixedWalls } = await import('../../src/world/enclosures.js');
+  const { LocalProjection } = await import('../../src/geo.js');
+  const proj = new LocalProjection(43.6059, 1.4020);
+  const fixed = fixedWalls(proj);
+  assert.ok(fixed.length >= 5);
+  const P = (lat, lon) => proj.project(lat, lon);
+  const piece = [...P(43.605913, 1.402111), ...P(43.605949, 1.402032), 6.8]; // 線から約 4 m、平行
+  const far = [...P(43.6062, 1.4040), ...P(43.6062, 1.4041), 2]; // 離れた塀
+  const [ax, az] = P(43.605913, 1.402111);
+  const across = [ax, az, ax - 3.4, az + 5.9, 2]; // 塀に直角（塀の向きは東南東 (59, 34.4)）
+  const out = clearNamedAreas([piece, far, across], [], proj);
+  assert.ok(!out.includes(piece));
+  assert.ok(out.includes(far) && out.includes(across));
+});
