@@ -104,6 +104,9 @@ const PHOTO_STYLES = [
   { at: [43.598767, 1.436351], style: 'faubourg', keepRoof: true },
   { at: [43.592261, 1.418397], style: 'glass' },
   { at: [43.592243, 1.418745], style: 'glass' },
+  // アレーヌのバスターミナルの南の曲がった 9 階建て（写真 Commons「Gare routière des Arènes 1・2」: 白い壁に黄色の斜めの帯）。
+  // 外形が 53 点の曲線と切り欠きで、5.5 m の寄棟屋根が刃のような面になって北へ突き出していた。陸屋根に
+  { at: [43.593275, 1.418515], style: 'whiteModern' },
   { at: [43.594344, 1.434192], style: 'whiteModern' },
   { at: [43.598925, 1.417837], style: 'whiteModern' },
   { at: [43.598673, 1.417451], style: 'brickGrid' },
