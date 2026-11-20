@@ -16,7 +16,7 @@ import { buildTrees, fillParkTrees, planeTreeTest, streetTrees, treelessTest, ma
 import { buildEnclosures, clearNamedAreas, clearRoads, fixedWalls, projectTrees, projectWalls, tameWalls } from './enclosures.js';
 import { clearEntrances, entranceWalls, inEntrance, projectEntrances } from './metro.js';
 import { findTowers } from './towers.js';
-import { buildMonuments, findMonuments, monumentClearance, monumentSolid } from './monuments.js';
+import { addLiftKiosks, buildMonuments, findMonuments, monumentClearance, monumentSolid } from './monuments.js';
 import { findCapitoleFacade, markBrickSites, markStreetStyles } from './landmarkfacades.js';
 import { greySquareTest, historicCoreTest, oldTownTest, pavedQuayTest } from '../config.js';
 import { POST_HIT, planStreets } from './streets.js';
@@ -52,6 +52,7 @@ export async function assembleWorld(data, bbox, { buildingMats, groundMats, prog
   progress('建物・道路・水辺を解析中…', 0);
   await pause();
   const parsed = parseOsm(data.osm, proj, rect, data.bdtopo);
+  addLiftKiosks(terrain.metroRaw); // メトロのエレベーターの地上の小屋（LiDAR で階段が見つからない駅）
   if (terrain.quayLines) snapPathsToQuays(parsed.roads, quayChains(terrain.quayLines, proj).filter((c) => !c.pts.every((q) => nearManualQuay(PHOTO_QUAYS(proj), q.x, q.z))).concat(PHOTO_QUAYS(proj))); // 岸壁に沿う小道を壁のどちらか側へ
   const roadnet = new RoadNetwork(parsed.roads);
   const group = new THREE.Group();

@@ -362,7 +362,9 @@ async function stationRoads(lon0, lat0, r) {
 
 // bbox の中の駅ごとに地形モデルを取り、出入口を見つける（同じ駅の名前が 2 つあれば両方の範囲を調べ、重なった穴は 1 つに）。
 // 地下駐車場のまわりも調べ、車の坂（isParkingRamp）は kind: 'parking' にする（駅のまわりで見つけた穴も、駐車場の近くの坂は駐車場）
-export async function fetchMetroEntrances(bbox, { log = () => {} } = {}) {
+// osmStations: OpenStreetMap から作った駅（public/data/toulouse-metro-osm.json の stations。metro/osmentrances.js の bouches）。
+// LiDAR で吹き抜けが見つからない地下の駅は、その階段の出入口とエレベーター（地上のガラスの小屋）を使う
+export async function fetchMetroEntrances(bbox, { log = () => {}, osmStations = null } = {}) {
   const inBox = (s) => s.lat > bbox.s && s.lat < bbox.n && s.lon > bbox.w && s.lon < bbox.e;
   const all = await fetchMetroStations(bbox);
   const stations = all.stations.filter(inBox), parkings = all.parkings.filter(inBox);
@@ -385,6 +387,21 @@ export async function fetchMetroEntrances(bbox, { log = () => {} } = {}) {
     let n = 0;
     for (const e of metro) n += add(e, 'metro', s.name) ? 1 : 0;
     for (const e of ramps) add(e, 'parking', parkings.reduce((m, p) => (dist(e, p) < dist(e, m) ? p : m)).name);
+    // LiDAR で吹き抜けが見つからない地下の駅（カルム・パット・ドワ・フォンテーヌ・レスタンなど。地形モデルが出入口の上の屋根や
+    // 植え込みを地面にしている）: OpenStreetMap の階段から作った出入口（メトロのゲームと同じ形）と、エレベーターの場所
+    let fromOsm = 0;
+    const o = n === 0 && osmStations ? Object.values(osmStations).find((q) => q.bd === s.name) : null;
+    for (const b of o?.bouches || []) {
+      if (b.kind === 'metro' && !out.some((q) => dist(q, b) < 3)) {
+        out.push({
+          kind: 'metro', station: s.name, src: 'osm', lon: r(b.lon, 7), lat: r(b.lat, 7), len: r(b.len, 1), wid: r(b.wid, 1), ang: r(b.ang, 3), depth: 3.8, down: b.down,
+          ...(b.esc != null ? { esc: b.esc } : {}), ...(b.covered ? { covered: true } : {}), ...(b.level != null ? { level: b.level } : {}),
+        });
+        fromOsm++;
+      } else if (b.kind === 'elevator') {
+        out.push({ kind: 'elevator', station: s.name, lon: r(b.lon, 7), lat: r(b.lat, 7), face: o.c.map((v) => r(v, 7)) });
+      }
+    }
     // 代わりの出入口（どの駅にも 1 つ。メトロのゲームで、本物の出入口が残らない駅に使う。自転車のゲームでは使わない）
     let alt = null;
     try {
@@ -398,7 +415,7 @@ export async function fetchMetroEntrances(bbox, { log = () => {} } = {}) {
     } catch (err) {
       log(`  ${s.name}: 代わりの出入口を置けませんでした（${err.message}）`);
     }
-    log(`  メトロ ${s.name}: 出入口 ${n}${ramps.length ? `（駐車場の坂 ${ramps.length}）` : ''}${alt ? '・代わりの出入口 1' : ''}`);
+    log(`  メトロ ${s.name}: 出入口 ${n}${fromOsm ? `（OpenStreetMap の階段 ${fromOsm}）` : ''}${ramps.length ? `（駐車場の坂 ${ramps.length}）` : ''}${alt ? '・代わりの出入口 1' : ''}`);
   }
   for (const p of parkings) {
     const ramps = (await scanPits(p.lon, p.lat, R, `駐車場 ${p.name}`, log))

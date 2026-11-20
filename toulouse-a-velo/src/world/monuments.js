@@ -381,6 +381,21 @@ export function stadiumAnnexes(stadium, buildings, maxArea = 400) {
   return buildings.filter((b) => b !== stadium && b.info.area < maxArea && (b.info.height || 0) >= 6 && b.outer.some(near));
 }
 
+// メトロのエレベーターだけの出入口（<エリア>-metro.json の elevator。OpenStreetMap の subway_entrance。LiDAR で階段の吹き抜けが
+// 見つからない駅だけ）: 地上のガラスの小屋（lift。Jean-Jaurès と同じ形、メトロのゲームと同じ大きさ）を MONUMENTS に足す。
+// 同じ所（6 m 以内）にもうあれば足さない。エリアを作るときに 1 回（タイルの名所を探す前）
+export function addLiftKiosks(entries) {
+  let n = 0;
+  for (const e of entries || []) {
+    if (e.kind !== 'elevator' || !e.face) continue;
+    const lifts = MONUMENTS.filter((m) => m.kind === 'lift').flatMap((m) => m.at);
+    if (lifts.some(([la, lo]) => Math.hypot((la - e.lat) * 111200, (lo - e.lon) * 80500) < 6)) continue;
+    MONUMENTS.push({ id: `ascenseur-${e.station}-${e.lat.toFixed(6)}`, kind: 'lift', at: [[e.lat, e.lon]], face: e.face, size: [2.0, 2.0], h: 2.8 });
+    n++;
+  }
+  return n;
+}
+
 // 名所の専用モデルの置き場所を決める。buildings: このタイル（エリア）の建物、bounds: このタイルの範囲
 // （像・十字はその中にあるときだけ作る）、onRoad(x, z): 車道の上か（広場の下を通る道も）、roads: 道路（parse.js。
 // 雄鶏の像を見える車道の縁に置くため）。replaced の建物は描かない（当たり判定は残す）

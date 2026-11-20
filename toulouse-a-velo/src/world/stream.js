@@ -21,7 +21,7 @@ import { buildEnclosures, clearNamedAreas, clearRoads, fixedWalls, projectTrees,
 import { clearEntrances, entranceWalls, inEntrance } from './metro.js';
 import { findCapitoleFacade, markBrickSites, markStreetStyles } from './landmarkfacades.js';
 import { findTowers } from './towers.js';
-import { buildMonuments, findMonuments, monumentClearance, monumentSolid } from './monuments.js';
+import { addLiftKiosks, buildMonuments, findMonuments, monumentClearance, monumentSolid } from './monuments.js';
 import { areaFrame, makeSurfaceAt } from './assemble.js';
 import { buildGroundBase, buildGroundDetailAsync, makeWaterTest } from './ground.js';
 import { POST_HIT, planStreets } from './streets.js';
@@ -46,6 +46,7 @@ export async function assembleStreamWorld({ base, bbox, presetId, buildingMats, 
   progress('道路・川・公園を解析中…', 0.05);
   await pause();
   const parsed = parseOsm(base.osm, proj, rect, []);
+  addLiftKiosks(terrain.metroRaw); // メトロのエレベーターの地上の小屋（LiDAR で階段が見つからない駅）
   if (terrain.quayLines) snapPathsToQuays(parsed.roads, quayChains(terrain.quayLines, proj).filter((c) => !c.pts.every((q) => nearManualQuay(PHOTO_QUAYS(proj), q.x, q.z))).concat(PHOTO_QUAYS(proj))); // 岸壁に沿う小道を壁のどちらか側へ（assemble.js と同じ）
   progress('道路網を作成中…', 0.3);
   await pause();

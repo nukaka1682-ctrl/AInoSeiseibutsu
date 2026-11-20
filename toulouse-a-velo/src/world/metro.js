@@ -44,7 +44,7 @@ const RAMP_PORTAL_H = 2.3; // 駐車場のトンネルの口の高さ（m。高�
 const ENTRANCE_WIDTHS = [[43.6046415, 1.4454812, 5.5]];
 // 事前取得の出入口（緯度経度）をローカル座標に。len・wid は扱える範囲に収める
 export function projectEntrances(list, proj) {
-  return (list || []).map((e) => {
+  return (list || []).filter((e) => e.kind !== 'elevator').map((e) => { // エレベーター（地上の小屋。monuments.js の addLiftKiosks）は吹き抜けにしない
     const [x, z] = proj.project(e.lat, e.lon);
     const parking = e.kind === 'parking';
     const fix = ENTRANCE_WIDTHS.find(([lat, lon]) => Math.abs(lat - e.lat) < 2e-6 && Math.abs(lon - e.lon) < 2e-6);
