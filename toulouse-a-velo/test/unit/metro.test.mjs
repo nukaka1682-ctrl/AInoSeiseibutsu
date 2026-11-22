@@ -177,3 +177,27 @@ test('メトロの出入口: 階段の地図のない出入口の印の近くの
   const fromOsm = [{ ...lidar[0], src: 'osm' }];
   assert.equal(stationBouches(st([-1]), fromOsm).find((b) => b.kind === 'metro').src, 'osm-guess');
 });
+
+test('メトロの駅へのワープ: 線ごとの駅の並び、行き先は駅の中心に近い出入口の上の端の手前で出入口を向く。エリアの外の駅は除く', async () => {
+  const { metroWarpTargets, headingTo } = await import('../../src/game/metrowarp.js');
+  const { LocalProjection } = await import('../../src/geo.js');
+  const { LINES, stationList } = await import('../../src/metro/network.js');
+  const proj = new LocalProjection(43.6045, 1.4440);
+  const cap = stationList().find((s) => s.id === 'capitole');
+  const [cx, cz] = proj.project(cap.lat, cap.lon);
+  // 東へ下りる長さ 20 m の出入口（中心は駅の中心から 30 m 西）と、遠い出入口
+  const near = { kind: 'metro', station: cap.bd, x: cx - 30, z: cz, ang: 0, down: 1, len: 20, wid: 5 };
+  const far = { kind: 'metro', station: cap.bd, x: cx + 200, z: cz, ang: 0, down: 1, len: 20, wid: 5 };
+  const inside = (x, z) => Math.hypot(x, z) < 2500; // キャピトルから 2.5 km のエリア
+  const t = metroWarpTargets([far, near], proj, inside);
+  assert.deepEqual(Object.keys(t), Object.keys(LINES));
+  const c = t.A.find((s) => s.id === 'capitole');
+  assert.ok(Math.abs(c.x - (cx - 30 - 10 - 4)) < 1e-6 && Math.abs(c.z - cz) < 1e-6, '上の端（西）の 4 m 手前');
+  assert.deepEqual(c.look, [near.x, near.z]);
+  assert.ok(Math.abs(headingTo([c.x, c.z], c.look) - Math.PI / 2) < 1e-9, '東を向く');
+  // 出入口のない駅は駅の中心、エリアの外（Basso Cambo・Balma-Gramont）は除く
+  const jj = t.A.find((s) => s.id === 'jean-jaures');
+  assert.equal(jj.look, null);
+  assert.ok(!t.A.some((s) => s.id === 'basso-cambo') && !t.A.some((s) => s.id === 'balma-gramont'));
+  assert.ok(t.B.some((s) => s.id === 'jean-jaures') && t.A.indexOf(c) < t.A.indexOf(jj), '線の順');
+});

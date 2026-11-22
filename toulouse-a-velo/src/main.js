@@ -30,6 +30,7 @@ import { TIME_OF_DAY, TIME_ORDER } from './world/light.js';
 import { createPipeline } from './metro/render.js';
 import { facadeNight } from './world/facades.js';
 import { lampNight } from './world/furniture.js';
+import { headingTo, metroWarpTargets } from './game/metrowarp.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -732,7 +733,10 @@ function openMap(open) {
   audio.ui();
   input.enabled = !open;
   show('map-screen', open);
-  if (open) renderFullMap();
+  if (open) {
+    fillMetroWarp();
+    renderFullMap();
+  }
 }
 
 let mapXf = null;
@@ -787,6 +791,45 @@ $('fullmap').addEventListener('click', (e) => {
     toast('ワープしました', 2, true);
   }
 });
+
+// ---------------------------------------------------------------- メトロの駅へワープ（全体地図）
+// 駅の一覧（A 線・B 線。エリアの中の駅だけ）は世界ができたあと 1 回だけ作る。行き先は出入口の上の端の手前（game/metrowarp.js）
+let metroWarp = null;
+function fillMetroWarp() {
+  const w = state.world, sel = $('metro-warp');
+  if (!w || metroWarp?.world === w) return;
+  const targets = metroWarpTargets(w.terrain?.metro || [], w.proj, (x, z) => !w.collision.outOfBounds(x, z));
+  metroWarp = { world: w, byKey: new Map() };
+  sel.innerHTML = '';
+  for (const [line, list] of Object.entries(targets)) {
+    if (!list.length) continue;
+    const g = document.createElement('optgroup');
+    g.label = `${line} 線`;
+    for (const t of list) {
+      const o = document.createElement('option');
+      o.value = `${line}:${t.id}`;
+      o.textContent = `${t.name}（${t.ja}）`;
+      g.appendChild(o);
+      metroWarp.byKey.set(o.value, t);
+    }
+    sel.appendChild(g);
+  }
+  sel.disabled = $('metro-warp-btn').disabled = !metroWarp.byKey.size;
+}
+function warpToStation(key) {
+  if (state.mode === 'tour') return toast('タイムアタック中はワープできません', 2, true);
+  const w = state.world, t = metroWarp?.byKey.get(key);
+  if (!w || !t) return;
+  const p = w.roadnet.nearestRideablePoint(t.x, t.z, (qx, qz) => !w.collision.blockedByWater(qx, qz) && !w.collision.outOfBounds(qx, qz));
+  if (!p) return toast('この駅の近くには行けません', 2, true);
+  const heading = t.look && Math.hypot(t.look[0] - p.x, t.look[1] - p.z) > 1 ? headingTo([p.x, p.z], t.look) : p.heading;
+  state.bike.place(p.x, p.z, heading, groundForTeleport(p.x, p.z, p.road));
+  rig.initialized = false;
+  state.routeTimer = 0;
+  openMap(false);
+  toast(`🚇 ${t.name} 駅へワープしました`, 2, true);
+}
+$('metro-warp-btn').addEventListener('click', () => warpToStation($('metro-warp').value));
 
 // ---------------------------------------------------------------- 旅の手帳（J）
 // 地図の画面と同じ扱い: 開いている間は操作を止める。ポーズ中に開いたらポーズを解いてから
