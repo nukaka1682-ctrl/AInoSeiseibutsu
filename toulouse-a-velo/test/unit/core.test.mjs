@@ -472,3 +472,21 @@ test('ジャン・ジョレス通りの車道の際の古い並木（LiDAR の�
   assert.ok(!on(50, 50), '橋の上の同じ名前の道は見ない');
   assert.ok(!on(50, -40), 'ほかの通り');
 });
+
+test('駐車の帯: 旧市街の中心の外の狭い一方通行の住宅街の通りに 2 m を足して片側に駐車（中心・両方向・広い道・橋は今まで）', async () => {
+  const { addParkingLanes } = await import('../../src/world/parse.js');
+  const { LocalProjection } = await import('../../src/geo.js');
+  const proj = new LocalProjection(43.5994, 1.4395);
+  const at = (lat, lon) => proj.project(lat, lon);
+  const line = (lat, lon) => { const [x, z] = at(lat, lon); return [[x, z], [x + 40, z]]; };
+  const out = { id: 1, type: 'residential', width: 4, oneway: true, pts: line(43.6106, 1.4535) }; // Chalets（中心の外）
+  const core = { id: 2, type: 'residential', width: 4, oneway: true, pts: line(43.6008, 1.4430) }; // 旧市街
+  const two = { id: 3, type: 'residential', width: 4, oneway: false, pts: line(43.6106, 1.4535) };
+  const wide = { id: 4, type: 'tertiary', width: 7, oneway: true, pts: line(43.6106, 1.4535) };
+  const bridge = { id: 5, type: 'residential', width: 4, oneway: true, bridge: true, pts: line(43.6106, 1.4535) };
+  assert.equal(addParkingLanes([out, core, two, wide, bridge], proj), 1);
+  assert.equal(out.width, 6);
+  assert.ok(out.parkSide === 'right' || out.parkSide === 'left');
+  assert.equal(core.width, 4);
+  assert.equal(two.width, 4);
+});

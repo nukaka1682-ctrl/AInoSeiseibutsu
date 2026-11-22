@@ -48,6 +48,8 @@ const PARK_TYPES = new Set(['residential', 'unclassified', 'tertiary', 'secondar
 const KERB_TYPES = new Set(['residential', 'unclassified', 'road']); // 歩道に半分乗り上げて止める通り
 const KERB_OVER = 0.85; // 半分乗り上げた車の、縁石の車道側の縁から歩道へ出る幅
 const KERB_MIN_E = 1.6; // 半分乗り上げて止める歩道の最小の幅
+const WALK_TYPES = new Set(['residential', 'tertiary', 'unclassified', 'road']); // 縁石の外の舗装に止める一方通行の狭い通り
+const WALK_LEFT = 0.7; // 縁石の外に止めた車の、建物の側に残す歩く幅
 const BOLLARD_STEP = 1.4;
 const CENTRE_R = 1500; // 広い歩道に車止めを並べる中心部（原点＝Pont Neuf からの距離）
 const NARROW_BOLLARD_R = 1100, NARROW_BOLLARD_STEP = 2.1; // 狭い歩道の縁にも車止めを並べる中心部（Saint-Cyprien を含む）と間隔（m）
@@ -105,6 +107,9 @@ export function parkMode(road, e) {
   if (road.width >= 2 * one + BIKE_LANE) return 'both';
   if (road.width >= one + BIKE_LANE) return 'one';
   if (KERB_TYPES.has(road.type) && e >= KERB_MIN_E && road.width - (CAR_W - KERB_OVER) >= BIKE_LANE) return 'kerb';
+  // 一方通行の狭い通り（IGN の幅は走る車線だけの 3〜4 m）: 縁石の外の、建物の前まで広い舗装の上に縦列に（街路写真帖 I11・I12 の
+  // フォーブールの通り: Rue Guillemin Tarayre・Rue de la Concorde など、車線の脇にずらりと駐車）。歩く幅 WALK_LEFT m を残す
+  if (road.oneway && WALK_TYPES.has(road.type) && road.width <= 4.5 && e >= CAR_W + CURB_GAP + WALK_LEFT) return 'walk';
   return null;
 }
 
@@ -388,8 +393,9 @@ export function planFurniture({ parsed, plan, clip, curbs = [], inOldTown = () =
     const mode = lane ? null : parkMode(road, curbAt(rows, (s0 + s1) / 2).e);
     if (mode && !road.bridge) {
       if (mode === 'both' || (road.parkSide ? road.parkSide === 'right' : hash01(id, 60) < 0.5) === right) {
-        const kerb = mode === 'kerb';
-        const off = kerb ? -KERB_OVER + CAR_W / 2 : CURB_GAP + CAR_W / 2; // 縁石の車道側の縁から車の中心まで（車道の側へ）
+        const kerb = mode === 'kerb', walk = mode === 'walk';
+        // 縁石の車道側の縁から車の中心まで（車道の側へ。walk は縁石の外の舗装の上なので負）
+        const off = walk ? -(CURB_W + CURB_GAP + CAR_W / 2) : kerb ? -KERB_OVER + CAR_W / 2 : CURB_GAP + CAR_W / 2;
         for (const { k, s: sk } of slotsAlong(s0 - CAR_PITCH, s1 + CAR_PITCH, CAR_PITCH, hash01(id, 61) * CAR_PITCH)) {
           const h = (id ^ Math.imul(k + 7919 * side, 0x9e3779b1)) | 0;
           const s = sk + (hash01(h, 62) - 0.5) * 0.7;
@@ -399,15 +405,21 @@ export function planFurniture({ parsed, plan, clip, curbs = [], inOldTown = () =
           if ((!open0 && s - (CAR_L / 2) * sl - 0.3 < s0) || (!open1 && s + (CAR_L / 2) * sl + 0.3 > s1)) continue;
           const p = curbAt(rows, s);
           if (kerb && p.e < KERB_MIN_E) continue;
+          if (walk && p.e < CAR_W + CURB_GAP + WALK_LEFT) continue;
           const x = p.ax - p.nx * off, z = p.az - p.nz * off;
           if (inOldTown(x, z) || onLane(x, z) || ctx.nearJunction(x, z, 11) || ctx.crossingZone(road, x, z, 4.5) || ctx.nearBridgeEnd(x, z, 14) || ctx.nearRail(x, z, 4.5)) continue;
           // ほかの通りの歩道にかかる所（交差点の角）は置かない。車道側の車輪の下は車道（高さ 0）
           const hx = p.ux * (CAR_L / 2) * sl, hz = p.uz * (CAR_L / 2) * sl;
           const ox = kerb ? -p.nx * (CAR_W / 2 - 0.2) : 0, oz = kerb ? -p.nz * (CAR_W / 2 - 0.2) : 0;
-          if (heightAt(x + ox + hx, z + oz + hz) > 0.02 || heightAt(x + ox - hx, z + oz - hz) > 0.02 || heightAt(x + ox, z + oz) > 0.02) continue;
+          if (!walk && (heightAt(x + ox + hx, z + oz + hz) > 0.02 || heightAt(x + ox - hx, z + oz - hz) > 0.02 || heightAt(x + ox, z + oz) > 0.02)) continue;
           const fwd = right || road.oneway ? 1 : -1;
           let y = 0, roll = 0;
-          if (kerb) {
+          if (walk) {
+            // 縁石の外の舗装の上: 街灯・木・ごみ箱・建物にかからない所だけ。高さは舗装の上
+            if ([-1, -0.5, 0, 0.5, 1].some((t) => !clear(x + hx * t * 0.9, z + hz * t * 0.9, 0.95))) continue;
+            y = Math.max(heightAt(x, z), heightAt(x + hx, z + hz), heightAt(x - hx, z - hz));
+            for (const t of [-1, 0, 1]) take(x + hx * t * 0.8, z + hz * t * 0.8, 1.0);
+          } else if (kerb) {
             // 歩道側の車輪は歩道の上: 歩道の街灯・木・ごみ箱・建物にかからない所だけ。車を横に少し傾ける
             const ix = p.cx + p.nx * (KERB_OVER - CURB_W) * 0.5, iz = p.cz + p.nz * (KERB_OVER - CURB_W) * 0.5;
             if ([-1, 0, 1].some((t) => !clear(ix + hx * t * 0.8, iz + hz * t * 0.8, 0.45))) continue;

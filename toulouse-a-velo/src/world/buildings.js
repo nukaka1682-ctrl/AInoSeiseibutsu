@@ -74,9 +74,15 @@ const STYLE_MIX = {
   concrete: [[STYLE.modern, 0.6], [STYLE.cream, 0.25], [STYLE.ochre, 0.15]],
   wood: [[STYLE.modern, 1]],
   other: [[STYLE.brickStone, 0.2], [STYLE.brickShutters, 0.24], [STYLE.ochre, 0.1], [STYLE.taupe, 0.1], [STYLE.salmon, 0.12], [STYLE.cream, 0.1], [STYLE.rose, 0.14]],
+  // 郊外の低い家（街路写真帖 01〜05 の北の住宅地: クリーム色・ベージュ・サーモン色の漆喰〔crépi〕に瓦屋根が大半、レンガは少し）
+  // 街路写真帖 K14・N12・O12（Côte Pavée・Busca・Saint-Agne）のフォーブールの低い家（toulousaine）は、漆喰にレンガの弓形の窓枠と
+  // 灰色の板の鎧戸が多い（STYLE.faubourg）
+  suburb: [[STYLE.cream, 0.25], [STYLE.faubourg, 0.25], [STYLE.ochre, 0.15], [STYLE.salmon, 0.1], [STYLE.taupe, 0.1], [STYLE.brickShutters, 0.15]],
   // 旧市街のレンガ造り・材料の分からない建物: 写真の街並みのとおり 8 割はレンガ（ばら色の漆喰にレンガの窓枠を含む）
   oldTown: [[STYLE.brickStone, 0.32], [STYLE.brickShutters, 0.34], [STYLE.rose, 0.14], [STYLE.ochre, 0.07], [STYLE.salmon, 0.07], [STYLE.cream, 0.06]],
 };
+// 郊外の様式にする、エリアの原点（ポン・ヌフのあたり）からの距離（m）。内側（環状の大通りのすぐ外まで）はレンガの家並み
+const SUBURB_R = 1600;
 export function facadeStyle(b) {
   if (b.style != null) return b.style; // 決まった様式（landmarkfacades.js の歴史的な建物）
   const mat = b.tags['building:material'];
@@ -96,6 +102,12 @@ export function facadeStyle(b) {
     if (mat === 'brick') return STYLE.brickGrid;
     const r = hash01(b.id, 21);
     return r < 0.45 ? STYLE.residence : r < 0.8 ? STYLE.whiteModern : STYLE.modern;
+  }
+  // 中心から SUBURB_R m より外の、2 階建てまで（8 m まで）の家は郊外の様式（材料がレンガ・石と分かっている家は除く）
+  if (!b.oldTown && mat !== 'brick' && mat !== 'stone' && b.inside && Math.hypot(b.inside[0], b.inside[1]) > SUBURB_R && (lv || 1) <= 2 && (h || 6) <= 8) {
+    let r = hash01(b.id, 21);
+    for (const [style, p] of STYLE_MIX.suburb) if ((r -= p) < 0) return style;
+    return STYLE.cream;
   }
   const key = mat === 'sandstone' || mat === 'limestone' ? 'stone' : mat === 'plaster' || mat === 'render' ? 'other' : mat;
   const mix = (b.oldTown && (key === 'brick' || !STYLE_MIX[key]) ? STYLE_MIX.oldTown : STYLE_MIX[key]) || STYLE_MIX.other;
