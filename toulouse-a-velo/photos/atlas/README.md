@@ -15,7 +15,7 @@
 
 取り出しは、まず作業用のフォルダに全部 `python3 scripts/atlas-extract.py <作業フォルダ> <PDF>…`（すでにある id は飛ばすので、
 追加の PDF だけ渡せばよい）、次に `python3 scripts/atlas-sync.py <作業フォルダ> photos/atlas 3000` で半径 3 km の分だけをここへ。
-受け取り済み: Atlas 01〜26（区画 A07〜T15。全 55,502 枚）、Supplement 01〜04（区画 A07〜K12。1,821 枚）。
+受け取り済み: Atlas 01〜26（区画 A07〜T15。全 55,502 枚）、Supplement 01〜07（区画 A07〜T15。2,923 枚）。
 ここにあるのは、そのうち半径 3 km 以内の index.jsonl の枚数。
 
 - 補遺（Toulouse_5km_Supplement）の写真は id が `A07-S001` の形（500 × 300 px）。index.jsonl の行に `source`（Panoramax・

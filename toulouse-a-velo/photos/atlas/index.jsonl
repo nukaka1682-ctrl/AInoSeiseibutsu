@@ -19605,6 +19605,7 @@
 {"id": "K12-S001", "cell": "K12", "street": "Place Occitane", "lat": 43.603204, "lon": 1.450201, "date": "2020-03-15", "author": "tyndare", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
 {"id": "K12-S002", "cell": "K12", "street": "Place Occitane", "lat": 43.602762, "lon": 1.450183, "date": "2020-03-15", "author": "tyndare", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
 {"id": "K12-S003", "cell": "K12", "street": "Rue Des Cheminees", "lat": 43.60104, "lon": 1.450286, "date": "2020-06-21", "author": "tyndare", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
+{"id": "K12-S004", "cell": "K12", "street": "Rue Des Penitents Blancs", "lat": 43.602388, "lon": 1.45016, "date": "2014-08-08", "author": "zors1843", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
 {"id": "K13-001", "cell": "K13", "street": "Avenue Camille Pujol", "lat": 43.601029, "lon": 1.46202, "date": "2025-11-06", "author": "Yod4z", "licence": "CC BY-SA 4.0"}
 {"id": "K13-002", "cell": "K13", "street": "Avenue Camille Pujol", "lat": 43.601215, "lon": 1.461158, "date": "2025-11-06", "author": "Yod4z", "licence": "CC BY-SA 4.0"}
 {"id": "K13-003", "cell": "K13", "street": "Avenue Camille Pujol", "lat": 43.600953, "lon": 1.462363, "date": "2025-11-06", "author": "Yod4z", "licence": "CC BY-SA 4.0"}
@@ -20877,6 +20878,13 @@
 {"id": "K15-249", "cell": "K15", "street": "Rue Salgues", "lat": 43.602556, "lon": 1.469976, "date": "2023-09-27", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "K15-250", "cell": "K15", "street": "Rue Salgues", "lat": 43.602672, "lon": 1.470193, "date": "2023-09-27", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "K15-251", "cell": "K15", "street": "Rue Salgues", "lat": 43.602758, "lon": 1.470345, "date": "2023-09-27", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
+{"id": "K15-S001", "cell": "K15", "street": "Av Jacques Chirac", "lat": 43.603942, "lon": 1.474876, "date": "2023-08-24", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "K15-S002", "cell": "K15", "street": "Av Jean Chaubet", "lat": 43.601467, "lon": 1.469114, "date": "2023-09-27", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "K15-S003", "cell": "K15", "street": "Che Des Fontanelles", "lat": 43.601428, "lon": 1.471816, "date": "2023-09-27", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "K15-S004", "cell": "K15", "street": "Rue Antoine Courthieu", "lat": 43.604342, "lon": 1.468788, "date": "2023-09-27", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "K15-S005", "cell": "K15", "street": "Rue Henriette Achiary", "lat": 43.600388, "lon": 1.474074, "date": "2023-09-26", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "K15-S006", "cell": "K15", "street": "Rue J Et M Dieulafoy", "lat": 43.602505, "lon": 1.472705, "date": "2023-09-27", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "K15-S007", "cell": "K15", "street": "Rue Monie", "lat": 43.604376, "lon": 1.47255, "date": "2023-09-27", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
 {"id": "K16-001", "cell": "K16", "street": "Avenue de Castres", "lat": 43.600623, "lon": 1.476395, "date": "2023-08-18", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "K16-002", "cell": "K16", "street": "Avenue de Castres", "lat": 43.600261, "lon": 1.477411, "date": "2023-08-18", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "K16-003", "cell": "K16", "street": "Avenue de Castres", "lat": 43.600149, "lon": 1.477638, "date": "2023-08-18", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
@@ -21130,6 +21138,11 @@
 {"id": "K16-275", "cell": "K16", "street": "Voie Anonyme", "lat": 43.602241, "lon": 1.478118, "date": "2023-09-20", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "K16-276", "cell": "K16", "street": "Voie Anonyme", "lat": 43.601579, "lon": 1.477585, "date": "2023-10-02", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "K16-277", "cell": "K16", "street": "Voie Anonyme", "lat": 43.601667, "lon": 1.477695, "date": "2023-10-02", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
+{"id": "K16-S001", "cell": "K16", "street": "Voie sans nom identifié", "lat": 43.602795, "lon": 1.476843, "date": "2023-10-02", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "K16-S003", "cell": "K16", "street": "Rue Andre Theuriet", "lat": 43.602901, "lon": 1.478541, "date": "2023-10-02", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "K16-S004", "cell": "K16", "street": "Rue Chateau Perpin", "lat": 43.602726, "lon": 1.478985, "date": "2023-10-02", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "K16-S005", "cell": "K16", "street": "Rue De L’Ayga", "lat": 43.602708, "lon": 1.478058, "date": "2023-10-02", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "K16-S006", "cell": "K16", "street": "Rue De L’Ayga", "lat": 43.602492, "lon": 1.477988, "date": "2023-10-02", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
 {"id": "L05-001", "cell": "L05", "street": "Avenue Raymond Badiou", "lat": 43.599416, "lon": 1.409135, "date": "2024-09-16", "author": "leofra31", "licence": "CC BY-SA 4.0"}
 {"id": "L05-002", "cell": "L05", "street": "Avenue Raymond Badiou", "lat": 43.599467, "lon": 1.40934, "date": "2024-09-16", "author": "leofra31", "licence": "CC BY-SA 4.0"}
 {"id": "L05-003", "cell": "L05", "street": "Avenue Raymond Badiou", "lat": 43.599468, "lon": 1.409558, "date": "2024-09-16", "author": "leofra31", "licence": "CC BY-SA 4.0"}
@@ -21207,6 +21220,12 @@
 {"id": "L05-076", "cell": "L05", "street": "Rue Roquemaurel", "lat": 43.596169, "lon": 1.412402, "date": "2026-04-16", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "L05-077", "cell": "L05", "street": "Rue Roquemaurel", "lat": 43.596162, "lon": 1.412567, "date": "2026-04-16", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "L05-078", "cell": "L05", "street": "Rue Roquemaurel", "lat": 43.596147, "lon": 1.412736, "date": "2024-09-13", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
+{"id": "L05-S001", "cell": "L05", "street": "Pl Pierre Lartigue", "lat": 43.596118, "lon": 1.409928, "date": "2024-09-13", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "L05-S002", "cell": "L05", "street": "Rue Anne Frank", "lat": 43.595731, "lon": 1.411358, "date": "2024-09-13", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "L05-S003", "cell": "L05", "street": "Rue Anne Frank", "lat": 43.595514, "lon": 1.411371, "date": "2024-09-13", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "L05-S004", "cell": "L05", "street": "Rue Francoise Giroud", "lat": 43.595723, "lon": 1.412637, "date": "2024-09-13", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "L05-S005", "cell": "L05", "street": "Rue Jeannette Mac Donald", "lat": 43.599867, "lon": 1.41064, "date": "2024-09-13", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "L05-S006", "cell": "L05", "street": "Rue Roger Sicre", "lat": 43.59974, "lon": 1.408917, "date": "2024-09-13", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
 {"id": "L06-001", "cell": "L06", "street": "Avenue de Grande Bretagne", "lat": 43.599552, "lon": 1.41602, "date": "2026-04-16", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "L06-002", "cell": "L06", "street": "Avenue de Grande Bretagne", "lat": 43.599497, "lon": 1.416164, "date": "2026-04-16", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "L06-003", "cell": "L06", "street": "Avenue de Grande Bretagne", "lat": 43.599422, "lon": 1.416335, "date": "2026-04-16", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
@@ -21350,6 +21369,13 @@
 {"id": "L06-141", "cell": "L06", "street": "Rue Vincent Scotto", "lat": 43.598103, "lon": 1.418376, "date": "2026-04-16", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "L06-142", "cell": "L06", "street": "Rue Vincent Scotto", "lat": 43.598226, "lon": 1.41841, "date": "2026-04-16", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "L06-143", "cell": "L06", "street": "Rue Vincent Scotto", "lat": 43.598331, "lon": 1.418491, "date": "2026-04-16", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
+{"id": "L06-S001", "cell": "L06", "street": "Voie sans nom identifié", "lat": 43.599725, "lon": 1.415891, "date": "2024-09-13", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "L06-S002", "cell": "L06", "street": "Voie sans nom identifié", "lat": 43.595608, "lon": 1.418289, "date": "2024-09-13", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "L06-S003", "cell": "L06", "street": "Avenue de Grande Bretagne", "lat": 43.598282, "lon": 1.418615, "date": "2024-09-13", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "L06-S004", "cell": "L06", "street": "Avenue de Grande Bretagne", "lat": 43.598201, "lon": 1.418785, "date": "2024-09-13", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "L06-S005", "cell": "L06", "street": "Rue Rosa Parks", "lat": 43.595888, "lon": 1.414431, "date": "2024-09-13", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "L06-S006", "cell": "L06", "street": "Rue Rosa Parks", "lat": 43.595468, "lon": 1.414465, "date": "2024-09-13", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "L06-S007", "cell": "L06", "street": "Rue Vincent Scotto", "lat": 43.597251, "lon": 1.417423, "date": "2024-09-13", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
 {"id": "L07-001", "cell": "L07", "street": "Allées Maurice Sarraut", "lat": 43.595993, "lon": 1.422739, "date": "2024-09-11", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "L07-002", "cell": "L07", "street": "Allées Maurice Sarraut", "lat": 43.595523, "lon": 1.422338, "date": "2026-04-25", "author": "leofra31", "licence": "CC BY-SA 4.0"}
 {"id": "L07-003", "cell": "L07", "street": "Allées Maurice Sarraut", "lat": 43.595586, "lon": 1.422386, "date": "2026-04-25", "author": "leofra31", "licence": "CC BY-SA 4.0"}
@@ -21681,6 +21707,9 @@
 {"id": "L07-329", "cell": "L07", "street": "Rue Roquemaurel", "lat": 43.597168, "lon": 1.420552, "date": "2026-04-16", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "L07-330", "cell": "L07", "street": "Rue Roquemaurel", "lat": 43.597212, "lon": 1.420733, "date": "2026-04-16", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "L07-331", "cell": "L07", "street": "Rue Roquemaurel", "lat": 43.597258, "lon": 1.420916, "date": "2026-04-16", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
+{"id": "L07-S001", "cell": "L07", "street": "Voie sans nom identifié", "lat": 43.597731, "lon": 1.420292, "date": "2026-04-16", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "L07-S002", "cell": "L07", "street": "Voie sans nom identifié", "lat": 43.595464, "lon": 1.419353, "date": "2024-09-11", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "L07-S003", "cell": "L07", "street": "Avenue de Grande Bretagne", "lat": 43.598056, "lon": 1.419118, "date": "2024-09-13", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
 {"id": "L08-001", "cell": "L08", "street": "Allées Charles de Fitte", "lat": 43.598492, "lon": 1.430446, "date": "2024-09-24", "author": "barnes38", "licence": "CC BY-SA 4.0"}
 {"id": "L08-002", "cell": "L08", "street": "Allées Charles de Fitte", "lat": 43.599844, "lon": 1.429524, "date": "2024-09-02", "author": "barnes38", "licence": "CC BY-SA 4.0"}
 {"id": "L08-003", "cell": "L08", "street": "Allées Charles de Fitte", "lat": 43.599677, "lon": 1.429644, "date": "2024-09-02", "author": "barnes38", "licence": "CC BY-SA 4.0"}
@@ -23004,6 +23033,28 @@
 {"id": "L10-268", "cell": "L10", "street": "Rue Joutx Aigues", "lat": 43.598442, "lon": 1.443202, "date": "2020-06-28", "author": null, "licence": null}
 {"id": "L10-269", "cell": "L10", "street": "Rue Peyrolières", "lat": 43.59979, "lon": 1.441188, "date": "2026-06-17", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "L10-270", "cell": "L10", "street": "Rue Saint-Rémésy", "lat": 43.595968, "lon": 1.443748, "date": "2020-03-14", "author": null, "licence": null}
+{"id": "L10-S001", "cell": "L10", "street": "Dsc La Halle Aux Poissons", "lat": 43.599326, "lon": 1.440943, "date": "2020-03-14", "author": "tyndare", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
+{"id": "L10-S002", "cell": "L10", "street": "Rue de la Madeleine", "lat": 43.599123, "lon": 1.442609, "date": "2020-06-28", "author": "tyndare", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
+{"id": "L10-S003", "cell": "L10", "street": "Rue De La Madeleine", "lat": 43.599108, "lon": 1.442596, "date": "2018-11-01", "author": "bdoin", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
+{"id": "L10-S004", "cell": "L10", "street": "Rue de la Madeleine", "lat": 43.599098, "lon": 1.442298, "date": "2020-06-28", "author": "tyndare", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
+{"id": "L10-S005", "cell": "L10", "street": "Rue De La Madeleine", "lat": 43.599032, "lon": 1.442272, "date": "2018-11-01", "author": "bdoin", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
+{"id": "L10-S006", "cell": "L10", "street": "Rue De La Madeleine", "lat": 43.599011, "lon": 1.441951, "date": "2018-11-01", "author": "bdoin", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
+{"id": "L10-S007", "cell": "L10", "street": "Rue des Couteliers", "lat": 43.598462, "lon": 1.441771, "date": "2018-11-01", "author": "bdoin", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
+{"id": "L10-S008", "cell": "L10", "street": "Rue Des Couteliers", "lat": 43.598435, "lon": 1.441793, "date": "2020-03-14", "author": "tyndare", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
+{"id": "L10-S009", "cell": "L10", "street": "Rue des Paradoux", "lat": 43.599579, "lon": 1.442534, "date": "2020-03-14", "author": "tyndare", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
+{"id": "L10-S010", "cell": "L10", "street": "Rue des Paradoux", "lat": 43.599283, "lon": 1.442717, "date": "2020-03-14", "author": "tyndare", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
+{"id": "L10-S011", "cell": "L10", "street": "Rue Des Paradoux", "lat": 43.599268, "lon": 1.442718, "date": "2020-06-28", "author": "tyndare", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
+{"id": "L10-S012", "cell": "L10", "street": "Rue des Paradoux", "lat": 43.599107, "lon": 1.442738, "date": "2020-03-14", "author": "tyndare", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
+{"id": "L10-S013", "cell": "L10", "street": "Rue Des Pretres", "lat": 43.597163, "lon": 1.4438, "date": "2020-06-28", "author": "tyndare", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
+{"id": "L10-S014", "cell": "L10", "street": "Rue Du Pont De Tounis", "lat": 43.597689, "lon": 1.441668, "date": "2021-06-10", "author": "jourf", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
+{"id": "L10-S015", "cell": "L10", "street": "Rue Joutx Aigues", "lat": 43.598454, "lon": 1.443676, "date": "2020-06-28", "author": "tyndare", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
+{"id": "L10-S016", "cell": "L10", "street": "Rue Pierre Bruniere", "lat": 43.59565, "lon": 1.443525, "date": "2020-03-14", "author": "tyndare", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
+{"id": "L10-S017", "cell": "L10", "street": "Rue Saint Jean", "lat": 43.597099, "lon": 1.443306, "date": "2020-06-28", "author": "tyndare", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
+{"id": "L10-S018", "cell": "L10", "street": "Rue Saint Jean", "lat": 43.597076, "lon": 1.44302, "date": "2020-06-28", "author": "tyndare", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
+{"id": "L10-S019", "cell": "L10", "street": "Rue Saint Jean", "lat": 43.597072, "lon": 1.443017, "date": "2021-06-10", "author": "jourf", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
+{"id": "L10-S020", "cell": "L10", "street": "Rue Saint Remesy", "lat": 43.596982, "lon": 1.443389, "date": "2020-03-14", "author": "tyndare", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
+{"id": "L10-S021", "cell": "L10", "street": "Rue Saint Remesy", "lat": 43.596354, "lon": 1.44356, "date": "2020-03-14", "author": "tyndare", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
+{"id": "L10-S022", "cell": "L10", "street": "Rue Saint-Rémésy", "lat": 43.596753, "lon": 1.443436, "date": "2020-03-14", "author": "tyndare", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
 {"id": "L11-001", "cell": "L11", "street": "Grande Rue Nazareth", "lat": 43.596469, "lon": 1.447064, "date": "2026-06-17", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "L11-002", "cell": "L11", "street": "Grande Rue Nazareth", "lat": 43.596533, "lon": 1.447146, "date": "2026-06-17", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "L11-003", "cell": "L11", "street": "Grande Rue Nazareth", "lat": 43.596607, "lon": 1.447252, "date": "2026-06-17", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
@@ -23320,6 +23371,19 @@
 {"id": "L11-314", "cell": "L11", "street": "Rue Tolosane", "lat": 43.598519, "lon": 1.447112, "date": "2024-09-03", "author": "barnes38", "licence": "CC BY-SA 4.0"}
 {"id": "L11-315", "cell": "L11", "street": "Rue Tolosane", "lat": 43.598451, "lon": 1.44709, "date": "2024-09-03", "author": "barnes38", "licence": "CC BY-SA 4.0"}
 {"id": "L11-316", "cell": "L11", "street": "Rue Vélane", "lat": 43.59716, "lon": 1.447948, "date": "2026-06-17", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
+{"id": "L11-S001", "cell": "L11", "street": "Rue Bouquieres", "lat": 43.599002, "lon": 1.446191, "date": "2020-06-28", "author": "tyndare", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
+{"id": "L11-S002", "cell": "L11", "street": "Rue De La Trilhe", "lat": 43.596137, "lon": 1.449293, "date": "2020-06-27", "author": "tyndare", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
+{"id": "L11-S003", "cell": "L11", "street": "Rue De La Trilhe", "lat": 43.595939, "lon": 1.449022, "date": "2020-06-27", "author": "tyndare", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
+{"id": "L11-S004", "cell": "L11", "street": "Rue des Filatiers", "lat": 43.598658, "lon": 1.44416, "date": "2020-03-15", "author": "tyndare", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
+{"id": "L11-S005", "cell": "L11", "street": "Rue Des Filatiers", "lat": 43.598297, "lon": 1.444192, "date": "2020-03-15", "author": "tyndare", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
+{"id": "L11-S006", "cell": "L11", "street": "Rue Des Regans", "lat": 43.596367, "lon": 1.444989, "date": "2020-06-28", "author": "tyndare", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
+{"id": "L11-S007", "cell": "L11", "street": "Rue D’Aussargues", "lat": 43.59728, "lon": 1.446844, "date": "2020-06-28", "author": "tyndare", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
+{"id": "L11-S008", "cell": "L11", "street": "Rue Espinasse", "lat": 43.595838, "lon": 1.448074, "date": "2020-06-27", "author": "tyndare", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
+{"id": "L11-S009", "cell": "L11", "street": "Rue Maletache", "lat": 43.598474, "lon": 1.445133, "date": "2020-06-28", "author": "tyndare", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
+{"id": "L11-S010", "cell": "L11", "street": "Rue Maletache", "lat": 43.598449, "lon": 1.444615, "date": "2020-06-28", "author": "tyndare", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
+{"id": "L11-S011", "cell": "L11", "street": "Rue Maletache", "lat": 43.59844, "lon": 1.444179, "date": "2020-06-28", "author": "tyndare", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
+{"id": "L11-S012", "cell": "L11", "street": "Rue Montoulieu Velane", "lat": 43.596595, "lon": 1.449835, "date": "2020-06-27", "author": "tyndare", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
+{"id": "L11-S013", "cell": "L11", "street": "Rue Montoulieu Velane", "lat": 43.596457, "lon": 1.449658, "date": "2020-06-27", "author": "tyndare", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
 {"id": "L12-001", "cell": "L12", "street": "Rue Sainte-Anne", "lat": 43.599823, "lon": 1.450798, "date": "2020-07-04", "author": null, "licence": null}
 {"id": "L12-002", "cell": "L12", "street": "Impasse de la Préfecture", "lat": 43.599621, "lon": 1.450688, "date": "2014-08-08", "author": null, "licence": null}
 {"id": "L12-003", "cell": "L12", "street": "Allée du Colonel Arnaud Beltrame et du Père …", "lat": 43.599925, "lon": 1.450589, "date": "2020-07-04", "author": null, "licence": null}
@@ -23856,6 +23920,11 @@
 {"id": "L12-534", "cell": "L12", "street": "Rue Sainte-Anne", "lat": 43.599179, "lon": 1.450922, "date": "2026-06-17", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "L12-535", "cell": "L12", "street": "Rue Sainte-Anne", "lat": 43.599262, "lon": 1.45096, "date": "2026-06-17", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "L12-536", "cell": "L12", "street": "Rue Sainte-Anne", "lat": 43.599336, "lon": 1.450995, "date": "2026-06-17", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
+{"id": "L12-S001", "cell": "L12", "street": "Allees Forain Francois Verdier", "lat": 43.599453, "lon": 1.451842, "date": "2019-07-06", "author": "photolibre", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
+{"id": "L12-S002", "cell": "L12", "street": "Allees Forain Francois Verdier", "lat": 43.599376, "lon": 1.451816, "date": "2017-08-10", "author": "emilio-gomez", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
+{"id": "L12-S003", "cell": "L12", "street": "Allees Forain Francois Verdier", "lat": 43.599266, "lon": 1.451817, "date": "2017-08-10", "author": "emilio-gomez", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
+{"id": "L12-S004", "cell": "L12", "street": "Allees Forain Francois Verdier", "lat": 43.599239, "lon": 1.451873, "date": "2019-07-06", "author": "photolibre", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
+{"id": "L12-S005", "cell": "L12", "street": "Allées Forain François Verdier", "lat": 43.599459, "lon": 1.451672, "date": "2020-07-04", "author": "tyndare", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
 {"id": "L13-001", "cell": "L13", "street": "Avenue Jean Rieux", "lat": 43.597472, "lon": 1.459129, "date": "2023-09-28", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "L13-002", "cell": "L13", "street": "Avenue Jean Rieux", "lat": 43.597567, "lon": 1.458719, "date": "2023-08-04", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "L13-003", "cell": "L13", "street": "Avenue Jean Rieux", "lat": 43.596567, "lon": 1.461488, "date": "2023-09-26", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
@@ -24534,6 +24603,13 @@
 {"id": "L14-376", "cell": "L14", "street": "Rue Victor Basch", "lat": 43.599817, "lon": 1.467475, "date": "2023-09-26", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "L14-377", "cell": "L14", "street": "Rue Victor Basch", "lat": 43.599808, "lon": 1.467582, "date": "2023-09-26", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "L14-378", "cell": "L14", "street": "Rue Victor Basch", "lat": 43.599785, "lon": 1.467733, "date": "2023-09-26", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
+{"id": "L14-S001", "cell": "L14", "street": "Voie sans nom identifié", "lat": 43.597363, "lon": 1.467196, "date": "2023-09-26", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "L14-S002", "cell": "L14", "street": "Pl Victor Basch", "lat": 43.599763, "lon": 1.467931, "date": "2023-09-26", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "L14-S003", "cell": "L14", "street": "Rue Claude Debussy", "lat": 43.596144, "lon": 1.466883, "date": "2023-09-26", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "L14-S004", "cell": "L14", "street": "Rue Claude Debussy", "lat": 43.595976, "lon": 1.466399, "date": "2023-09-26", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "L14-S005", "cell": "L14", "street": "Rue Du Soleil Levant", "lat": 43.595712, "lon": 1.46739, "date": "2023-09-26", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "L14-S006", "cell": "L14", "street": "Rue Du Soleil Levant", "lat": 43.595556, "lon": 1.467541, "date": "2023-09-26", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "L14-S007", "cell": "L14", "street": "Rue Jean Andrieu", "lat": 43.598635, "lon": 1.468455, "date": "2023-09-26", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
 {"id": "L15-001", "cell": "L15", "street": "Avenue des Tilleuls", "lat": 43.599568, "lon": 1.46876, "date": "2023-09-26", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "L15-002", "cell": "L15", "street": "Avenue des Tilleuls", "lat": 43.599414, "lon": 1.468799, "date": "2023-09-26", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "L15-003", "cell": "L15", "street": "Avenue des Tilleuls", "lat": 43.599224, "lon": 1.468853, "date": "2023-09-26", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
@@ -24768,6 +24844,11 @@
 {"id": "L15-232", "cell": "L15", "street": "Rue Moquin Tandon", "lat": 43.599321, "lon": 1.474408, "date": "2023-09-26", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "L15-233", "cell": "L15", "street": "Rue Saint-Paër", "lat": 43.595757, "lon": 1.47084, "date": "2023-09-22", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "L15-234", "cell": "L15", "street": "Rue Saint-Paër", "lat": 43.595588, "lon": 1.470863, "date": "2023-09-22", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
+{"id": "L15-S001", "cell": "L15", "street": "Av Raymond Naves", "lat": 43.598886, "lon": 1.469881, "date": "2023-09-26", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "L15-S002", "cell": "L15", "street": "Bd Deltour", "lat": 43.599247, "lon": 1.472531, "date": "2023-09-26", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "L15-S003", "cell": "L15", "street": "Bd Deltour", "lat": 43.596591, "lon": 1.473161, "date": "2023-09-22", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "L15-S004", "cell": "L15", "street": "Rue Du Lac D’Oo", "lat": 43.598696, "lon": 1.470449, "date": "2023-09-26", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "L15-S005", "cell": "L15", "street": "Rue Henriette Achiary", "lat": 43.599223, "lon": 1.474513, "date": "2023-09-26", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
 {"id": "L16-001", "cell": "L16", "street": "Rue Mascard", "lat": 43.598588, "lon": 1.47588, "date": "2023-09-26", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "L16-002", "cell": "L16", "street": "Avenue de Castres", "lat": 43.599511, "lon": 1.478714, "date": "2026-05-09", "author": "f-systemes", "licence": "Licence Ouverte 2.0"}
 {"id": "L16-003", "cell": "L16", "street": "Avenue de Castres", "lat": 43.599433, "lon": 1.478853, "date": "2026-05-09", "author": "f-systemes", "licence": "Licence Ouverte 2.0"}
@@ -24937,6 +25018,11 @@
 {"id": "L16-222", "cell": "L16", "street": "Rue Saint Expedit", "lat": 43.59692, "lon": 1.475529, "date": "2023-09-26", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "L16-223", "cell": "L16", "street": "Rue Saint Expedit", "lat": 43.597066, "lon": 1.475663, "date": "2023-09-26", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "L16-224", "cell": "L16", "street": "Rue Saint Expedit", "lat": 43.597213, "lon": 1.475789, "date": "2023-09-26", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
+{"id": "L16-S001", "cell": "L16", "street": "Voie sans nom identifié", "lat": 43.599298, "lon": 1.479203, "date": "2023-08-18", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "L16-S002", "cell": "L16", "street": "Av Raymond Naves", "lat": 43.596671, "lon": 1.477634, "date": "2023-09-26", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "L16-S003", "cell": "L16", "street": "Av Raymond Naves", "lat": 43.59614, "lon": 1.478805, "date": "2023-09-20", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "L16-S004", "cell": "L16", "street": "Bd De La Falaise", "lat": 43.59723, "lon": 1.478584, "date": "2023-09-26", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "L16-S005", "cell": "L16", "street": "Pl Suzanne Buisson", "lat": 43.59949, "lon": 1.475648, "date": "2023-09-26", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
 {"id": "M05-006", "cell": "M05", "street": "Rue de Negogousses", "lat": 43.593499, "lon": 1.409675, "date": "2025-01-01", "author": "lloegyr", "licence": "CC BY-SA 4.0"}
 {"id": "M05-007", "cell": "M05", "street": "Rue de Negogousses", "lat": 43.593471, "lon": 1.40992, "date": "2025-01-01", "author": "lloegyr", "licence": "CC BY-SA 4.0"}
 {"id": "M05-008", "cell": "M05", "street": "Rue de Negogousses", "lat": 43.593447, "lon": 1.410166, "date": "2025-01-01", "author": "lloegyr", "licence": "CC BY-SA 4.0"}
@@ -25040,6 +25126,9 @@
 {"id": "M05-147", "cell": "M05", "street": "Rue Pedro Gailhard", "lat": 43.592168, "lon": 1.412267, "date": "2025-07-08", "author": "leofra31", "licence": "CC BY-SA 4.0"}
 {"id": "M05-148", "cell": "M05", "street": "Rue Pedro Gailhard", "lat": 43.592229, "lon": 1.412446, "date": "2025-07-08", "author": "leofra31", "licence": "CC BY-SA 4.0"}
 {"id": "M05-149", "cell": "M05", "street": "Rue Pedro Gailhard", "lat": 43.592074, "lon": 1.411928, "date": "2025-03-13", "author": "leofra31", "licence": "CC BY-SA 4.0"}
+{"id": "M05-S001", "cell": "M05", "street": "Voie sans nom identifié", "lat": 43.593996, "lon": 1.409475, "date": "2024-09-13", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "M05-S003", "cell": "M05", "street": "Imp De L’Hippodrome", "lat": 43.591578, "lon": 1.411005, "date": "2024-09-16", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "M05-S004", "cell": "M05", "street": "Rue Anne Frank", "lat": 43.59504, "lon": 1.41135, "date": "2024-09-13", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
 {"id": "M06-001", "cell": "M06", "street": "Avenue de Lombez", "lat": 43.59414, "lon": 1.412767, "date": "2024-09-13", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "M06-002", "cell": "M06", "street": "Avenue de Lombez", "lat": 43.59402, "lon": 1.412817, "date": "2024-09-13", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "M06-003", "cell": "M06", "street": "Avenue de Lombez", "lat": 43.593989, "lon": 1.413003, "date": "2024-09-13", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
@@ -25200,6 +25289,15 @@
 {"id": "M06-158", "cell": "M06", "street": "Voie Anonyme", "lat": 43.592971, "lon": 1.414362, "date": "2024-09-16", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "M06-159", "cell": "M06", "street": "Voie Anonyme", "lat": 43.593006, "lon": 1.414084, "date": "2024-09-16", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "M06-160", "cell": "M06", "street": "Voie Anonyme", "lat": 43.59306, "lon": 1.414228, "date": "2024-09-16", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
+{"id": "M06-S001", "cell": "M06", "street": "Voie sans nom identifié", "lat": 43.594125, "lon": 1.413648, "date": "2024-09-13", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "M06-S002", "cell": "M06", "street": "Voie sans nom identifié", "lat": 43.594088, "lon": 1.413361, "date": "2024-09-13", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "M06-S003", "cell": "M06", "street": "Voie sans nom identifié", "lat": 43.594043, "lon": 1.413559, "date": "2024-09-13", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "M06-S004", "cell": "M06", "street": "Voie sans nom identifié", "lat": 43.594021, "lon": 1.413147, "date": "2024-09-13", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "M06-S005", "cell": "M06", "street": "Av Remy Sans", "lat": 43.595041, "lon": 1.416282, "date": "2024-09-13", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "M06-S006", "cell": "M06", "street": "Imp Des Arenes", "lat": 43.591722, "lon": 1.416833, "date": "2024-09-16", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "M06-S007", "cell": "M06", "street": "Rue Du Onze Novembre 1918", "lat": 43.592998, "lon": 1.414707, "date": "2024-09-16", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "M06-S008", "cell": "M06", "street": "Rue Du Pech", "lat": 43.591895, "lon": 1.412836, "date": "2024-09-16", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "M06-S009", "cell": "M06", "street": "Rue Jean Joseph Sanfourche", "lat": 43.592891, "lon": 1.415077, "date": "2024-09-16", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
 {"id": "M07-001", "cell": "M07", "street": "Allées Maurice Sarraut", "lat": 43.591717, "lon": 1.419138, "date": "2026-04-25", "author": "leofra31", "licence": "CC BY-SA 4.0"}
 {"id": "M07-002", "cell": "M07", "street": "Allées Maurice Sarraut", "lat": 43.591803, "lon": 1.419303, "date": "2026-04-25", "author": "leofra31", "licence": "CC BY-SA 4.0"}
 {"id": "M07-003", "cell": "M07", "street": "Allées Maurice Sarraut", "lat": 43.591909, "lon": 1.419417, "date": "2026-04-25", "author": "leofra31", "licence": "CC BY-SA 4.0"}
@@ -25382,6 +25480,10 @@
 {"id": "M07-180", "cell": "M07", "street": "Rue Nungesser et Coli", "lat": 43.591539, "lon": 1.420693, "date": "2024-09-11", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "M07-181", "cell": "M07", "street": "Rue Nungesser et Coli", "lat": 43.591694, "lon": 1.420768, "date": "2024-09-11", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "M07-182", "cell": "M07", "street": "Rue Nungesser et Coli", "lat": 43.591143, "lon": 1.420541, "date": "2024-09-11", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
+{"id": "M07-S001", "cell": "M07", "street": "Voie sans nom identifié", "lat": 43.594423, "lon": 1.419174, "date": "2024-09-11", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "M07-S002", "cell": "M07", "street": "Bd Gabriel Koenigs", "lat": 43.592586, "lon": 1.418977, "date": "2024-09-11", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "M07-S003", "cell": "M07", "street": "Rue De Cugnaux", "lat": 43.592007, "lon": 1.421251, "date": "2024-09-10", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "M07-S004", "cell": "M07", "street": "Rue Des Arcs Saint Cyprien", "lat": 43.591141, "lon": 1.425033, "date": "2024-09-11", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
 {"id": "M08-001", "cell": "M08", "street": "Chemin de la Néboude", "lat": 43.590931, "lon": 1.427914, "date": "2024-09-12", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "M08-002", "cell": "M08", "street": "Chemin de la Néboude", "lat": 43.591039, "lon": 1.427983, "date": "2024-09-12", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "M08-003", "cell": "M08", "street": "Chemin de la Néboude", "lat": 43.591161, "lon": 1.428056, "date": "2024-09-12", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
@@ -26550,6 +26652,11 @@
 {"id": "M10-388", "cell": "M10", "street": "Rue Mespoul", "lat": 43.591256, "lon": 1.443714, "date": "2023-07-27", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "M10-389", "cell": "M10", "street": "Voie Anonyme", "lat": 43.591601, "lon": 1.441409, "date": "2026-06-17", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "M10-390", "cell": "M10", "street": "Voie Anonyme", "lat": 43.591486, "lon": 1.441619, "date": "2024-09-03", "author": "barnes38", "licence": "CC BY-SA 4.0"}
+{"id": "M10-S001", "cell": "M10", "street": "Impasse de la Hache", "lat": 43.594419, "lon": 1.443137, "date": "2020-03-14", "author": "tyndare", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
+{"id": "M10-S002", "cell": "M10", "street": "Impasse de la Hache", "lat": 43.594155, "lon": 1.443175, "date": "2020-03-14", "author": "tyndare", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
+{"id": "M10-S003", "cell": "M10", "street": "Pas De Comminges", "lat": 43.594701, "lon": 1.441964, "date": "2020-03-14", "author": "tyndare", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
+{"id": "M10-S004", "cell": "M10", "street": "Pas De Comminges", "lat": 43.594629, "lon": 1.441785, "date": "2020-03-14", "author": "tyndare", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
+{"id": "M10-S005", "cell": "M10", "street": "Rue Des Poutiroux", "lat": 43.595321, "lon": 1.443735, "date": "2020-03-14", "author": "tyndare", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
 {"id": "M11-001", "cell": "M11", "street": "Rue Sainte-Catherine", "lat": 43.591198, "lon": 1.446199, "date": "2026-03-02", "author": "Patchanka", "licence": "CC BY-SA 4.0"}
 {"id": "M11-002", "cell": "M11", "street": "Grande Rue Saint-Michel", "lat": 43.591103, "lon": 1.445506, "date": "2026-03-02", "author": "Patchanka", "licence": "CC BY-SA 4.0"}
 {"id": "M11-003", "cell": "M11", "street": "Grande Rue Saint-Michel", "lat": 43.591118, "lon": 1.445638, "date": "2026-03-02", "author": "Patchanka", "licence": "CC BY-SA 4.0"}
@@ -27052,6 +27159,8 @@
 {"id": "M11-500", "cell": "M11", "street": "Rue Théodore Ozenne", "lat": 43.594501, "lon": 1.448997, "date": "2024-09-03", "author": "barnes38", "licence": "CC BY-SA 4.0"}
 {"id": "M11-501", "cell": "M11", "street": "Rue Théodore Ozenne", "lat": 43.594448, "lon": 1.449086, "date": "2024-09-03", "author": "barnes38", "licence": "CC BY-SA 4.0"}
 {"id": "M11-502", "cell": "M11", "street": "Rue Théodore Ozenne", "lat": 43.594388, "lon": 1.449167, "date": "2024-09-03", "author": "barnes38", "licence": "CC BY-SA 4.0"}
+{"id": "M11-S001", "cell": "M11", "street": "Rue Des Fleurs", "lat": 43.594336, "lon": 1.44634, "date": "2020-03-15", "author": "tyndare", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
+{"id": "M11-S002", "cell": "M11", "street": "Rue Furgole", "lat": 43.594863, "lon": 1.447266, "date": "2020-06-28", "author": "tyndare", "source": "KartaView", "licence": "CC BY-SA 4.0", "pano": false}
 {"id": "M12-001", "cell": "M12", "street": "Allée Matilda", "lat": 43.593905, "lon": 1.451527, "date": "2022-09-12", "author": "fgouget", "licence": "CC BY-SA 4.0"}
 {"id": "M12-002", "cell": "M12", "street": "Allée des Demoiselles", "lat": 43.590958, "lon": 1.45264, "date": "2024-09-24", "author": "barnes38", "licence": "CC BY-SA 4.0"}
 {"id": "M12-003", "cell": "M12", "street": "Allée des Demoiselles", "lat": 43.590933, "lon": 1.452762, "date": "2023-07-25", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
@@ -27849,6 +27958,7 @@
 {"id": "M13-425", "cell": "M13", "street": "Rue René Vaïsse", "lat": 43.595154, "lon": 1.462002, "date": "2023-08-04", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "M13-426", "cell": "M13", "street": "Rue René Vaïsse", "lat": 43.595273, "lon": 1.462029, "date": "2023-08-04", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "M13-427", "cell": "M13", "street": "Rue René Vaïsse", "lat": 43.595391, "lon": 1.462055, "date": "2023-08-04", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
+{"id": "M13-S001", "cell": "M13", "street": "Rue Pierre Brossolette", "lat": 43.591426, "lon": 1.462404, "date": "2023-08-04", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
 {"id": "M14-001", "cell": "M14", "street": "Avenue Armand Leygue", "lat": 43.592323, "lon": 1.464121, "date": "2023-08-04", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "M14-002", "cell": "M14", "street": "Avenue Armand Leygue", "lat": 43.59254, "lon": 1.464186, "date": "2023-08-04", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "M14-003", "cell": "M14", "street": "Avenue Armand Leygue", "lat": 43.592671, "lon": 1.464224, "date": "2023-08-04", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
@@ -28087,6 +28197,11 @@
 {"id": "M14-236", "cell": "M14", "street": "Rue Sirol", "lat": 43.595226, "lon": 1.465037, "date": "2023-09-26", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "M14-237", "cell": "M14", "street": "Rue Sirol", "lat": 43.595278, "lon": 1.465153, "date": "2023-09-26", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "M14-238", "cell": "M14", "street": "Rue Sirol", "lat": 43.59535, "lon": 1.465342, "date": "2023-09-26", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
+{"id": "M14-S001", "cell": "M14", "street": "Rue De Louvain", "lat": 43.591874, "lon": 1.464045, "date": "2023-08-04", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "M14-S002", "cell": "M14", "street": "Rue De Madagascar", "lat": 43.591771, "lon": 1.465474, "date": "2023-08-04", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "M14-S003", "cell": "M14", "street": "Rue De Madagascar", "lat": 43.591685, "lon": 1.465948, "date": "2023-08-04", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "M14-S004", "cell": "M14", "street": "Rue Diderot", "lat": 43.59118, "lon": 1.465278, "date": "2023-08-04", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "M14-S005", "cell": "M14", "street": "Rue Diderot", "lat": 43.591125, "lon": 1.465572, "date": "2023-08-04", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
 {"id": "M15-001", "cell": "M15", "street": "Avenue Balansa", "lat": 43.591728, "lon": 1.47063, "date": "2023-09-22", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "M15-002", "cell": "M15", "street": "Avenue Balansa", "lat": 43.591774, "lon": 1.470876, "date": "2023-09-22", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "M15-003", "cell": "M15", "street": "Avenue Balansa", "lat": 43.591859, "lon": 1.471149, "date": "2023-09-22", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
@@ -28275,6 +28390,11 @@
 {"id": "M15-186", "cell": "M15", "street": "Rue Stephane Mallarme", "lat": 43.592702, "lon": 1.474143, "date": "2025-06-27", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "M15-187", "cell": "M15", "street": "Rue Stephane Mallarme", "lat": 43.592933, "lon": 1.474318, "date": "2023-09-19", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "M15-188", "cell": "M15", "street": "Rue Stephane Mallarme", "lat": 43.593066, "lon": 1.47441, "date": "2023-09-19", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
+{"id": "M15-S001", "cell": "M15", "street": "Av Balansa", "lat": 43.592552, "lon": 1.473451, "date": "2023-09-22", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "M15-S002", "cell": "M15", "street": "Av Balansa", "lat": 43.59229, "lon": 1.472585, "date": "2023-09-22", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "M15-S003", "cell": "M15", "street": "Rue Beau Soleil", "lat": 43.59357, "lon": 1.469257, "date": "2023-09-26", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "M15-S004", "cell": "M15", "street": "Rue De Limayrac", "lat": 43.593999, "lon": 1.470008, "date": "2023-09-22", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "M15-S005", "cell": "M15", "street": "Rue Jean Baptiste Noulet", "lat": 43.59146, "lon": 1.468739, "date": "2023-08-04", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
 {"id": "M16-026", "cell": "M16", "street": "Chemin de Duroux", "lat": 43.595357, "lon": 1.478198, "date": "2023-08-18", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "M16-027", "cell": "M16", "street": "Chemin de Duroux", "lat": 43.595219, "lon": 1.478214, "date": "2023-08-18", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "M16-028", "cell": "M16", "street": "Chemin de Duroux", "lat": 43.595084, "lon": 1.478256, "date": "2023-08-18", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
@@ -28499,6 +28619,11 @@
 {"id": "N06-177", "cell": "N06", "street": "Rue Vestrepain", "lat": 43.58745, "lon": 1.417533, "date": "2024-09-17", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "N06-178", "cell": "N06", "street": "Rue Vestrepain", "lat": 43.587513, "lon": 1.417763, "date": "2024-09-17", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "N06-179", "cell": "N06", "street": "Rue Vestrepain", "lat": 43.587586, "lon": 1.41795, "date": "2024-09-17", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
+{"id": "N06-S001", "cell": "N06", "street": "Av Alain Gerbault", "lat": 43.588589, "lon": 1.418696, "date": "2024-09-17", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "N06-S002", "cell": "N06", "street": "Av Lamartine", "lat": 43.587651, "lon": 1.418084, "date": "2024-09-17", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "N06-S003", "cell": "N06", "street": "Rue Des Gardenias", "lat": 43.588226, "lon": 1.414836, "date": "2024-09-17", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "N06-S004", "cell": "N06", "street": "Rue Du Dr Jean Bernardbeig", "lat": 43.587832, "lon": 1.417177, "date": "2024-09-17", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "N06-S005", "cell": "N06", "street": "Rue Henri Desbals", "lat": 43.586861, "lon": 1.417576, "date": "2024-09-17", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
 {"id": "N07-001", "cell": "N07", "street": "Rue Lamothe-Langon", "lat": 43.586494, "lon": 1.423018, "date": "2025-01-01", "author": "lloegyr", "licence": "CC BY-SA 4.0"}
 {"id": "N07-002", "cell": "N07", "street": "Rue Boieldieu", "lat": 43.586673, "lon": 1.423048, "date": "2025-01-01", "author": "lloegyr", "licence": "CC BY-SA 4.0"}
 {"id": "N07-003", "cell": "N07", "street": "Boulevard Déodat de Séverac", "lat": 43.588815, "lon": 1.423418, "date": "2025-01-01", "author": "lloegyr", "licence": "CC BY-SA 4.0"}
@@ -28692,6 +28817,13 @@
 {"id": "N07-191", "cell": "N07", "street": "Rue Vestrepain", "lat": 43.588213, "lon": 1.42014, "date": "2024-09-17", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "N07-192", "cell": "N07", "street": "Rue Vestrepain", "lat": 43.588264, "lon": 1.420305, "date": "2024-09-17", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "N07-193", "cell": "N07", "street": "Rue Vestrepain", "lat": 43.588349, "lon": 1.420599, "date": "2024-09-17", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
+{"id": "N07-S001", "cell": "N07", "street": "Voie sans nom identifié", "lat": 43.590902, "lon": 1.424575, "date": "2024-09-11", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "N07-S002", "cell": "N07", "street": "Voie sans nom identifié", "lat": 43.590445, "lon": 1.419103, "date": "2024-09-19", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "N07-S003", "cell": "N07", "street": "Rue Boieldieu", "lat": 43.586604, "lon": 1.424921, "date": "2024-09-23", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "N07-S004", "cell": "N07", "street": "Rue Lamothe Langon", "lat": 43.586547, "lon": 1.423559, "date": "2024-09-23", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "N07-S005", "cell": "N07", "street": "Rue Mozart", "lat": 43.588327, "lon": 1.421703, "date": "2024-09-19", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "N07-S006", "cell": "N07", "street": "Rue Nungesser Et Coli", "lat": 43.590816, "lon": 1.420392, "date": "2024-09-11", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "N07-S007", "cell": "N07", "street": "Rue Vestrepain", "lat": 43.588306, "lon": 1.420459, "date": "2024-09-17", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
 {"id": "N08-001", "cell": "N08", "street": "Allée des Moulins de la Garonne", "lat": 43.587739, "lon": 1.43135, "date": "2024-09-04", "author": "barnes38", "licence": "CC BY-SA 4.0"}
 {"id": "N08-002", "cell": "N08", "street": "Allée Monique Pelletier", "lat": 43.586488, "lon": 1.430264, "date": "2024-09-04", "author": "barnes38", "licence": "CC BY-SA 4.0"}
 {"id": "N08-003", "cell": "N08", "street": "Allée Monique Pelletier", "lat": 43.586656, "lon": 1.430382, "date": "2024-09-04", "author": "barnes38", "licence": "CC BY-SA 4.0"}
@@ -28826,6 +28958,11 @@
 {"id": "N08-132", "cell": "N08", "street": "Rue Rapas", "lat": 43.589299, "lon": 1.431132, "date": "2024-09-12", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "N08-133", "cell": "N08", "street": "Rue Rapas", "lat": 43.589257, "lon": 1.431236, "date": "2024-09-12", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "N08-134", "cell": "N08", "street": "Rue Rapas", "lat": 43.58922, "lon": 1.431354, "date": "2024-09-12", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
+{"id": "N08-S001", "cell": "N08", "street": "Voie sans nom identifié", "lat": 43.590873, "lon": 1.425397, "date": "2024-09-12", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "N08-S002", "cell": "N08", "street": "Av De Muret", "lat": 43.588455, "lon": 1.43114, "date": "2024-09-12", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "N08-S003", "cell": "N08", "street": "Av De Muret", "lat": 43.587228, "lon": 1.430126, "date": "2024-09-12", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "N08-S004", "cell": "N08", "street": "Bd Deodat De Severac", "lat": 43.586549, "lon": 1.426301, "date": "2024-09-12", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "N08-S005", "cell": "N08", "street": "Rue Rapas", "lat": 43.589754, "lon": 1.429439, "date": "2024-09-12", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
 {"id": "N09-001", "cell": "N09", "street": null, "lat": 43.586439, "lon": 1.434763, "date": "2022-09-01", "author": "motocultrice / kalepom", "licence": "CC BY-SA 4.0"}
 {"id": "N09-002", "cell": "N09", "street": null, "lat": 43.588409, "lon": 1.436232, "date": "2024-06-16", "author": "barnes38", "licence": "CC BY-SA 4.0"}
 {"id": "N09-003", "cell": "N09", "street": "Promenade Robert Armandary", "lat": 43.588418, "lon": 1.435102, "date": "2024-09-04", "author": "barnes38", "licence": "CC BY-SA 4.0"}
@@ -29063,6 +29200,7 @@
 {"id": "N09-235", "cell": "N09", "street": "Rue Gaston Phoebus", "lat": 43.589734, "lon": 1.431566, "date": "2024-09-12", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "N09-236", "cell": "N09", "street": "Rue Gaston Phoebus", "lat": 43.589703, "lon": 1.431672, "date": "2024-09-12", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "N09-237", "cell": "N09", "street": "Rue Rapas", "lat": 43.589185, "lon": 1.431453, "date": "2024-09-12", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
+{"id": "N09-S001", "cell": "N09", "street": "Promenade Robert Armandary", "lat": 43.586687, "lon": 1.437528, "date": "2024-09-24", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
 {"id": "N10-001", "cell": "N10", "street": "Allée du Professeur Camille Soula", "lat": 43.586471, "lon": 1.437838, "date": "2024-09-24", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "N10-002", "cell": "N10", "street": "Allée du Professeur Camille Soula", "lat": 43.586922, "lon": 1.437653, "date": "2024-09-24", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "N10-003", "cell": "N10", "street": "Allée du Professeur Camille Soula", "lat": 43.586795, "lon": 1.437709, "date": "2024-09-24", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
@@ -29282,6 +29420,11 @@
 {"id": "N10-217", "cell": "N10", "street": "Rue Mespoul", "lat": 43.590664, "lon": 1.44304, "date": "2023-07-27", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "N10-218", "cell": "N10", "street": "Rue Mespoul", "lat": 43.590755, "lon": 1.443134, "date": "2023-07-27", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "N10-219", "cell": "N10", "street": "Rue Mespoul", "lat": 43.590855, "lon": 1.443233, "date": "2023-07-27", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
+{"id": "N10-S001", "cell": "N10", "street": "Bd Des Platanes", "lat": 43.586525, "lon": 1.439824, "date": "2023-07-27", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "N10-S002", "cell": "N10", "street": "Bd Du Marechal Juin", "lat": 43.586658, "lon": 1.439329, "date": "2025-06-26", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "N10-S003", "cell": "N10", "street": "Promenade Robert Armandary", "lat": 43.586461, "lon": 1.437687, "date": "2024-09-24", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "N10-S004", "cell": "N10", "street": "Rue Germinal", "lat": 43.586533, "lon": 1.440634, "date": "2023-07-27", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "N10-S005", "cell": "N10", "street": "Rue Germinal", "lat": 43.586478, "lon": 1.441497, "date": "2023-07-27", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
 {"id": "N11-001", "cell": "N11", "street": "Grande Rue Saint-Michel", "lat": 43.590816, "lon": 1.445236, "date": "2026-04-25", "author": "leofra31", "licence": "CC BY-SA 4.0"}
 {"id": "N11-002", "cell": "N11", "street": "Grande Rue Saint-Michel", "lat": 43.590689, "lon": 1.445304, "date": "2026-04-25", "author": "leofra31", "licence": "CC BY-SA 4.0"}
 {"id": "N11-003", "cell": "N11", "street": "Grande Rue Saint-Michel", "lat": 43.590619, "lon": 1.445342, "date": "2026-04-25", "author": "leofra31", "licence": "CC BY-SA 4.0"}
@@ -29571,6 +29714,7 @@
 {"id": "N11-287", "cell": "N11", "street": "Rue Saint-Joseph", "lat": 43.589814, "lon": 1.449427, "date": "2023-12-05", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "N11-288", "cell": "N11", "street": "Rue Saint-Joseph", "lat": 43.589877, "lon": 1.449567, "date": "2023-12-05", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "N11-289", "cell": "N11", "street": "Rue Saint-Joseph", "lat": 43.589961, "lon": 1.449759, "date": "2023-12-05", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
+{"id": "N11-S001", "cell": "N11", "street": "Rue Robespierre", "lat": 43.586754, "lon": 1.449043, "date": "2023-07-26", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
 {"id": "N12-001", "cell": "N12", "street": "Allée des Demoiselles", "lat": 43.589964, "lon": 1.454939, "date": "2023-07-25", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "N12-002", "cell": "N12", "street": "Allée des Demoiselles", "lat": 43.59074, "lon": 1.453159, "date": "2024-09-24", "author": "barnes38", "licence": "CC BY-SA 4.0"}
 {"id": "N12-003", "cell": "N12", "street": "Allée des Demoiselles", "lat": 43.590704, "lon": 1.453247, "date": "2024-09-24", "author": "barnes38", "licence": "CC BY-SA 4.0"}
@@ -29923,6 +30067,11 @@
 {"id": "N12-350", "cell": "N12", "street": "Rue Victor Ségoffin", "lat": 43.58798, "lon": 1.450653, "date": "2024-09-03", "author": "barnes38", "licence": "CC BY-SA 4.0"}
 {"id": "N12-351", "cell": "N12", "street": "Rue Victor Ségoffin", "lat": 43.588169, "lon": 1.450696, "date": "2024-09-03", "author": "barnes38", "licence": "CC BY-SA 4.0"}
 {"id": "N12-352", "cell": "N12", "street": "Rue Victor Ségoffin", "lat": 43.588226, "lon": 1.450752, "date": "2024-09-03", "author": "barnes38", "licence": "CC BY-SA 4.0"}
+{"id": "N12-S001", "cell": "N12", "street": "Voie sans nom identifié", "lat": 43.586977, "lon": 1.453346, "date": "2023-07-25", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "N12-S002", "cell": "N12", "street": "Rue De La Tannerie", "lat": 43.586875, "lon": 1.453747, "date": "2023-07-25", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "N12-S003", "cell": "N12", "street": "Rue Des Pyrenees", "lat": 43.586548, "lon": 1.455498, "date": "2023-07-25", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "N12-S004", "cell": "N12", "street": "Rue Henri Rachou", "lat": 43.586752, "lon": 1.453243, "date": "2023-07-26", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "N12-S005", "cell": "N12", "street": "Rue Louis Marc Demouilles", "lat": 43.586455, "lon": 1.453961, "date": "2023-07-25", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
 {"id": "N13-001", "cell": "N13", "street": "Boulevard Griffoul-Dorval", "lat": 43.58851, "lon": 1.461439, "date": "2023-08-04", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "N13-002", "cell": "N13", "street": "Rue Louis Vitet", "lat": 43.588532, "lon": 1.461603, "date": "2023-08-04", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "N13-003", "cell": "N13", "street": "Rue Louis Vitet", "lat": 43.587529, "lon": 1.462238, "date": "2023-08-04", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
@@ -30186,6 +30335,10 @@
 {"id": "N13-261", "cell": "N13", "street": "Rue Louis Vitet", "lat": 43.588563, "lon": 1.462141, "date": "2023-08-04", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "N13-262", "cell": "N13", "street": "Rue Louis Vitet", "lat": 43.588374, "lon": 1.462254, "date": "2023-08-04", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "N13-263", "cell": "N13", "street": "Rue Louis Vitet", "lat": 43.58814, "lon": 1.462396, "date": "2023-08-04", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
+{"id": "N13-S001", "cell": "N13", "street": "Voie sans nom identifié", "lat": 43.587276, "lon": 1.46164, "date": "2023-08-04", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "N13-S002", "cell": "N13", "street": "Bd Bernard Griffoul Dorval", "lat": 43.589707, "lon": 1.460679, "date": "2023-08-04", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "N13-S003", "cell": "N13", "street": "Rue Georges Clemenceau", "lat": 43.586433, "lon": 1.458231, "date": "2023-07-26", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "N13-S004", "cell": "N13", "street": "Rue Goudouli", "lat": 43.587291, "lon": 1.459272, "date": "2023-07-25", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
 {"id": "N14-001", "cell": "N14", "street": "Avenue André Bousquairol", "lat": 43.588643, "lon": 1.468587, "date": "2023-08-18", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "N14-002", "cell": "N14", "street": "Avenue Antoine de Saint-Exupéry", "lat": 43.586818, "lon": 1.462781, "date": "2023-08-04", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "N14-003", "cell": "N14", "street": "Avenue Antoine de Saint-Exupéry", "lat": 43.58671, "lon": 1.463011, "date": "2023-08-04", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
@@ -30425,6 +30578,13 @@
 {"id": "N14-237", "cell": "N14", "street": "Rue Pradal", "lat": 43.590495, "lon": 1.464263, "date": "2023-08-04", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "N14-238", "cell": "N14", "street": "Rue Pradal", "lat": 43.590684, "lon": 1.464379, "date": "2023-08-04", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "N14-239", "cell": "N14", "street": "Rue Pradal", "lat": 43.590838, "lon": 1.464469, "date": "2023-08-04", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
+{"id": "N14-S001", "cell": "N14", "street": "Rue Barrau", "lat": 43.587031, "lon": 1.466335, "date": "2023-08-04", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "N14-S002", "cell": "N14", "street": "Rue Bel Air", "lat": 43.588284, "lon": 1.465207, "date": "2023-08-04", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "N14-S003", "cell": "N14", "street": "Rue De La Gaiete", "lat": 43.588535, "lon": 1.466869, "date": "2023-08-18", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "N14-S004", "cell": "N14", "street": "Rue Des Iris", "lat": 43.589033, "lon": 1.466761, "date": "2023-08-04", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "N14-S005", "cell": "N14", "street": "Rue Du Docteur Etienne Gay", "lat": 43.586439, "lon": 1.467982, "date": "2023-08-18", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "N14-S006", "cell": "N14", "street": "Rue Noguier", "lat": 43.588187, "lon": 1.467903, "date": "2023-08-18", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "N14-S007", "cell": "N14", "street": "Rue Pierre Brossolette", "lat": 43.590415, "lon": 1.465625, "date": "2023-08-04", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
 {"id": "N15-001", "cell": "N15", "street": "Avenue André Bousquairol", "lat": 43.589376, "lon": 1.46956, "date": "2023-08-18", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "N15-002", "cell": "N15", "street": "Avenue André Bousquairol", "lat": 43.589519, "lon": 1.469758, "date": "2023-08-18", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "N15-003", "cell": "N15", "street": "Avenue André Bousquairol", "lat": 43.589675, "lon": 1.469964, "date": "2023-08-18", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
@@ -30563,6 +30723,12 @@
 {"id": "N15-167", "cell": "N15", "street": "Rue Perrey", "lat": 43.586774, "lon": 1.469002, "date": "2023-08-18", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "N15-168", "cell": "N15", "street": "Rue Perrey", "lat": 43.586669, "lon": 1.469138, "date": "2023-08-18", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "N15-169", "cell": "N15", "street": "Rue Stephane Mallarme", "lat": 43.590836, "lon": 1.472414, "date": "2023-09-19", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
+{"id": "N15-S001", "cell": "N15", "street": "Av Des Glaieuls", "lat": 43.589274, "lon": 1.470684, "date": "2023-08-18", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "N15-S002", "cell": "N15", "street": "Rue Barrau", "lat": 43.590354, "lon": 1.469586, "date": "2023-08-04", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "N15-S003", "cell": "N15", "street": "Rue Des Narcisses", "lat": 43.588887, "lon": 1.47259, "date": "2023-09-19", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "N15-S004", "cell": "N15", "street": "Rue Des Narcisses", "lat": 43.588837, "lon": 1.472894, "date": "2023-09-19", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "N15-S005", "cell": "N15", "street": "Rue Du Docteur Jean Arlaud", "lat": 43.590917, "lon": 1.470769, "date": "2023-09-20", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "N15-S006", "cell": "N15", "street": "Rue Jules Leotard", "lat": 43.587736, "lon": 1.470667, "date": "2023-08-18", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
 {"id": "N16-223", "cell": "N16", "street": "Rue Rene Bazin", "lat": 43.590875, "lon": 1.475553, "date": "2023-09-19", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "O06-021", "cell": "O06", "street": "Rue de la Drôme", "lat": 43.586415, "lon": 1.41852, "date": "2024-09-17", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "O06-022", "cell": "O06", "street": "Rue de la Drôme", "lat": 43.586379, "lon": 1.418684, "date": "2024-09-17", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
@@ -30588,6 +30754,7 @@
 {"id": "O06-108", "cell": "O06", "street": "Rue Henri Desbals", "lat": 43.585973, "lon": 1.416959, "date": "2024-09-17", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "O06-109", "cell": "O06", "street": "Rue Henri Desbals", "lat": 43.586092, "lon": 1.417051, "date": "2024-09-17", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "O06-110", "cell": "O06", "street": "Rue Henri Desbals", "lat": 43.586295, "lon": 1.417192, "date": "2024-09-17", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
+{"id": "O06-S005", "cell": "O06", "street": "Rue Henri Desbals", "lat": 43.586195, "lon": 1.417124, "date": "2024-09-17", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
 {"id": "O07-001", "cell": "O07", "street": "Rue Lamothe-Langon", "lat": 43.586341, "lon": 1.423075, "date": "2024-09-23", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "O07-002", "cell": "O07", "street": "Rue Théodore Rivière", "lat": 43.584696, "lon": 1.423892, "date": "2024-09-23", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "O07-003", "cell": "O07", "street": "Rue Théodore Rivière", "lat": 43.584758, "lon": 1.424034, "date": "2024-09-23", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
@@ -30750,6 +30917,11 @@
 {"id": "O07-184", "cell": "O07", "street": "Rue Théodore Rivière", "lat": 43.584889, "lon": 1.424916, "date": "2024-09-23", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "O07-185", "cell": "O07", "street": "Rue Théodore Rivière", "lat": 43.584917, "lon": 1.424138, "date": "2024-09-23", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "O07-186", "cell": "O07", "street": "Rue Théodore Rivière", "lat": 43.585049, "lon": 1.424198, "date": "2024-09-23", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
+{"id": "O07-S001", "cell": "O07", "street": "Voie sans nom identifié", "lat": 43.586194, "lon": 1.419563, "date": "2024-09-17", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "O07-S002", "cell": "O07", "street": "Voie sans nom identifié", "lat": 43.584315, "lon": 1.424135, "date": "2024-09-23", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "O07-S003", "cell": "O07", "street": "Rue Camille Saint Saens", "lat": 43.583643, "lon": 1.423744, "date": "2024-09-23", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "O07-S004", "cell": "O07", "street": "Rue Jean Francois Blade", "lat": 43.58637, "lon": 1.421029, "date": "2024-09-19", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "O07-S005", "cell": "O07", "street": "Rue Jean Francois Blade", "lat": 43.586208, "lon": 1.421653, "date": "2024-09-19", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
 {"id": "O08-001", "cell": "O08", "street": "Allée des Moulins de la Garonne", "lat": 43.581947, "lon": 1.427891, "date": "2026-05-07", "author": "sc_vigicrues", "licence": "Licence Ouverte 2.0"}
 {"id": "O08-002", "cell": "O08", "street": "Allée des Moulins de la Garonne", "lat": 43.582139, "lon": 1.42796, "date": "2026-05-07", "author": "sc_vigicrues", "licence": "Licence Ouverte 2.0"}
 {"id": "O08-003", "cell": "O08", "street": "Allée des Moulins de la Garonne", "lat": 43.58232, "lon": 1.428023, "date": "2026-05-07", "author": "sc_vigicrues", "licence": "Licence Ouverte 2.0"}
@@ -30926,6 +31098,14 @@
 {"id": "O08-174", "cell": "O08", "street": "Voie Anonyme", "lat": 43.583745, "lon": 1.43107, "date": "2024-09-24", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "O08-175", "cell": "O08", "street": "Voie Anonyme", "lat": 43.583813, "lon": 1.43124, "date": "2024-09-24", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "O08-176", "cell": "O08", "street": "Voie Anonyme", "lat": 43.583911, "lon": 1.431375, "date": "2024-09-24", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
+{"id": "O08-S001", "cell": "O08", "street": "Voie sans nom identifié", "lat": 43.586335, "lon": 1.426124, "date": "2024-09-23", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "O08-S002", "cell": "O08", "street": "Voie sans nom identifié", "lat": 43.584591, "lon": 1.431064, "date": "2024-09-24", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "O08-S003", "cell": "O08", "street": "All Fernand Jourdant", "lat": 43.584451, "lon": 1.430954, "date": "2024-09-24", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "O08-S004", "cell": "O08", "street": "Av De Muret", "lat": 43.586389, "lon": 1.429437, "date": "2024-09-12", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "O08-S005", "cell": "O08", "street": "Av De Muret", "lat": 43.585857, "lon": 1.429, "date": "2024-09-12", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "O08-S006", "cell": "O08", "street": "Rue De La Digue", "lat": 43.583714, "lon": 1.428473, "date": "2024-09-24", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "O08-S007", "cell": "O08", "street": "Rue De La Digue", "lat": 43.582279, "lon": 1.427809, "date": "2024-09-24", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "O08-S008", "cell": "O08", "street": "Rue Pierre Bourthoumieux", "lat": 43.584491, "lon": 1.426074, "date": "2024-09-23", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
 {"id": "O09-001", "cell": "O09", "street": null, "lat": 43.585358, "lon": 1.434277, "date": "2022-09-01", "author": "motocultrice / kalepom", "licence": "CC BY-SA 4.0"}
 {"id": "O09-002", "cell": "O09", "street": null, "lat": 43.585234, "lon": 1.434434, "date": "2022-09-01", "author": "motocultrice / kalepom", "licence": "CC BY-SA 4.0"}
 {"id": "O09-003", "cell": "O09", "street": null, "lat": 43.585087, "lon": 1.434694, "date": "2022-09-01", "author": "motocultrice / kalepom", "licence": "CC BY-SA 4.0"}
@@ -31045,6 +31225,10 @@
 {"id": "O09-117", "cell": "O09", "street": "Voie Anonyme", "lat": 43.584666, "lon": 1.431753, "date": "2024-09-24", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "O09-118", "cell": "O09", "street": "Voie Anonyme", "lat": 43.583042, "lon": 1.436824, "date": "2024-09-25", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "O09-119", "cell": "O09", "street": "Voie Anonyme", "lat": 43.582937, "lon": 1.43706, "date": "2024-09-25", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
+{"id": "O09-S001", "cell": "O09", "street": "Voie sans nom identifié", "lat": 43.584431, "lon": 1.432913, "date": "2024-09-25", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "O09-S002", "cell": "O09", "street": "Voie sans nom identifié", "lat": 43.584416, "lon": 1.432087, "date": "2024-09-25", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "O09-S003", "cell": "O09", "street": "Pont Pierre De Coubertin", "lat": 43.584306, "lon": 1.435581, "date": "2024-09-25", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "O09-S004", "cell": "O09", "street": "Pont Pierre De Coubertin", "lat": 43.584292, "lon": 1.435902, "date": "2024-09-25", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
 {"id": "O10-001", "cell": "O10", "street": "Rond-point Marcelle Rumeau", "lat": 43.582401, "lon": 1.442796, "date": "2023-07-27", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "O10-002", "cell": "O10", "street": "Rue D Antibes", "lat": 43.582266, "lon": 1.442923, "date": "2023-07-27", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "O10-003", "cell": "O10", "street": "Rue D Antibes", "lat": 43.58217, "lon": 1.443101, "date": "2023-07-27", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
@@ -31292,6 +31476,11 @@
 {"id": "O10-245", "cell": "O10", "street": "Rue Soufflot", "lat": 43.585253, "lon": 1.441887, "date": "2023-07-27", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "O10-246", "cell": "O10", "street": "Rue Soufflot", "lat": 43.585332, "lon": 1.441204, "date": "2023-07-27", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "O10-247", "cell": "O10", "street": "Voie Anonyme", "lat": 43.584974, "lon": 1.437854, "date": "2024-09-24", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
+{"id": "O10-S001", "cell": "O10", "street": "Av De Lattre De Tassigny", "lat": 43.582458, "lon": 1.439142, "date": "2025-06-26", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "O10-S002", "cell": "O10", "street": "Bd Du Marechal Juin", "lat": 43.585106, "lon": 1.439572, "date": "2023-07-27", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "O10-S003", "cell": "O10", "street": "Rampe Du Belvedere", "lat": 43.585017, "lon": 1.439734, "date": "2023-07-27", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "O10-S004", "cell": "O10", "street": "Rue Andre Daste", "lat": 43.582726, "lon": 1.440184, "date": "2023-07-27", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "O10-S005", "cell": "O10", "street": "Rue Des Saules", "lat": 43.584099, "lon": 1.442634, "date": "2023-07-27", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
 {"id": "O11-001", "cell": "O11", "street": "Avenue de L Urss", "lat": 43.583987, "lon": 1.447921, "date": "2023-07-27", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "O11-002", "cell": "O11", "street": "Avenue de L Urss", "lat": 43.583845, "lon": 1.447933, "date": "2023-07-27", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "O11-003", "cell": "O11", "street": "Avenue de L Urss", "lat": 43.583854, "lon": 1.448094, "date": "2023-07-27", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
@@ -31488,6 +31677,12 @@
 {"id": "O11-194", "cell": "O11", "street": "Rue Valentin", "lat": 43.583879, "lon": 1.447359, "date": "2023-07-28", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "O11-195", "cell": "O11", "street": "Rue Valentin", "lat": 43.583915, "lon": 1.447558, "date": "2023-07-28", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "O11-196", "cell": "O11", "street": "Rue Valentin", "lat": 43.583961, "lon": 1.447751, "date": "2023-07-28", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
+{"id": "O11-S001", "cell": "O11", "street": "Voie sans nom identifié", "lat": 43.583938, "lon": 1.443927, "date": "2023-07-27", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "O11-S002", "cell": "O11", "street": "Voie sans nom identifié", "lat": 43.583601, "lon": 1.448225, "date": "2023-07-27", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "O11-S003", "cell": "O11", "street": "Voie sans nom identifié", "lat": 43.58214, "lon": 1.447187, "date": "2023-07-27", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "O11-S004", "cell": "O11", "street": "Rue Achille Viadieu", "lat": 43.58435, "lon": 1.444192, "date": "2023-07-27", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "O11-S005", "cell": "O11", "street": "Rue Du Feretra", "lat": 43.582215, "lon": 1.444013, "date": "2023-07-27", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "O11-S006", "cell": "O11", "street": "Rue Valentin", "lat": 43.583718, "lon": 1.44657, "date": "2023-07-28", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
 {"id": "O12-001", "cell": "O12", "street": "Rue du Midi", "lat": 43.584568, "lon": 1.455823, "date": "2023-07-26", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "O12-002", "cell": "O12", "street": "Impasse Jean Delfour", "lat": 43.584714, "lon": 1.455978, "date": "2023-07-26", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "O12-003", "cell": "O12", "street": "Impasse Jean Delfour", "lat": 43.584841, "lon": 1.456117, "date": "2023-07-26", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
@@ -31763,6 +31958,13 @@
 {"id": "O12-273", "cell": "O12", "street": "Rue Saint-Denis", "lat": 43.586253, "lon": 1.450758, "date": "2023-07-26", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "O12-274", "cell": "O12", "street": "Rue Tarissan", "lat": 43.581975, "lon": 1.456025, "date": "2023-07-26", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "O12-275", "cell": "O12", "street": "Rue Tarissan", "lat": 43.582022, "lon": 1.456179, "date": "2023-07-26", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
+{"id": "O12-S001", "cell": "O12", "street": "Av D’Italie", "lat": 43.583226, "lon": 1.454639, "date": "2023-07-26", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "O12-S002", "cell": "O12", "street": "Av Marcel Langer", "lat": 43.58364, "lon": 1.45051, "date": "2023-07-27", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "O12-S003", "cell": "O12", "street": "Rue Aristote", "lat": 43.583404, "lon": 1.456032, "date": "2023-07-26", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "O12-S004", "cell": "O12", "street": "Rue Aristote", "lat": 43.583314, "lon": 1.455751, "date": "2023-07-26", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "O12-S005", "cell": "O12", "street": "Rue Capus", "lat": 43.581981, "lon": 1.450428, "date": "2023-07-31", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "O12-S006", "cell": "O12", "street": "Rue George Sand", "lat": 43.584564, "lon": 1.454743, "date": "2023-07-26", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "O12-S007", "cell": "O12", "street": "Rue Marceau", "lat": 43.585515, "lon": 1.451983, "date": "2023-07-26", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
 {"id": "O13-001", "cell": "O13", "street": "Impasse Jean Delfour", "lat": 43.584954, "lon": 1.456242, "date": "2023-07-26", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "O13-002", "cell": "O13", "street": null, "lat": 43.584924, "lon": 1.457794, "date": "2023-07-26", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "O13-003", "cell": "O13", "street": null, "lat": 43.584914, "lon": 1.457971, "date": "2023-07-26", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
@@ -31975,6 +32177,15 @@
 {"id": "O13-210", "cell": "O13", "street": "Rue Édouard Baudrimont", "lat": 43.585262, "lon": 1.460685, "date": "2023-07-26", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "O13-211", "cell": "O13", "street": "Rue Édouard Baudrimont", "lat": 43.585439, "lon": 1.46081, "date": "2023-07-26", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "O13-212", "cell": "O13", "street": "Rue Édouard Baudrimont", "lat": 43.584046, "lon": 1.459619, "date": "2023-07-26", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
+{"id": "O13-S001", "cell": "O13", "street": "Voie sans nom identifié", "lat": 43.584931, "lon": 1.457702, "date": "2023-07-26", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "O13-S002", "cell": "O13", "street": "Voie sans nom identifié", "lat": 43.584926, "lon": 1.457882, "date": "2023-07-26", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "O13-S003", "cell": "O13", "street": "Voie sans nom identifié", "lat": 43.584891, "lon": 1.458041, "date": "2023-07-26", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "O13-S004", "cell": "O13", "street": "Voie sans nom identifié", "lat": 43.584771, "lon": 1.458214, "date": "2023-07-26", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "O13-S005", "cell": "O13", "street": "Voie sans nom identifié", "lat": 43.584659, "lon": 1.458408, "date": "2023-07-26", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "O13-S006", "cell": "O13", "street": "Av Du Marechal Foch", "lat": 43.58325, "lon": 1.458049, "date": "2023-07-26", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "O13-S007", "cell": "O13", "street": "Bd De La Marne", "lat": 43.582758, "lon": 1.4622, "date": "2025-05-18", "author": "topologie11", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "O13-S008", "cell": "O13", "street": "Rue Alfred De Vigny", "lat": 43.583108, "lon": 1.461052, "date": "2023-07-26", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "O13-S009", "cell": "O13", "street": "Rue Georges Clemenceau", "lat": 43.58573, "lon": 1.459432, "date": "2023-07-26", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
 {"id": "O14-004", "cell": "O14", "street": "Avenue Antoine de Saint-Exupéry", "lat": 43.586357, "lon": 1.463902, "date": "2023-08-04", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "O14-005", "cell": "O14", "street": "Avenue Antoine de Saint-Exupéry", "lat": 43.586298, "lon": 1.464043, "date": "2023-08-04", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "O14-006", "cell": "O14", "street": "Avenue Antoine de Saint-Exupéry", "lat": 43.586228, "lon": 1.464202, "date": "2023-08-04", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
@@ -32148,12 +32359,19 @@
 {"id": "O14-211", "cell": "O14", "street": "Rue Joseph Saget", "lat": 43.585674, "lon": 1.465182, "date": "2023-08-04", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "O14-212", "cell": "O14", "street": "Rue Pierre Benoit", "lat": 43.586323, "lon": 1.466599, "date": "2023-08-18", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "O14-213", "cell": "O14", "street": "Rue Villaudric", "lat": 43.583573, "lon": 1.466901, "date": "2023-08-04", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
+{"id": "O14-S002", "cell": "O14", "street": "Av De Lespinet", "lat": 43.586384, "lon": 1.462928, "date": "2023-08-04", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "O14-S003", "cell": "O14", "street": "Av De Lespinet", "lat": 43.585651, "lon": 1.463204, "date": "2023-08-04", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "O14-S004", "cell": "O14", "street": "Che De Fages", "lat": 43.583814, "lon": 1.463568, "date": "2023-08-04", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "O14-S005", "cell": "O14", "street": "Rue Christiane", "lat": 43.586046, "lon": 1.468466, "date": "2023-08-18", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "O14-S006", "cell": "O14", "street": "Rue de Bouloc", "lat": 43.584788, "lon": 1.462723, "date": "2023-08-04", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "O14-S007", "cell": "O14", "street": "Rue Georges Labit", "lat": 43.583552, "lon": 1.465636, "date": "2023-08-04", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
 {"id": "O15-113", "cell": "O15", "street": "Impasse Blancou", "lat": 43.58625, "lon": 1.470058, "date": "2023-08-18", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "O15-114", "cell": "O15", "street": "Impasse Blancou", "lat": 43.586427, "lon": 1.470265, "date": "2023-08-18", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "O15-115", "cell": "O15", "street": "Impasse Christiane", "lat": 43.586312, "lon": 1.46898, "date": "2023-08-18", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "O15-116", "cell": "O15", "street": "Impasse Christiane", "lat": 43.586208, "lon": 1.46915, "date": "2023-08-18", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "O15-117", "cell": "O15", "street": "Impasse Christiane", "lat": 43.586088, "lon": 1.469332, "date": "2023-08-18", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "O15-126", "cell": "O15", "street": "Rue Christiane", "lat": 43.586317, "lon": 1.468807, "date": "2023-08-18", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
+{"id": "O15-S002", "cell": "O15", "street": "Rue Christiane", "lat": 43.586202, "lon": 1.468672, "date": "2023-08-18", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
 {"id": "P07-015", "cell": "P07", "street": "Avenue de Muret", "lat": 43.581148, "lon": 1.424997, "date": "2024-09-23", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "P07-023", "cell": "P07", "street": "Avenue de Muret", "lat": 43.581279, "lon": 1.425148, "date": "2024-09-23", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "P07-091", "cell": "P07", "street": "Rue Cahuzac", "lat": 43.581545, "lon": 1.423824, "date": "2024-09-23", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
@@ -32194,6 +32412,8 @@
 {"id": "P08-069", "cell": "P08", "street": "Rue de la Digue", "lat": 43.581567, "lon": 1.427517, "date": "2026-09-15", "author": "sogefi sig", "licence": "Licence Ouverte 2.0"}
 {"id": "P08-070", "cell": "P08", "street": "Rue de la Digue", "lat": 43.581703, "lon": 1.427506, "date": "2026-09-15", "author": "sogefi sig", "licence": "Licence Ouverte 2.0"}
 {"id": "P08-071", "cell": "P08", "street": "Rue de la Digue", "lat": 43.581881, "lon": 1.427542, "date": "2026-09-15", "author": "sogefi sig", "licence": "Licence Ouverte 2.0"}
+{"id": "P08-S001", "cell": "P08", "street": "Voie sans nom identifié", "lat": 43.58164, "lon": 1.429399, "date": "2024-09-24", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "P08-S002", "cell": "P08", "street": "Voie sans nom identifié", "lat": 43.581465, "lon": 1.429363, "date": "2024-09-24", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
 {"id": "P09-001", "cell": "P09", "street": "Allée Gabrielle Meyer", "lat": 43.580072, "lon": 1.433773, "date": "2026-05-07", "author": "sc_vigicrues", "licence": "Licence Ouverte 2.0"}
 {"id": "P09-002", "cell": "P09", "street": "Allée Gabrielle Meyer", "lat": 43.579971, "lon": 1.433872, "date": "2026-05-07", "author": "sc_vigicrues", "licence": "Licence Ouverte 2.0"}
 {"id": "P09-003", "cell": "P09", "street": "Allée Gabrielle Meyer", "lat": 43.579894, "lon": 1.433998, "date": "2026-05-07", "author": "sc_vigicrues", "licence": "Licence Ouverte 2.0"}
@@ -32284,6 +32504,12 @@
 {"id": "P09-109", "cell": "P09", "street": "Rue Maria Mombiola", "lat": 43.579009, "lon": 1.437075, "date": "2024-09-04", "author": "barnes38", "licence": "CC BY-SA 4.0"}
 {"id": "P09-110", "cell": "P09", "street": "Rue Maria Mombiola", "lat": 43.578953, "lon": 1.437233, "date": "2024-09-04", "author": "barnes38", "licence": "CC BY-SA 4.0"}
 {"id": "P09-111", "cell": "P09", "street": "Rue Maria Mombiola", "lat": 43.578886, "lon": 1.437422, "date": "2024-09-04", "author": "barnes38", "licence": "CC BY-SA 4.0"}
+{"id": "P09-S001", "cell": "P09", "street": "All Du Pr Camille Soula", "lat": 43.578688, "lon": 1.434411, "date": "2024-09-24", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "P09-S002", "cell": "P09", "street": "Av De Lattre De Tassigny", "lat": 43.579541, "lon": 1.437175, "date": "2023-07-27", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "P09-S003", "cell": "P09", "street": "Av De Lattre De Tassigny", "lat": 43.57864, "lon": 1.436748, "date": "2023-07-27", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "P09-S004", "cell": "P09", "street": "Av De Lattre De Tassigny", "lat": 43.578065, "lon": 1.436533, "date": "2023-07-27", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "P09-S005", "cell": "P09", "street": "Rue d'Aix", "lat": 43.578018, "lon": 1.437592, "date": "2023-07-27", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "P09-S006", "cell": "P09", "street": "Rue d'Aix", "lat": 43.577975, "lon": 1.437376, "date": "2023-07-27", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
 {"id": "P10-001", "cell": "P10", "street": null, "lat": 43.578094, "lon": 1.437794, "date": "2023-07-27", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "P10-002", "cell": "P10", "street": null, "lat": 43.578027, "lon": 1.437928, "date": "2023-07-27", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "P10-003", "cell": "P10", "street": "Rue Maria Mombiola", "lat": 43.578127, "lon": 1.43814, "date": "2023-07-27", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
@@ -32480,6 +32706,12 @@
 {"id": "P10-196", "cell": "P10", "street": "Rue Maria Mombiola", "lat": 43.577964, "lon": 1.439917, "date": "2023-07-27", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "P10-197", "cell": "P10", "street": "Rue Maria Mombiola", "lat": 43.577889, "lon": 1.440149, "date": "2023-07-27", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "P10-198", "cell": "P10", "street": "Rue Maria Mombiola", "lat": 43.577802, "lon": 1.440414, "date": "2023-07-27", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
+{"id": "P10-S001", "cell": "P10", "street": "Voie sans nom identifié", "lat": 43.581781, "lon": 1.440619, "date": "2023-07-27", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "P10-S002", "cell": "P10", "street": "Voie sans nom identifié", "lat": 43.581603, "lon": 1.44051, "date": "2023-07-27", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "P10-S003", "cell": "P10", "street": "Voie sans nom identifié", "lat": 43.578037, "lon": 1.437832, "date": "2023-07-27", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "P10-S004", "cell": "P10", "street": "Av De Lattre De Tassigny", "lat": 43.581256, "lon": 1.438455, "date": "2023-07-27", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "P10-S005", "cell": "P10", "street": "Av Jean Moulin", "lat": 43.57956, "lon": 1.441719, "date": "2023-07-27", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "P10-S006", "cell": "P10", "street": "Rue de Menton", "lat": 43.579117, "lon": 1.44, "date": "2023-07-27", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
 {"id": "P11-001", "cell": "P11", "street": "Rue Saint Roch", "lat": 43.57786, "lon": 1.447181, "date": "2025-01-01", "author": "lloegyr", "licence": "CC BY-SA 4.0"}
 {"id": "P11-002", "cell": "P11", "street": "Rue Saint Roch", "lat": 43.578191, "lon": 1.447769, "date": "2025-01-01", "author": "lloegyr", "licence": "CC BY-SA 4.0"}
 {"id": "P11-003", "cell": "P11", "street": "Rue Saint Roch", "lat": 43.578302, "lon": 1.447964, "date": "2025-01-01", "author": "lloegyr", "licence": "CC BY-SA 4.0"}
@@ -32683,6 +32915,14 @@
 {"id": "P11-205", "cell": "P11", "street": "Rue Saint Thomas D Aquin", "lat": 43.580336, "lon": 1.448892, "date": "2023-07-27", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "P11-206", "cell": "P11", "street": "Rue Saint Thomas D Aquin", "lat": 43.580397, "lon": 1.449126, "date": "2023-07-27", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "P11-207", "cell": "P11", "street": "Rue Saint Thomas D Aquin", "lat": 43.580441, "lon": 1.44931, "date": "2023-07-27", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
+{"id": "P11-S001", "cell": "P11", "street": "Voie sans nom identifié", "lat": 43.581701, "lon": 1.444736, "date": "2023-07-27", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "P11-S002", "cell": "P11", "street": "Voie sans nom identifié", "lat": 43.581325, "lon": 1.445173, "date": "2023-07-27", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "P11-S003", "cell": "P11", "street": "Voie sans nom identifié", "lat": 43.579203, "lon": 1.445091, "date": "2023-07-27", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "P11-S004", "cell": "P11", "street": "Voie sans nom identifié", "lat": 43.577965, "lon": 1.447537, "date": "2023-07-28", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "P11-S005", "cell": "P11", "street": "Nouveau rectorat de l'académie de T…", "lat": 43.578372, "lon": 1.445873, "date": "2015-06-14", "author": "Mathieu MD", "source": "Wikimedia Commons", "licence": "CC BY-SA 3.0", "pano": false}
+{"id": "P11-S006", "cell": "P11", "street": "Imp De La Charbonniere", "lat": 43.577723, "lon": 1.446378, "date": "2023-07-28", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "P11-S007", "cell": "P11", "street": "Rue Capus", "lat": 43.581597, "lon": 1.449615, "date": "2023-07-31", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "P11-S008", "cell": "P11", "street": "Rue Saint Gabriel", "lat": 43.581425, "lon": 1.445794, "date": "2023-07-27", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
 {"id": "P12-001", "cell": "P12", "street": "Rue Devic", "lat": 43.580947, "lon": 1.45263, "date": "2023-07-26", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "P12-002", "cell": "P12", "street": "Rue Devic", "lat": 43.581055, "lon": 1.452727, "date": "2023-07-26", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "P12-003", "cell": "P12", "street": "Rue Devic", "lat": 43.581176, "lon": 1.45288, "date": "2023-07-26", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
@@ -32859,6 +33099,11 @@
 {"id": "P12-221", "cell": "P12", "street": "Rue Tarissan", "lat": 43.581783, "lon": 1.455278, "date": "2023-07-26", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "P12-222", "cell": "P12", "street": "Rue Tarissan", "lat": 43.581834, "lon": 1.455491, "date": "2023-07-26", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "P12-223", "cell": "P12", "street": "Rue Tarissan", "lat": 43.581894, "lon": 1.455713, "date": "2023-07-26", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
+{"id": "P12-S001", "cell": "P12", "street": "IUFM Saint-Agne (Toulouse, 31)", "lat": 43.580889, "lon": 1.450139, "date": null, "author": "Florent Pécassou", "source": "Wikimedia Commons", "licence": "CC BY-SA 3.0", "pano": false}
+{"id": "P12-S003", "cell": "P12", "street": "Rue Camille Desmoulins", "lat": 43.580533, "lon": 1.45398, "date": "2023-07-26", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "P12-S004", "cell": "P12", "street": "Rue Devic", "lat": 43.579729, "lon": 1.452117, "date": "2023-07-27", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "P12-S005", "cell": "P12", "street": "Rue Devic", "lat": 43.579544, "lon": 1.451935, "date": "2023-07-27", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "P12-S006", "cell": "P12", "street": "Rue Devic", "lat": 43.578683, "lon": 1.451097, "date": "2023-07-27", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
 {"id": "P13-010", "cell": "P13", "street": "Avenue Albert Bedouce", "lat": 43.581098, "lon": 1.461815, "date": "2023-07-26", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "P13-011", "cell": "P13", "street": "Avenue Albert Bedouce", "lat": 43.581338, "lon": 1.462161, "date": "2023-07-26", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "P13-012", "cell": "P13", "street": "Avenue Albert Bedouce", "lat": 43.581428, "lon": 1.462284, "date": "2023-07-26", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
@@ -32938,9 +33183,13 @@
 {"id": "P13-187", "cell": "P13", "street": "Rue Pelletier Doisy", "lat": 43.581903, "lon": 1.459551, "date": "2023-07-26", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "P13-188", "cell": "P13", "street": "Rue Pelletier Doisy", "lat": 43.581751, "lon": 1.459333, "date": "2023-07-26", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "P13-193", "cell": "P13", "street": "Rue Virgile", "lat": 43.579847, "lon": 1.458529, "date": "2023-07-26", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
+{"id": "P13-S001", "cell": "P13", "street": "Av Albert Bedouce", "lat": 43.581511, "lon": 1.462396, "date": "2023-07-26", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "P13-S004", "cell": "P13", "street": "Rue Alain Lesage", "lat": 43.581423, "lon": 1.459433, "date": "2023-07-26", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
 {"id": "P14-040", "cell": "P14", "street": "Boulevard de la Marne", "lat": 43.581672, "lon": 1.46267, "date": "2023-07-26", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "P14-041", "cell": "P14", "street": "Boulevard de la Marne", "lat": 43.581897, "lon": 1.462728, "date": "2025-05-18", "author": "topologie11", "licence": "Licence Ouverte 2.0"}
 {"id": "P14-042", "cell": "P14", "street": "Boulevard de la Marne", "lat": 43.581675, "lon": 1.462858, "date": "2025-05-18", "author": "topologie11", "licence": "Licence Ouverte 2.0"}
 {"id": "P14-043", "cell": "P14", "street": "Boulevard de la Marne", "lat": 43.581575, "lon": 1.462953, "date": "2025-05-18", "author": "topologie11", "licence": "Licence Ouverte 2.0"}
 {"id": "P14-070", "cell": "P14", "street": "Boulevard de la Mediterranee", "lat": 43.581928, "lon": 1.463224, "date": "2023-08-03", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
 {"id": "P14-071", "cell": "P14", "street": "Boulevard de la Mediterranee", "lat": 43.581742, "lon": 1.463281, "date": "2025-06-26", "author": "Toulouse Métropole", "licence": "Licence Ouverte 2.0"}
+{"id": "P14-S002", "cell": "P14", "street": "Bd De La Marne", "lat": 43.581787, "lon": 1.462723, "date": "2023-07-26", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
+{"id": "P14-S003", "cell": "P14", "street": "Bd De La Marne", "lat": 43.58169, "lon": 1.462511, "date": "2023-07-26", "author": "Toulouse Métropole", "source": "Panoramax", "licence": "Licence Ouverte 2.0", "pano": true}
