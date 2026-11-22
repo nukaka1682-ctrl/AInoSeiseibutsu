@@ -75,12 +75,14 @@ const STYLE_MIX = {
   wood: [[STYLE.modern, 1]],
   other: [[STYLE.brickStone, 0.2], [STYLE.brickShutters, 0.24], [STYLE.ochre, 0.1], [STYLE.taupe, 0.1], [STYLE.salmon, 0.12], [STYLE.cream, 0.1], [STYLE.rose, 0.14]],
   // 郊外の低い家（街路写真帖 01〜05 の北の住宅地: クリーム色・ベージュ・サーモン色の漆喰〔crépi〕に瓦屋根が大半、レンガは少し）
-  suburb: [[STYLE.cream, 0.35], [STYLE.ochre, 0.2], [STYLE.salmon, 0.15], [STYLE.taupe, 0.15], [STYLE.brickShutters, 0.15]],
+  // 街路写真帖 K14・N12・O12（Côte Pavée・Busca・Saint-Agne）のフォーブールの低い家（toulousaine）は、漆喰にレンガの弓形の窓枠と
+  // 灰色の板の鎧戸が多い（STYLE.faubourg）
+  suburb: [[STYLE.cream, 0.25], [STYLE.faubourg, 0.25], [STYLE.ochre, 0.15], [STYLE.salmon, 0.1], [STYLE.taupe, 0.1], [STYLE.brickShutters, 0.15]],
   // 旧市街のレンガ造り・材料の分からない建物: 写真の街並みのとおり 8 割はレンガ（ばら色の漆喰にレンガの窓枠を含む）
   oldTown: [[STYLE.brickStone, 0.32], [STYLE.brickShutters, 0.34], [STYLE.rose, 0.14], [STYLE.ochre, 0.07], [STYLE.salmon, 0.07], [STYLE.cream, 0.06]],
 };
-// 郊外の様式にする、エリアの原点（ポン・ヌフのあたり）からの距離（m）。内側はフォーブールのレンガの家並み
-const SUBURB_R = 2200;
+// 郊外の様式にする、エリアの原点（ポン・ヌフのあたり）からの距離（m）。内側（環状の大通りのすぐ外まで）はレンガの家並み
+const SUBURB_R = 1600;
 export function facadeStyle(b) {
   if (b.style != null) return b.style; // 決まった様式（landmarkfacades.js の歴史的な建物）
   const mat = b.tags['building:material'];
