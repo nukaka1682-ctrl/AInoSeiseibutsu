@@ -49,7 +49,7 @@ const KERB_TYPES = new Set(['residential', 'unclassified', 'road']); // 歩道�
 const KERB_OVER = 0.85; // 半分乗り上げた車の、縁石の車道側の縁から歩道へ出る幅
 const KERB_MIN_E = 1.6; // 半分乗り上げて止める歩道の最小の幅
 const WALK_TYPES = new Set(['residential', 'tertiary', 'unclassified', 'road']); // 縁石の外の舗装に止める一方通行の狭い通り
-const WALK_LEFT = 1.1; // 縁石の外に止めた車の、建物の側に残す歩く幅
+const WALK_LEFT = 0.7; // 縁石の外に止めた車の、建物の側に残す歩く幅
 const BOLLARD_STEP = 1.4;
 const CENTRE_R = 1500; // 広い歩道に車止めを並べる中心部（原点＝Pont Neuf からの距離）
 const NARROW_BOLLARD_R = 1100, NARROW_BOLLARD_STEP = 2.1; // 狭い歩道の縁にも車止めを並べる中心部（Saint-Cyprien を含む）と間隔（m）

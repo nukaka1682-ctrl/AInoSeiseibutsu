@@ -106,7 +106,7 @@ test('狭い住宅街の通り（4 m）は片側に歩道へ半分乗り上げ�
   // 一方通行の狭い通り（車線だけの幅）: 縁石の外の広い舗装の上に（歩く幅を残せるときだけ）
   assert.equal(parkMode({ type: 'tertiary', width: 3, oneway: true }, 3.2), 'walk');
   assert.equal(parkMode({ type: 'residential', width: 3.5, oneway: true }, 3.2), 'walk');
-  assert.equal(parkMode({ type: 'residential', width: 3.5, oneway: true }, 2.5), null, '歩く幅が残らない');
+  assert.equal(parkMode({ type: 'residential', width: 3.5, oneway: true }, 2.2), null, '歩く幅が残らない');
   assert.equal(parkMode({ type: 'residential', width: 3.5 }, 3.2), null, '両方向の通りはしない');
   const narrow = road(4, 'residential', 4, [[-200, 100], [200, 100]]);
   const { opts, raised } = town(() => false, [narrow]);
