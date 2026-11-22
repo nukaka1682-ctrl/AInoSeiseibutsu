@@ -15,4 +15,4 @@
 
 取り出しは、まず作業用のフォルダに全部 `python3 scripts/atlas-extract.py <作業フォルダ> <PDF>…`（すでにある id は飛ばすので、
 追加の PDF だけ渡せばよい）、次に `python3 scripts/atlas-sync.py <作業フォルダ> photos/atlas 3000` で半径 3 km の分だけをここへ。
-受け取り済み: 01〜10（区画 A07〜J05。全 21,757 枚のうち、ここにあるのは index.jsonl の枚数）
+受け取り済み: 01〜15（区画 A07〜L10。全 32,826 枚のうち、ここにあるのは index.jsonl の枚数）
