@@ -19,6 +19,13 @@ test('通りの種類: 旧市街の細い歩行者の通りは石の板、Rue du
   assert.equal(classifyStreet(road(1, 'pedestrian', 6, [[0, 0], [1, 0]]), true).kind, 'shared');
   assert.equal(classifyStreet(road(1, 'pedestrian', 4, [[0, 0], [1, 0]]), true).slabs, true);
   assert.equal(classifyStreet(road(1, 'residential', 3, [[0, 0], [1, 0]], { name: 'Rue Ninau' }), true).kind, 'curb', '街路写真帖: アスファルトと狭い歩道');
+  // 歩行者の区域の通り（IGN では住宅街の通り）は石畳。旧市街の外の同じ名前の通りは今まで
+  const pomme = classifyStreet(road(1, 'residential', 4, [[0, 0], [1, 0]], { name: 'Rue de la Pomme' }), true);
+  assert.equal(pomme.kind, 'shared');
+  assert.equal(pomme.slabs, false);
+  assert.equal(classifyStreet(road(1, 'tertiary', 9, [[0, 0], [1, 0]], { name: "Rue d'Alsace Lorraine" }), true).alsace, true);
+  assert.equal(classifyStreet(road(1, 'residential', 4, [[0, 0], [1, 0]], { name: 'Rue Léon-Gambetta' }), true).kind, 'shared');
+  assert.equal(classifyStreet(road(1, 'residential', 4, [[0, 0], [1, 0]], { name: 'Rue de la Pomme' }), false).kind, 'curb');
   assert.equal(classifyStreet(road(1, 'residential', 3, [[0, 0], [1, 0]], { name: 'Rue du Taur' }), true).kind, 'taur');
   assert.equal(classifyStreet(road(1, 'residential', 3, [[0, 0], [1, 0]], { name: 'Rue du Taur' }), false).kind, 'curb');
   assert.equal(classifyStreet(road(1, 'secondary', 7, [[0, 0], [1, 0]], { name: 'Rue de Metz' }), true).kind, 'curb');

@@ -55,10 +55,19 @@ const strHash = (s) => {
 // 旧市街でも、車道（アスファルト）と灰色の花崗岩の板の歩道の通り（利用者のストリートビュー 2026-10-17 210627: ポン・ヌフの橋のたもと）
 // 旧市街の小舗石の車道の通り（Rue du Taur 型。街路写真帖・利用者の写真）
 const TAUR_STREETS = /^Rue du Taur$/i;
+// 旧市街の中心の歩行者の区域の通り（IGN では住宅街の通り。街路写真帖で、縁石がなく壁から壁まで石畳の通りと確かめたもの。
+// Rue de la Bourse・Rue Peyrolières は車道と駐車があるので入れない）
+const PEDESTRIAN_ZONE = new Set(['rue saint rome', 'rue des changes', 'rue des filatiers', 'rue de la pomme', 'rue leon gambetta', 'rue pargaminieres',
+  'rue des arts', 'rue d alsace lorraine', 'rue lafayette', 'rue saint antoine du t', 'rue baour lormian', 'rue croix baragnon', 'rue temponieres',
+  'rue tripiere', 'rue du poids de l huile', 'rue romiguieres', 'rue saint pantaleon', 'rue de la trinite', 'rue des marchands', 'rue malcousinat',
+  'rue jules chalande', 'rue cujas', 'rue montardy', 'rue des puits clos', 'rue boulbonne', 'rue d astorg']);
+const plainName = (s) => (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[-'’]/g, ' ').replace(/\s+/g, ' ').trim();
+export const inPedestrianZone = (road) => PEDESTRIAN_ZONE.has(plainName(road.name));
 const GREY_WALKS = /^(Place du Pont[- ]Neuf|Quai de la Daurade)$/i;
 
 export function classifyStreet(road, old) {
-  const t = road.type;
+  const zone = old && inPedestrianZone(road); // 歩行者の区域の通りは歩行者の通りと同じ（壁から壁まで石畳）
+  const t = zone ? 'pedestrian' : road.type;
   const grey = GREY_WALKS.test(road.name || '');
   if (grey) old = false;
   const car = CAR_ROADS.has(t);
@@ -84,7 +93,8 @@ export function classifyStreet(road, old) {
     // - 小舗石の通りは Rue du Taur など少し（TAUR_STREETS: 小舗石の車道と石の板の歩道）
     // - 車の通る通り（Rue Ninau・Rue Tolosane・Rue des Lois・Rue de la Dalbade など）は、灰色のアスファルトの車道と、黒い車止めの
     //   並ぶ狭い歩道。下の「縁石と一段高い歩道」にする（以前は全部を小舗石の石畳にしていた）
-    if (t === 'pedestrian' || t === 'living_street') return { kind: 'shared', slabs: true, band: Math.max(road.width / 2 + 1.2, 3), gutter: 0, near };
+    // 歩行者の区域の通り（Rue Saint-Rome・Rue de la Pomme など）は小舗石と真ん中の側溝、地図の歩行者の通りは淡い石の板
+    if (t === 'pedestrian' || t === 'living_street') return { kind: 'shared', slabs: !zone, band: Math.max(road.width / 2 + 1.2, 3), gutter: 0, near };
     if (TAUR_STREETS.test(road.name || '')) return { kind: 'taur', band: Math.max(road.width / 2 + 1.2, 3), gutter: null, near };
   }
   if (car && road.sidewalk !== 'no' && road.sidewalk !== 'none') {
