@@ -5,6 +5,7 @@ import {
 } from '../geo.js';
 import { reshapeRoads } from './ramblas.js';
 import { gardenPaths } from './squares.js';
+import { historicCoreTest } from '../config.js';
 import polygonClipping from 'polygon-clipping';
 
 export const FLOOR_HEIGHT = 3.1;
@@ -588,10 +589,35 @@ export function parseOsm(osm, proj, rect, bdtopo = []) {
 
   reshapeRoads(roads, proj); // ジャン・ジョレス通りの 2023 年の車道の位置（ramblas.js）
   gardenPaths(roads, proj); // 広場の真ん中の庭の砂の園路（squares.js。Place Wilson）
+  addParkingLanes(roads, proj); // フォーブールの狭い一方通行の通りの駐車の帯
   unifyWaterLevels(areas);
   fillWaterUnderBridges(areas, roads);
   parkPavilions(buildings, areas);
   return { nodePos, buildings, parts, roads: dropPontNeufLanes(roads), areas, rails, waterLines, trees, named, proj };
+}
+
+// フォーブール・郊外の狭い一方通行の通り（IGN の幅は走る車線だけの 3〜4 m）: 車道に駐車の帯 PARK_LANE m を足し、片側に
+// 路上駐車させる（街路写真帖 I11・I12・L09・M11・M12: Rue de la Concorde・Rue de Bourgogne・Rue de Fleurance など、車線の脇に
+// 車がずらりと並び、歩道は狭い。足さないと建物の前まで広い歩道に車のない通りになっていた）。旧市街の歴史的な中心
+// （config.js の historicCoreTest。石畳の通りで駐車しない）・橋・トンネル・写真で直した道・行き止まりの短い道は除く
+const PARK_LANE = 2;
+const PARK_LANE_TYPES = new Set(['residential', 'tertiary', 'unclassified']);
+export function addParkingLanes(roads, proj) {
+  if (!proj) return 0;
+  const core = historicCoreTest(proj);
+  let n = 0;
+  for (const r of roads) {
+    if (!r.oneway || !PARK_LANE_TYPES.has(r.type) || r.width > 4 || r.bridge || r.tunnel || r.parkSide || r.pts.length < 2) continue;
+    let L = 0;
+    for (let i = 0; i + 1 < r.pts.length; i++) L += Math.hypot(r.pts[i + 1][0] - r.pts[i][0], r.pts[i + 1][1] - r.pts[i][1]);
+    const m = r.pts[r.pts.length >> 1];
+    if (L < 15 || core(m[0], m[1])) continue;
+    r.width += PARK_LANE;
+    r.lanes = 1; // 走る車線は 1 本（車線の境の破線を引かない）
+    r.parkSide = hash01(r.id ?? Math.round(m[0] * 7 + m[1] * 13), 61) < 0.5 ? 'right' : 'left';
+    n++;
+  }
+  return n;
 }
 
 // 公園・庭園・芝生の中の、高さのない建物（IGN の高さなしが 1 % ほど。売店・物置・温室・あずまや）は 1 階建てにする。
