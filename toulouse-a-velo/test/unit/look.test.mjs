@@ -237,3 +237,14 @@ test('時間帯: 太陽の高さ・方位から向きのベクトル', () => {
   // 北（方位 0）は −z、南（180）は +z
   assert.ok(sunDirection(30, 0)[2] < 0 && sunDirection(30, 180)[2] > 0);
 });
+
+test('ファサード: 中心から 2.2 km より外の 2 階建てまでの家は、多くが漆喰の様式（レンガと分かっている家・中心の近くは今まで）', () => {
+  const plaster = new Set([STYLE.cream, STYLE.ochre, STYLE.salmon, STYLE.taupe]);
+  let far = 0, near = 0;
+  for (let id = 1; id <= 400; id++) {
+    if (plaster.has(facadeStyle({ id, tags: {}, oldTown: false, inside: [0, -3000], info: { levels: 2, height: 6 } }))) far++;
+    if (plaster.has(facadeStyle({ id, tags: {}, oldTown: false, inside: [0, -1000], info: { levels: 2, height: 6 } }))) near++;
+  }
+  assert.ok(far / 400 > 0.75, `郊外 ${far / 400}`);
+  assert.ok(near < far);
+});

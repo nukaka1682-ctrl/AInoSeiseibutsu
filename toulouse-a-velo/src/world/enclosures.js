@@ -152,6 +152,11 @@ export function clearNamedAreas(segs, areas, proj = null) {
   });
 }
 
+// 旧市街の外の LiDAR の塀を庭の塀（kind 'garden'。buildEnclosures が漆喰の低い塀と生け垣にする）に。inOld(x, z): 旧市街か
+export function gardenWalls(segs, inOld) {
+  return segs.map((w) => (w.length === 5 && !inOld((w[0] + w[2]) / 2, (w[1] + w[3]) / 2) ? [...w, 'garden'] : w));
+}
+
 // 範囲 bounds に中点が入る区間を [ax, az, bx, bz, h, kind, { tint, rail }] にして返す
 export function fixedWalls(proj, bounds = null) {
   const out = [];
@@ -172,12 +177,30 @@ export function buildEnclosures(segs, materials, collision = null, terrain = nul
   const o = { drape: terrain, lift: -0.05 }; // 少し地面に埋める（地面の細かい凹凸で浮かないように）
   const brick = new MeshWriter(o), render = new MeshWriter(o), cap = new MeshWriter(o);
   const sloped = terrain && !terrain.flat;
-  const plain = sloped ? { brick: new MeshWriter(), render: new MeshWriter(), cap: new MeshWriter(), fill: new MeshWriter() } : null;
+  const plain = sloped ? { brick: new MeshWriter(), render: new MeshWriter(), cap: new MeshWriter(), fill: new MeshWriter(), hedge: new MeshWriter(), nocap: new MeshWriter() } : null;
   for (const [ax, az, bx, bz, h, kind, { tint, rail } = {}] of segs) {
     const L = Math.hypot(bx - ax, bz - az);
     if (L < 0.5) continue;
     // 塀の面: kind（'render' | 'brick'）が決まっていなければ 4 本に 3 本はレンガ
     const pick = (seed) => (kind ? kind === 'render' : hash01(seed, 1) >= 0.75);
+    if (sloped && kind === 'garden') {
+      // 旧市街の外の庭の塀（街路写真帖 E08・F08・G07 など: 郊外の家の前は高さ約 1 m のクリーム色・白の漆喰の低い塀で、
+      // 上は生け垣か何もない。LiDAR の高さ 2 m 前後は生け垣ごとの高さ）: 漆喰の低い塀（1 m まで）と、高い塀の 3 分の 2 は
+      // その上に生け垣（塀の高さまで）。土留めの塀（両側の地面の高さが違う）は普通の塀のまま
+      const seed = Math.floor(ax * 3.1) * 7919 + Math.floor(az * 2.3);
+      const full = wallProfile(terrain, ax, az, bx, bz, h, rail ? { rail } : undefined);
+      if (!full.some((p) => p.fill)) {
+        const low = wallProfile(terrain, ax, az, bx, bz, Math.min(h, 1.0), { rail: Math.min(h, 1.0) });
+        const cream = [[1.06, 1.03, 0.95], [1.1, 1.08, 1.04], [1.04, 0.95, 0.84]][Math.floor(hash01(seed, 7) * 3)];
+        writeSlopedWall(plain.render, plain.cap, low, seed, null, undefined, cream);
+        if (h > 1.3 && hash01(seed, 8) < 0.67) {
+          const hedge = low.map((p, i) => ({ x: p.x, z: p.z, base: p.top - 0.05, top: Math.max(p.top + 0.3, full[i].top + 0.1) }));
+          writeSlopedWall(plain.hedge, plain.nocap, hedge, seed, null, undefined, [0.3, 0.46, 0.22]);
+        }
+        if (collision) collision.addSegment(ax, az, bx, bz);
+        continue;
+      }
+    }
     if (sloped) {
       // 地形の上: 地面にそのまま沿わせると、段差（河岸・土手）を斜めに横切る塀の上端が 5 m の格子ごとにのこぎりの歯になる。
       // 上端はなめらかな線（wallProfile）、下端は地面より下まで（地面に隠れる）の普通の面で作る
@@ -220,7 +243,7 @@ export function buildEnclosures(segs, materials, collision = null, terrain = nul
   const group = new THREE.Group();
   group.name = 'enclosure-walls';
   const list = [[brick, materials.enclosureBrick], [render, materials.enclosureRender], [cap, materials.roof]];
-  if (plain) list.push([plain.brick, materials.enclosureBrick], [plain.render, materials.enclosureRender], [plain.cap, materials.roof], [plain.fill, materials.enclosureRender]);
+  if (plain) list.push([plain.brick, materials.enclosureBrick], [plain.render, materials.enclosureRender], [plain.cap, materials.roof], [plain.fill, materials.enclosureRender], [plain.hedge, materials.enclosureRender]);
   for (const [w, material] of list) {
     if (w.empty) continue;
     const m = new THREE.Mesh(w.toGeometry(), material);
