@@ -9,10 +9,16 @@
   `lat`・`lon`（撮影地点）、`date`（撮影日）、`author`・`licence`（撮影者とライセンス）
 - `<区画>/<id>.webp`: 写真
 
-写真の出典は Panoramax（https://panoramax.fr）。撮影者ごとのライセンスは index.jsonl のとおり
-（Toulouse Métropole の写真は Licence Ouverte 2.0、ほかの多くは CC BY-SA 4.0。使うときは撮影者名を表示する）。
+写真の出典は Panoramax（https://panoramax.fr）、補遺の一部は KartaView（https://kartaview.org）と Wikimedia Commons。撮影者ごとのライセンスは index.jsonl のとおり
+（Toulouse Métropole の写真は Licence Ouverte 2.0、ほかの多くは CC BY-SA 4.0、一部 CC BY-SA 3.0・CC BY 3.0。使うときは撮影者名を表示する）。
 地図の背景は Toulouse Métropole（Filaire de voirie）・© OpenStreetMap contributors。
 
 取り出しは、まず作業用のフォルダに全部 `python3 scripts/atlas-extract.py <作業フォルダ> <PDF>…`（すでにある id は飛ばすので、
 追加の PDF だけ渡せばよい）、次に `python3 scripts/atlas-sync.py <作業フォルダ> photos/atlas 3000` で半径 3 km の分だけをここへ。
-受け取り済み: 01〜25（区画 A07〜T14。全 55,493 枚のうち、ここにあるのは index.jsonl の枚数）
+受け取り済み: Atlas 01〜26（区画 A07〜T15。全 55,502 枚）、Supplement 01〜04（区画 A07〜K12。1,821 枚）。
+ここにあるのは、そのうち半径 3 km 以内の index.jsonl の枚数。
+
+- 補遺（Toulouse_5km_Supplement）の写真は id が `A07-S001` の形（500 × 300 px）。index.jsonl の行に `source`（Panoramax・
+  KartaView・Wikimedia Commons）と `pano`（360° の写真から切り出したもの）が付く。取り出しは
+  `python3 scripts/atlas-supplement-extract.py <作業フォルダ> <PDF>…`（Atlas と同じ作業フォルダに足してから atlas-sync.py）
+- `streets.json`: 通り名索引（Atlas 26 の巻末。通りの名前 → 写真のある区画。5 km 全体）。`python3 scripts/atlas-streets.py <Atlas 26 の PDF> streets.json`
