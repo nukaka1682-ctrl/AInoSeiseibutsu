@@ -1,0 +1,16 @@
+# トゥールーズ街路写真帖（Toulouse_5km_Atlas）から取り出した写真
+
+利用者から受け取った PDF「Toulouse_5km_Atlas_01〜33」（キャピトル広場から半径 5 km、500 m 四方の区画 A01〜T15、
+写真 55,502 枚）の写真を、区画ごとのフォルダに 1 枚ずつ取り出したもの（PDF の中の縮小写真 275 × 151 px を WebP に）。
+ゲームの見た目を本物に近づけるときの手本にする。
+
+- `index.jsonl`: 1 行 1 枚。`id`（例 A07-001）、`cell`（区画）、`street`（撮影座標に近い通りの名前。PDF の推定）、
+  `lat`・`lon`（撮影地点）、`date`（撮影日）、`author`・`licence`（撮影者とライセンス）
+- `<区画>/<id>.webp`: 写真
+
+写真の出典は Panoramax（https://panoramax.fr）。撮影者ごとのライセンスは index.jsonl のとおり
+（Toulouse Métropole の写真は Licence Ouverte 2.0、ほかの多くは CC BY-SA 4.0。使うときは撮影者名を表示する）。
+地図の背景は Toulouse Métropole（Filaire de voirie）・© OpenStreetMap contributors。
+
+取り出しは `python3 scripts/atlas-extract.py photos/atlas <PDF>…`（すでにある id は飛ばすので、追加の PDF だけ渡せばよい）。
+受け取り済み: 01〜05（区画 A07〜G08、10,610 枚）
