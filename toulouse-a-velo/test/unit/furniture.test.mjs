@@ -89,10 +89,10 @@ test('小物の配置: 路上駐車は自転車の通る幅を残し、交差点
   // 駐車場の車と、当たり判定（車は箱、ほかは円）
   assert.ok(out.cars.some((c) => c.x > 40 && c.z < -40));
   assert.equal(out.colliders.filter((c) => c.hl).length, out.cars.length + out.containers.length + out.shelters.length);
-  // 旧市街では路上駐車も灰色の街灯もない
+  // 旧市街に灰色の街灯はない。路上駐車は旧市街でも同じ（街路写真帖: 車の通る通りの片側に駐車）
   const old = planFurniture(town(() => true).opts);
   assert.equal(old.lights.length, 0);
-  assert.equal(old.cars.filter((c) => Math.abs(c.z) < 4 || Math.abs(c.x) < 2.5).length, 0);
+  assert.equal(old.cars.filter((c) => Math.abs(c.z) < 4 || Math.abs(c.x) < 2.5).length, out.cars.filter((c) => Math.abs(c.z) < 4 || Math.abs(c.x) < 2.5).length);
 });
 
 test('狭い住宅街の通り（4 m）は片側に歩道へ半分乗り上げて駐車。狭い tertiary には止めない', () => {

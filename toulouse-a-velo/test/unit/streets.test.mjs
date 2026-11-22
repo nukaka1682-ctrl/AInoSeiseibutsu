@@ -15,8 +15,10 @@ function crossroads(nsType = 'secondary') {
   return { roads: [ew, ns, ns2], buildings: [box(10, 9, 60, 30), box(10, -30, 60, -7.5)] };
 }
 
-test('通りの種類: 旧市街の細い通りは石畳（一部 Rue du Taur 型）、それ以外の車道は縁石と歩道', () => {
+test('通りの種類: 旧市街の細い歩行者の通りは石の板、Rue du Taur は小舗石、車の通る細い通りとそれ以外の車道は縁石と歩道', () => {
   assert.equal(classifyStreet(road(1, 'pedestrian', 6, [[0, 0], [1, 0]]), true).kind, 'shared');
+  assert.equal(classifyStreet(road(1, 'pedestrian', 4, [[0, 0], [1, 0]]), true).slabs, true);
+  assert.equal(classifyStreet(road(1, 'residential', 3, [[0, 0], [1, 0]], { name: 'Rue Ninau' }), true).kind, 'curb', '街路写真帖: アスファルトと狭い歩道');
   assert.equal(classifyStreet(road(1, 'residential', 3, [[0, 0], [1, 0]], { name: 'Rue du Taur' }), true).kind, 'taur');
   assert.equal(classifyStreet(road(1, 'residential', 3, [[0, 0], [1, 0]], { name: 'Rue du Taur' }), false).kind, 'curb');
   assert.equal(classifyStreet(road(1, 'secondary', 7, [[0, 0], [1, 0]], { name: 'Rue de Metz' }), true).kind, 'curb');
@@ -28,7 +30,7 @@ test('通りの種類: 旧市街の細い通りは石畳（一部 Rue du Taur �
   assert.equal(classifyStreet(road(1, 'footway', 2.5, [[0, 0], [1, 0]]), false).kind, 'plain');
   assert.equal(classifyStreet(road(1, 'residential', 5, [[0, 0], [1, 0]], { bridge: true }), false).kind, 'bridge');
   // 石畳の通りは IGN の幅（車道だけ）より広い範囲でほかの道の歩道を切る
-  assert.ok(classifyStreet(road(1, 'residential', 3, [[0, 0], [1, 0]]), true).band >= 3);
+  assert.ok(classifyStreet(road(1, 'pedestrian', 3, [[0, 0], [1, 0]]), true).band >= 3);
 });
 
 test('通りの計画: 交差点・続きの道・横断歩道と停止線、横断歩道の所で縁石を下げる', () => {
@@ -165,7 +167,7 @@ test('旧市街の石畳: 広場の中では幅を広げず、道の端の円も
   // 東西の細い通りが広場を横切り、南北の通りが広場の中で終わる
   const plaza = { type: 'plaza', ...box(-20, -30, 20, 30) };
   plaza.bounds = { minX: -20, minZ: -30, maxX: 20, maxZ: 30 };
-  const parsed = { roads: [road(1, 'residential', 4, [[-100, 0], [100, 0]]), road(2, 'pedestrian', 4, [[0, -100], [0, 0]])], areas: [plaza], rails: [] };
+  const parsed = { roads: [road(1, 'pedestrian', 4, [[-100, 0], [100, 0]]), road(2, 'pedestrian', 4, [[0, -100], [0, 0]])], areas: [plaza], rails: [] }; // 旧市街の石の板の歩行者の通り
   const plan = planStreets(parsed, () => true);
   const writers = {};
   writeStreets(parsed, plan, ALL, {}, (k) => (writers[k] ||= new MeshWriter()), new RaisedIndex());
