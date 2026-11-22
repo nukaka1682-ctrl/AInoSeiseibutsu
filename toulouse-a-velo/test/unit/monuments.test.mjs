@@ -316,3 +316,111 @@ test('自転車置き場: 線に沿って 1 m ごとの輪と自転車、当た�
   for (let i = 0; i < pos.count; i++) top = Math.max(top, pos.getY(i));
   assert.ok(top > 0.75 && top < 1.1, `輪の高さ ${top}`);
 });
+
+test('写真から作った名所のモデル（市場のハレット・ダルバード・カルム市場・凱旋門・ニエル兵舎・レ・ザバトワール）が組み立てられる', async () => {
+  const THREE = await import('three');
+  const { MONUMENTS, buildMonuments, findMonuments } = await import('../../src/world/monuments.js');
+  const { LocalProjection } = await import('../../src/geo.js');
+  const proj = new LocalProjection(43.5975, 1.44);
+  const rect = (lat, lon, w, d, extra = {}) => {
+    const [x, z] = proj.project(lat, lon);
+    const outer = [[x - w / 2, z - d / 2], [x + w / 2, z - d / 2], [x + w / 2, z + d / 2], [x - w / 2, z + d / 2]];
+    return { id: Math.round(lat * 1e5 + lon * 1e5), outer, holes: [], inside: [x, z], bounds: { minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2 }, tags: {}, info: { area: w * d, height: 12, ...extra } };
+  };
+  const buildings = [
+    rect(43.59755, 1.430203, 30, 12), rect(43.59787, 1.430189, 20, 11), // サン・シプリアンの市場
+    rect(43.597632, 1.442584, 50, 32, { isChurch: true, height: 28 }), // ダルバード
+    rect(43.597639, 1.44481, 50, 45, { height: 20 }), // カルム市場
+    rect(43.57744, 1.444198, 70, 14, { height: 13 }), // ニエル兵舎
+    rect(43.600879, 1.429539, 63, 31, { height: 11.8 }), // レ・ザバトワール
+  ];
+  const ids = new Set(['marche-saint-cyprien', 'dalbade', 'marche-carmes', 'caserne-niel', 'monument-combattants', 'abattoirs']);
+  const saved = MONUMENTS.splice(0, MONUMENTS.length, ...MONUMENTS.filter((m) => ids.has(m.id)));
+  try {
+    const list = findMonuments(proj, { buildings });
+    const kinds = new Set(list.map((m) => m.kind));
+    for (const k of ['halls', 'gothic', 'market', 'barracks', 'memorial', 'hall']) assert.ok(kinds.has(k), `${k} がない（${[...kinds].join(', ')}）`);
+    // レ・ザバトワールの正面は広場（東）の側: e1（正面から奥へ）は西向き
+    const hall = list.find((m) => m.kind === 'hall');
+    const [fx, fz] = proj.project(43.60115, 1.43020);
+    assert.ok((fx - hall.cx) * hall.e1[0] + (fz - hall.cz) * hall.e1[1] < 0, '正面は広場の側');
+    const halls = list.find((m) => m.kind === 'halls');
+    assert.equal(halls.halls.length, 2);
+    assert.ok(halls.replaced.every((b) => b && b.outer));
+    const mat = new THREE.MeshBasicMaterial();
+    const { group, colliders } = buildMonuments(list, { monument: mat, monumentMetal: mat, monumentInlay: mat }, { groundAt: () => 0 });
+    let tris = 0, bad = 0;
+    group.traverse((o) => {
+      const p = o.geometry?.attributes?.position;
+      if (!p) return;
+      tris += p.count / 3;
+      for (let i = 0; i < p.count; i++) if (!Number.isFinite(p.getX(i)) || !Number.isFinite(p.getY(i)) || !Number.isFinite(p.getZ(i))) bad++;
+    });
+    assert.ok(tris > 2000, `三角形 ${tris}`);
+    assert.equal(bad, 0, 'NaN の頂点');
+    assert.ok(colliders.length > 0);
+  } finally {
+    MONUMENTS.splice(0, MONUMENTS.length, ...saved);
+  }
+});
+
+test('Place Wilson の庭: 地図の小道を砂の園路に、入口は小道が縁を横切る所。噴水（水盤の当たり判定）・回転木馬（円い建物を置き換え）・木を植えない所', async () => {
+  const { SQUARES, gardenGates, gardenPaths, inSquareGarden, squaresLocal } = await import('../../src/world/squares.js');
+  const proj = new LocalProjection(43.6048, 1.4474);
+  const [sq] = squaresLocal(proj);
+  assert.equal(sq.id, 'wilson');
+  assert.ok(inSquareGarden(sq, sq.fx, sq.fz) && !inSquareGarden(sq, sq.cx + sq.r + 1, sq.cz));
+  // 庭の中心から西の入口へ（環状の車道の芯線まで）の小道と、庭の外の歩道
+  const inner = { type: 'footway', width: 2.5, pts: [[sq.fx, sq.fz], [sq.cx - sq.r - 2.5, sq.cz]] };
+  const outside = { type: 'footway', width: 2.5, pts: [[sq.cx + sq.r + 8, sq.cz], [sq.cx + sq.r + 8, sq.cz + 30]] };
+  const road = { type: 'tertiary', width: 5, pts: [[sq.cx - 40, sq.cz], [sq.cx + 40, sq.cz]] };
+  gardenPaths([inner, outside, road], proj);
+  assert.equal(inner.surface, 'fine_gravel');
+  assert.equal(inner.width, SQUARES[0].pathWidth);
+  assert.ok(!outside.surface && !road.surface);
+  const gates = gardenGates(sq, [inner]);
+  assert.equal(gates.length, 1);
+  assert.ok(Math.abs(Math.abs(gates[0]) - Math.PI) < 0.05, '西の入口');
+  // 噴水と回転木馬（地図の円い 6 m の建物を置き換える）
+  const carousel = bld(circle(sq.kx, sq.kz, 5.3, 16), { height: 6 });
+  const list = findMonuments(proj, { buildings: [carousel], roads: [inner, road] }).filter((m) => m.kind === 'square' || m.kind === 'carousel');
+  assert.equal(list.length, 2);
+  assert.deepEqual(list.find((m) => m.kind === 'carousel').replaced, [carousel]);
+  const { group, colliders, keepOut } = buildMonuments(list, { monument: new THREE.MeshBasicMaterial(), monumentMetal: new THREE.MeshBasicMaterial(), monumentInlay: new THREE.MeshBasicMaterial() }, { groundAt: () => 0 });
+  let bad = 0;
+  group.traverse((o) => {
+    const p = o.geometry?.attributes?.position;
+    if (p) for (let i = 0; i < p.count; i++) if (!Number.isFinite(p.getX(i) + p.getY(i) + p.getZ(i))) bad++;
+  });
+  assert.equal(bad, 0, 'NaN の頂点');
+  assert.ok(colliders.some((c) => c.length === 3 && Math.hypot(c[0] - sq.fx, c[1] - sq.fz) < 0.01 && Math.abs(c[2] - (sq.basin + 0.06)) < 1e-9), '水盤の外の縁');
+  assert.ok(colliders.some((c) => c.length === 3 && Math.hypot(c[0] - sq.kx, c[1] - sq.kz) < 0.01), '回転木馬');
+  assert.ok(keepOut.length >= 2);
+  // 木を植えない所: 噴水と回転木馬のまわり（隣のタイルの名所の一覧が空でも）
+  const clear = monumentClearance([], proj);
+  assert.ok(clear(sq.fx + 3, sq.fz) && clear(sq.kx, sq.kz + 4) && !clear(sq.cx - 25, sq.cz));
+});
+
+test('Place Wilson の庭の縁: 楕円の環状の車道の内側の縁石に沿い、車止め（当たり判定）は車道の上に立たない', async () => {
+  const { gardenOutline, inSquareGarden, squaresLocal } = await import('../../src/world/squares.js');
+  const proj = new LocalProjection(43.6048, 1.4474);
+  const [sq] = squaresLocal(proj);
+  // 楕円の環状の車道（芯線の半径 東西 42 m・南北 36 m、幅 5 m）を 4 本の道に分けて
+  const ell = (a) => [sq.cx + Math.cos(a) * 42, sq.cz + Math.sin(a) * 36];
+  const name = 'Place du Président Thomas Woodrow Wilson';
+  const roads = [0, 1, 2, 3].map((q) => ({ name, type: 'tertiary', width: 5, pts: Array.from({ length: 13 }, (_, i) => ell(((q + i / 12) * Math.PI) / 2)) }));
+  const o = gardenOutline(sq, roads);
+  assert.ok(Math.abs(o.rAt(0) - (42 - 2.5 - 0.4)) < 0.2, `東 ${o.rAt(0).toFixed(2)}`);
+  assert.ok(Math.abs(o.rAt(Math.PI / 2) - (36 - 2.5 - 0.4)) < 0.2, `南 ${o.rAt(Math.PI / 2).toFixed(2)}`);
+  assert.ok(inSquareGarden(sq, sq.cx + 38, sq.cz, 0, roads) && !inSquareGarden(sq, sq.cx, sq.cz + 34, 0, roads));
+  const list = findMonuments(proj, { buildings: [], roads }).filter((m) => m.kind === 'square');
+  const { colliders } = buildMonuments(list, {}, { groundAt: () => 0 });
+  const seg = roads.flatMap((r) => r.pts.slice(1).map((p, i) => [...r.pts[i], ...p]));
+  const d = (x, z) => Math.min(...seg.map(([ax, az, bx, bz]) => {
+    const dx = bx - ax, dz = bz - az, t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz)));
+    return Math.hypot(x - ax - dx * t, z - az - dz * t);
+  }));
+  const posts = colliders.filter((c) => c.length === 3 && Math.abs(c[2] - 0.12) < 1e-9);
+  assert.ok(posts.length > 60, `車止め ${posts.length}`);
+  for (const [x, z, r] of posts) assert.ok(d(x, z) > 2.5 + r - 0.01, `車止めが車道の上（芯線から ${d(x, z).toFixed(2)} m）`);
+});

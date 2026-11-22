@@ -10,6 +10,7 @@ import { MeshWriter, triangulate, writeFlatPolygon } from './meshwriter.js';
 import { COVER_COLORS, createCoverShared } from './cover.js';
 import { Grid, centroid, clipPolylineToRect, clipRingToRect, closestOnSegment, freeRects, hash01, pointInPolygon, ringBounds, signedArea } from '../geo.js';
 import { ramblasLayout } from './ramblas.js';
+import { gardenPlazaRings, squaresLocal } from './squares.js';
 import { LOCKS, lockFrame } from './locks.js';
 import { RaisedIndex, oldTownBase, planStreets, streetSteps, writePrism } from './streets.js';
 import { CAR_ROADS } from './parse.js';
@@ -17,7 +18,7 @@ import { catenaryStations, mergeIntervals, slicePolyline, subtract, tramCrossCut
 import { PONT_NEUF_HALF, bridgeGroups, buildAbutments, buildBridges, conditionUnderpasses, pontNeufApproaches, raiseBridgeEnds, setupDecks } from './bridges.js';
 import { DRAPE_LIFT, FLAT_TERRAIN } from './terrain.js';
 import { buildFarTerrain, createTerrainMaterials, splitGeometry, TERRAIN_ORDER } from './terrainmesh.js';
-import { conditionRoads, despike, sharpenQuays, WALK_DEF } from './terraincond.js';
+import { conditionRoads, despike, sharpenQuays, SMOOTH_ZONES, smoothZones, WALK_DEF } from './terraincond.js';
 import { fillManualHeights, flattenManualQuays, manualChains, manualLawns, nearManualQuay, quayChains, quaySegments } from './quays.js';
 import { buildMetroEntrances, chooseEntrances, createMetroMaterials, fillMetroPits, orientRamps, projectEntrances, writeEntranceMasks } from './metro.js';
 
@@ -696,7 +697,8 @@ export function quayLinks(walls, proj) {
 const QUAY_PARAPET = 1.0; // 岸壁の上のレンガの手すり壁の高さ（m）
 // 石の岸壁（利用者の写真 NCM_0111・0112: ポン・ヌフの南の左岸、Cours Dillon の下の岸壁は、レンガでなく淡い灰色の
 // 切石の壁と手すり壁）。[緯度, 経度, 半径 m] の円の中の岸壁
-const STONE_QUAYS = [[43.598547, 1.437515, 55]];
+// アレーヌの駅前の切り通しの擁壁は淡いコンクリート（航空写真）
+const STONE_QUAYS = [[43.598547, 1.437515, 55], [43.59360, 1.41908, 40]];
 const STONE_QUAY = c3('#c6bca8', 1.16);
 function buildQuayWalls(list, mats, proj = null) {
   const stoneDiscs = proj ? STONE_QUAYS.map(([lat, lon, r]) => [...proj.project(lat, lon), r]) : [];
@@ -740,12 +742,13 @@ function buildQuayWalls(list, mats, proj = null) {
     const am = Math.min(1.6, 1 / Math.max(0.3, aex * nx + aez * nz)), bm = Math.min(1.6, 1 / Math.max(0.3, bex * nx + bez * nz));
     const [anx, anz, bnx, bnz] = [aex * am, aez * am, bex * bm, bez * bm];
     // 壁の面は上の河岸の高さ + 胸壁（QUAY_PARAPET m）まで（写真: ドラード河岸・トゥニ河岸は上の歩道の縁にレンガの手すり壁）
-    const P = QUAY_PARAPET, ta = at + P, tb = bt + P;
+    // noParapet: 手すり壁なし（橋面の下の橋台の壁。壁の面は上の段の高さまで）
+    const P = q.noParapet ? 0 : QUAY_PARAPET, ta = at + P, tb = bt + P;
     w.quad([ax, h0, az], [bx, h0, bz], [bx, tb, bz], [ax, ta, az], [nx, 0, nz], [0, 0], [L * us, 0], [L * us, (hb + P) * vs], [0, (ha + P) * vs], brick);
     // 手すり壁の内側の面と上面（厚さ 0.45 m、レンガの笠）
     const T = 0.45, pax = ax - anx * T, paz = az - anz * T, pbx = bx - bnx * T, pbz = bz - bnz * T;
-    w.quad([pbx, bt, pbz], [pax, at, paz], [pax, ta, paz], [pbx, tb, pbz], [-nx, 0, -nz], [0, 0], [L * us, 0], [L * us, P * vs], [0, P * vs], brick);
-    w.quad([ax, ta, az], [pax, ta, paz], [pbx, tb, pbz], [bx, tb, bz], [0, 1, 0], [0, 0], [0, T * vs], [L * us, T * vs], [L * us, 0], brick.map((c) => c * (stone ? 0.95 : 0.85)));
+    if (P > 0) w.quad([pbx, bt, pbz], [pax, at, paz], [pax, ta, paz], [pbx, tb, pbz], [-nx, 0, -nz], [0, 0], [L * us, 0], [L * us, P * vs], [0, P * vs], brick);
+    if (P > 0) w.quad([ax, ta, az], [pax, ta, paz], [pbx, tb, pbz], [bx, tb, bz], [0, 1, 0], [0, 0], [0, T * vs], [L * us, T * vs], [L * us, 0], brick.map((c) => c * (stone ? 0.95 : 0.85)));
     // 足元の石積みの帯（遊歩道から 1.3 m。写真では淡い石の切石の土台の上にレンガが積まれている）。壁の面より 3 cm 手前
     const sa = Math.min(at, ab + 1.3), sb = Math.min(bt, bb + 1.3), ox = nx * 0.03, oz = nz * 0.03;
     if (!stone && sa > h0 + 0.5 && sb > h0 + 0.5) w.quad([ax + ox, h0, az + oz], [bx + ox, h0, bz + oz], [bx + ox, sb, bz + oz], [ax + ox, sa, az + oz], [nx, 0, nz], [0, 0], [L / 2, 0], [L / 2, (sb - h0) / 2], [0, (sa - h0) / 2], BANK.quayBase);
@@ -883,14 +886,30 @@ export function buildGroundBase(parsed, rect, mats, terrain = FLAT_TERRAIN, layo
     T.metro = chooseEntrances(projectEntrances(T.metroRaw, T.proj).filter((e) => !inWater(e.x, e.z) && !(e.kind === 'metro' && !e.src && inCarriageway(e.x, e.z))), !!T.metroWalk);
     T.metroPrepare?.(T.metro); // メトロのゲーム: ホームが浅い駅の出入口を長くする・反対側に足す
     orientRamps(T.metro, parsed.roads);
-    fillMetroPits(T, T.metro);
+    // 工事中に測った所などの細かいでこぼこをならす（terraincond.js の SMOOTH_ZONES。出入口の穴は中央値でほぼ消え、残りは下で埋める）
+    if (parsed.proj) smoothZones(T, SMOOTH_ZONES, parsed.proj);
+    // OpenStreetMap の出入口に替えた駅の LiDAR の吹き抜け（metro.js の mergeOsmBouches の kind: 'fill'）は、地形の穴を埋めるだけ
+    const fills = projectEntrances((T.metroRaw || []).filter((e) => e.kind === 'fill').map((e) => ({ ...e, kind: 'metro' })), T.proj);
+    fillMetroPits(T, T.metro.concat(fills));
     T.metroAdjust?.(T.metro); // メトロのゲーム: 出入口の階段の深さを駅の改札階にそろえる
-    const mounds = raiseBridgeEnds(T, parsed.roads, parsed.proj); // 橋の端の地面を測った橋面の高さに（bridges.js。地形より橋面を信じる）
-    conditionRoads(T, parsed.roads, inWater);
+    // 写真で決めた盛り土（early。Pont Saint-Pierre の取り付けの高架）: 道路をならす前に埋める（道の縦断面が地形モデルの穴を
+    // なぞらない・橋の端を盛り上げない）。壁の段は下の setCliffs の前にもう一度書き直す
+    const early = T.quayLines && parsed.proj ? manualChains(parsed.proj).filter((c) => c.spec.early) : [];
+    if (early.length) flattenManualQuays(T, early, inWater);
+    // 橋の端の地面を測った橋面の高さに（bridges.js。地形より橋面を信じる）。写真で決めた盛り土の端は除く
+    const mounds = raiseBridgeEnds(T, parsed.roads, parsed.proj, { skip: early.length ? (x, z) => nearManualQuay(early, x, z) : null });
     // ブリエンヌ運河の岸は草の土手（利用者の写真 NCM_0186）。地形の段を岸壁にしない
     const brienne = parsed.proj ? BRIENNE.line.map((ll) => parsed.proj.project(...ll)) : [];
     const inBasin0 = parsed.proj ? lockBasinTest(parsed.proj) : () => false; // 船だまりの岸壁は lockBasinWalls
     const onBrienne = (x, z) => brienne.some((p, i) => i + 1 < brienne.length && closestOnSegment(x, z, ...p, ...brienne[i + 1]).d2 < 25 * 25);
+    // 焼き込んだ岸壁・擁壁の線（下の setCliffs と同じ線。道が横切る所は切れている）を越えて、道の高さを地面に広げない
+    let barrier = [];
+    if (T.quayLines && parsed.proj) {
+      const photo0 = manualChains(parsed.proj);
+      barrier = quaySegments(quayChains(T.quayLines, parsed.proj), parsed.roads, { skip: (x, z) => onBrienne(x, z) || inBasin0(x, z) || nearManualQuay(photo0, x, z) })
+        .concat(quaySegments(photo0, parsed.roads));
+    }
+    conditionRoads(T, parsed.roads, inWater, { barrier });
     // 盛り上げた橋の端（raiseBridgeEnds）の縁を岸壁にしたもののうち、橋の下を横切る壁は作らない（橋の上の当たり判定になる）
     const bridgeWays = mounds.length ? parsed.roads.filter((r) => r.bridge && r.pts.length >= 2) : [];
     const underRaisedEnd = (x, z) => mounds.some((m) => Math.hypot(x - m.x, z - m.z) < 24)
@@ -912,7 +931,7 @@ export function buildGroundBase(parsed, rect, mats, terrain = FLAT_TERRAIN, layo
       for (const k of T.cliffLevels.keys()) T.quayMask[k] = 1; // despike が段の縁の点を「とげ」として戻さないように
       // 壁の上端・下端は、切れた地面の両側の高さ（端へ向けてすぼむ）。壁の上の歩道の板は要らない（wa = wb = 0）
       const cliffs = segs.map((q) => ({
-        ax: q.ax, az: q.az, bx: q.bx, bz: q.bz, nx: q.nx, nz: q.nz, wa: 0, wb: 0, cliff: true, wet: q.wet, stone: q.stone, setts: q.plain,
+        ax: q.ax, az: q.az, bx: q.bx, bz: q.bz, nx: q.nx, nz: q.nz, wa: 0, wb: 0, cliff: true, wet: q.wet, stone: q.stone, setts: q.plain, noParapet: q.noParapet,
         at: T.h(q.ax, q.az, -1), ab: T.h(q.ax, q.az, 1), bt: T.h(q.bx, q.bz, -1), bb: T.h(q.bx, q.bz, 1),
       }));
       T.setQuayWalls(cliffs.concat(manual));
@@ -1436,6 +1455,16 @@ function* groundDetailSteps(parsed, clip, mats, waterDepthAt, opts) {
     }
     for (const line of rl.beds) {
       for (const pts of clipPolylineToRect(line, ...clipRect)) writeRibbon(W(ORDER.plaza + 0.1, 'grass'), pts, rl.bedHalf, 0, c3('#8a7a5a'), 3);
+    }
+  }
+  // ---- 広場の真ん中の庭（squares.js。Place Wilson）: 噴水と回転木馬のまわりの固めた砂の広場（園路と同じ砂。園路の下に描く）
+  if (parsed.proj) {
+    for (const sq of squaresLocal(parsed.proj)) {
+      for (const ring of gardenPlazaRings(sq)) {
+        if (!overlaps(ringBounds(ring))) continue;
+        const outer = clipRingToRect(ring, clip.minX, clip.minZ, clip.maxX, clip.maxZ);
+        if (outer.length >= 3) writeFlatPolygon(W(ORDER.footway - 0.2, 'gravel'), outer, [], 0, 4, c3('#ffffff'));
+      }
     }
   }
   // ---- 道路 ----

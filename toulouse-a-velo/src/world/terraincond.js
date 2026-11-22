@@ -31,6 +31,27 @@ function samplePolyline(pts, step) {
   return out;
 }
 
+// 擁壁の線 segs を越えるかの判定（conditionRoads の barrier）: (k, x, z, px, pz) => 格子点 k = (x, z) から道の点 (px, pz) へ
+// 線を横切るか。線から reach m より遠い格子点は調べない。線がなければ null
+function barrierTest(g, segs, reach) {
+  if (!segs || !segs.length) return null;
+  const grid = new Grid(10), near = new Uint8Array(g.cols * g.rows);
+  segs.forEach((q, i) => {
+    grid.insertSegment(q.ax, q.az, q.bx, q.bz, i);
+    const c0 = Math.max(0, Math.floor(g.ax * (Math.min(q.ax, q.bx) - reach) + g.bx)), c1 = Math.min(g.cols - 1, Math.ceil(g.ax * (Math.max(q.ax, q.bx) + reach) + g.bx));
+    const r0 = Math.max(0, Math.floor(g.az * (Math.min(q.az, q.bz) - reach) + g.bz)), r1 = Math.min(g.rows - 1, Math.ceil(g.az * (Math.max(q.az, q.bz) + reach) + g.bz));
+    for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) near[r * g.cols + c] = 1;
+  });
+  return (k, x, z, px, pz) => {
+    if (!near[k]) return false;
+    let hit = false;
+    grid.query(Math.min(x, px), Math.min(z, pz), Math.max(x, px), Math.max(z, pz), (i) => {
+      if (!hit && segmentsCross(x, z, px, pz, segs[i].ax, segs[i].az, segs[i].bx, segs[i].bz)) hit = true;
+    });
+    return hit;
+  };
+}
+
 // 道の縦断面で地面の格子をならす。roads: 道路（parse.js）、inWater(x, z): 水の上か。
 // 中心線を 5 m ごとに測り、水の上の点は両岸の点の高さを結び、前後 ±window m の三角の重みでならす。
 // 3 回に分けて格子に書く（あとの回が優先）:
@@ -40,10 +61,13 @@ function samplePolyline(pts, step) {
 //  2. 車道の路肩: 車道の縁から shoulder m までの格子点を、いちばん近い車道の高さに（その先 fringe m かけて元の地面へ）。
 //     車道の面にかかる格子の三角形の頂点がすべて車道の高さになるので、車道が横に傾かない。小道の芯の上は小道を優先
 //  3. 車道の芯: 幅の半分 + 1 m までの格子点を車道の高さに（重なる道は重みで平均）
-export function conditionRoads(terrain, roads, inWater = () => false, { window = 15, fringe = 6, shoulder = 6.1, pathShoulder = 4.5, pathFringe = 4, paths = true } = {}) {
+// barrier: [{ ax, az, bx, bz }] 擁壁・岸壁の線。格子点と道（いちばん近い点）の間にこの線があれば、その道の高さを格子点に広げない
+// （盛り土の斜路の路肩が壁の外の地面まで持ち上げて、壁の外に灰色の丘ができていた。Rue du Pont Saint-Pierre）
+export function conditionRoads(terrain, roads, inWater = () => false, { window = 15, fringe = 6, shoulder = 6.1, pathShoulder = 4.5, pathFringe = 4, paths = true, barrier = [] } = {}) {
   if (!terrain || terrain.flat) return 0;
   const g = terrain.near, D = g.data, cols = g.cols, rows = g.rows;
   const DAT = terrain.datum;
+  const blocked = barrierTest(g, barrier, shoulder + fringe + 12);
   // 縦断面（元の地面から。格子に書く前に全部の道を測る）
   const profile = (r) => {
     const S = samplePolyline(r.pts, 5);
@@ -109,8 +133,9 @@ export function conditionRoads(terrain, roads, inWater = () => false, { window =
             const c = closestOnSegment(nodeX(g, cc), z, a.x, a.z, b.x, b.z);
             const d = Math.sqrt(c.d2);
             if (d >= outer) continue;
-            const w = d <= inner ? 1 : 1 - smooth01((d - inner) / fr);
             const k = rr * cols + cc;
+            if (blocked && blocked(k, nodeX(g, cc), z, c.x, c.z)) continue;
+            const w = d <= inner ? 1 : 1 - smooth01((d - inner) / fr);
             const pw = w * w * wid2;
             sumW[k] += pw;
             sumY[k] += pw * (ys[i] + (ys[i + 1] - ys[i]) * c.t);
@@ -141,6 +166,7 @@ export function conditionRoads(terrain, roads, inWater = () => false, { window =
             const c = closestOnSegment(nodeX(g, cc), z, a.x, a.z, b.x, b.z);
             const d = Math.sqrt(c.d2) - half, k = rr * cols + cc;
             if (d >= reach || d >= sumW[k]) continue;
+            if (blocked && blocked(k, nodeX(g, cc), z, c.x, c.z)) continue;
             sumW[k] = d;
             sumY[k] = ys[i] + (ys[i + 1] - ys[i]) * c.t;
           }
@@ -539,6 +565,79 @@ export function despike(terrain, { min = 1, roadMax = 0.3 } = {}) {
       if (!(n4.every((u) => u - v > min) || n4.every((u) => v - u > min))) continue;
       const n8 = [...n4, src[k - cols - 1], src[k - cols + 1], src[k + cols - 1], src[k + cols + 1]].filter((u) => !Number.isNaN(u)).sort((a, b) => a - b);
       D[k] = (n8[(n8.length - 1) >> 1] + n8[n8.length >> 1]) / 2;
+      n++;
+    }
+  }
+  return n;
+}
+
+// 地形モデルの細かいでこぼこをならす所。LiDAR HD は 2021〜22 年の測りで、工事中の所が写っている: ジャン・ジョレス通りの
+// 遊歩道（2019〜23 年の工事）の植え穴と盛り土が、5 m の格子に 0.5 m ほどの穴と山の列になって残り、遊歩道と車道が波打っていた
+// （利用者の指摘「道がぼこぼこ」）。Place Wilson の庭（木の下の測りの乱れ）・Allées Roosevelt・Jean-Jaurès の駅前も同じ。
+// line: 軸の線 [[緯度, 経度]…] と半分の幅 half m、または中心 c と半径 r m
+export const SMOOTH_ZONES = [
+  { line: [[43.605571, 1.448741], [43.609102, 1.453765]], half: 32 }, // Allées Jean-Jaurès（ランブラ）
+  { line: [[43.60512, 1.44766], [43.60567, 1.44862]], half: 17 }, // Allées Roosevelt
+  { c: [43.604854, 1.44738], r: 47 }, // Place Wilson（庭と環状の車道）
+  { c: [43.60585, 1.44900], r: 36 }, // Jean-Jaurès の交差点と駅前
+  { c: [43.60935, 1.45448], r: 24 }, // Boulevard de la Gare の Pont Pompidou の手前（メディアテークの前。車道に 25 cm のこぶ）
+];
+
+// zones の中の格子点を、まわり ±2 点（±10 m）の中央値（坂の面はそのまま残る）の 3 × 3 の平均に置き換える。
+// 縁の fade m で元の高さへ戻す。動かした格子点の数を返す
+export function smoothZones(terrain, zones, proj, { fade = 10 } = {}) {
+  if (!terrain || terrain.flat || !proj) return 0;
+  const g = terrain.near, D = g.data, cols = g.cols, rows = g.rows;
+  let n = 0;
+  for (const zn of zones) {
+    let weight, x0, x1, z0, z1;
+    if (zn.c) {
+      const [cx, cz] = proj.project(zn.c[0], zn.c[1]);
+      weight = (x, z) => Math.min(1, Math.max(0, (zn.r - Math.hypot(x - cx, z - cz)) / fade));
+      [x0, x1, z0, z1] = [cx - zn.r, cx + zn.r, cz - zn.r, cz + zn.r];
+    } else {
+      const pts = zn.line.map((ll) => proj.project(ll[0], ll[1]));
+      weight = (x, z) => {
+        let d2 = Infinity;
+        for (let i = 0; i + 1 < pts.length; i++) d2 = Math.min(d2, closestOnSegment(x, z, pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1]).d2);
+        return Math.min(1, Math.max(0, (zn.half - Math.sqrt(d2)) / fade));
+      };
+      x0 = Math.min(...pts.map((p) => p[0])) - zn.half; x1 = Math.max(...pts.map((p) => p[0])) + zn.half;
+      z0 = Math.min(...pts.map((p) => p[1])) - zn.half; z1 = Math.max(...pts.map((p) => p[1])) + zn.half;
+    }
+    const c0 = Math.max(3, Math.floor(g.ax * x0 + g.bx)), c1 = Math.min(cols - 4, Math.ceil(g.ax * x1 + g.bx));
+    const r0 = Math.max(3, Math.floor(g.az * z0 + g.bz)), r1 = Math.min(rows - 4, Math.ceil(g.az * z1 + g.bz));
+    const med = new Map(), buf = [];
+    for (let r = r0; r <= r1; r++) {
+      for (let c = c0; c <= c1; c++) {
+        const k = r * cols + c;
+        if (Number.isNaN(D[k])) continue;
+        const w = weight((c - g.bx) / g.ax, (r - g.bz) / g.az);
+        if (!w) continue;
+        buf.length = 0;
+        for (let dr = -2; dr <= 2; dr++) for (let dc = -2; dc <= 2; dc++) {
+          const v = D[k + dr * cols + dc];
+          if (!Number.isNaN(v)) buf.push(v);
+        }
+        if (buf.length < 13) continue;
+        buf.sort((a, b) => a - b);
+        med.set(k, [(buf[(buf.length - 1) >> 1] + buf[buf.length >> 1]) / 2, w]);
+      }
+    }
+    const next = [];
+    for (const [k, [, w]] of med) {
+      let sum = 0, cnt = 0;
+      for (const dk of [-cols - 1, -cols, -cols + 1, -1, 0, 1, cols - 1, cols, cols + 1]) {
+        const q = med.get(k + dk), v = q ? q[0] : D[k + dk];
+        if (!Number.isNaN(v)) {
+          sum += v;
+          cnt++;
+        }
+      }
+      next.push([k, sum / cnt, w]);
+    }
+    for (const [k, v, w] of next) {
+      D[k] += (v - D[k]) * w;
       n++;
     }
   }

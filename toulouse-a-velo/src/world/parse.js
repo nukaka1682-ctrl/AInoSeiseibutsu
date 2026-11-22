@@ -4,6 +4,8 @@ import {
   Grid, centroid, clipRingToRect, closestOnSegment, hash01, pointInPolygon, pointInRing, ringBounds, signedArea, simplifyRing,
 } from '../geo.js';
 import { reshapeRoads } from './ramblas.js';
+import { gardenPaths } from './squares.js';
+import polygonClipping from 'polygon-clipping';
 
 export const FLOOR_HEIGHT = 3.1;
 
@@ -91,6 +93,10 @@ const ROAD_FIXES = [
   // 利用者の Street View 224901: Rue Laganne（Prairie des Filtres の西）は、西の庭の塀から東の擁壁まで約 8 m で、
   // 1 車線＋東の擁壁沿いの縦列駐車（約 5.5 m）と西の約 2 m の歩道。データの線は通りの中心より約 2 m 東（航空写真）
   { name: /^Rue Laganne$/i, box: [43.5955, 1.4355, 43.5966, 1.4365], fix: { width: '5.5', shift: -2, parkSide: 'right' } },
+  // Pont Saint-Pierre と Rue du Pont Saint-Pierre（サン・シプリアン）: 2024 年 4 月から、サン・シプリアンから都心へ（北東へ）の
+  // 一方通行（Le Journal Toulousain「le pont Saint-Pierre définitivement à sens unique」。夏は車を止めて歩行者・自転車だけ）。
+  // データは両方向 2 車線（IGN）・向きなし（OSM の橋と斜路）。along: 車の進む向き [緯度, 経度] の符号（逆向きの way は oneway=-1）
+  { name: /Pont Saint[- ]Pierre/i, box: [43.5978, 1.4316, 43.6034, 1.4358], along: [1, 1], fix: { oneway: 'yes', lanes: '1' } },
 ];
 // tags: 道のタグ、a・b: 道の両端 [緯度, 経度]（一方通行は進む向きの順）
 export function roadFix(tags, a, b) {
@@ -99,11 +105,57 @@ export function roadFix(tags, a, b) {
   for (const f of ROAD_FIXES) {
     if (!f.name.test(tags.name) || lat < f.box[0] || lon < f.box[1] || lat > f.box[2] || lon > f.box[3]) continue;
     if ((f.when && !f.when(tags)) || (f.west && !(b[1] < a[1]))) continue;
+    if (f.along) return (b[0] - a[0]) * f.along[0] + (b[1] - a[1]) * f.along[1] * 0.72 >= 0 ? f.fix : { ...f.fix, oneway: '-1' };
     return f.fix;
   }
   return null;
 }
-const FIX_NAMES = /Grande[- ]Bretagne|^Rue Laganne$/i; // 補正のある通り（両端の緯度・経度を求めるのはこの通りだけ）
+const FIX_NAMES = /Grande[- ]Bretagne|^Rue Laganne$|Pont Saint[- ]Pierre/i; // 補正のある通り（両端の緯度・経度を求めるのはこの通りだけ）
+
+// 地図の建物の一部を別の建物に分けて高さを直す（表面モデル・航空写真で確かめた）。at [緯度, 経度] を含む建物の、
+// box [南, 西, 北, 東] に入る部分を tags の建物にする（残りは元のまま）
+export const BUILDING_SPLITS = [
+  // IGN の La Grave（サン・シプリアン）の大きな建物（多角形 1 つ、高さ 17.2 m）は、Pont Saint-Pierre の取り付けの西に沿う細い腕と
+  // 橋の端までの東の端も含む。表面モデルでは東経 1.43352 より東は 4〜8 m の低い建物（オレンジの瓦の屋根。屋根は高架の
+  // 路面とほぼ同じ高さ）で、腕が 14 m の壁になって道の上に 7 m 突き出し、橋の端に細い刃のような屋根が立っていた
+  { at: [43.60105, 1.43380], box: [43.6008, 1.43352, 43.6014, 1.43415], tags: { building: 'yes', height: '5.5', 'roof:shape': 'hipped', 'roof:height': '1.5', 'roof:material': 'roof_tiles', 'building:material': 'brick' } },
+];
+
+// 屋根だけの構造物にする所（IGN では壁のある建物）: 円 [緯度, 経度, 半径 m] の中の、高さ maxHeight m 以下の陸屋根の建物を
+// building=roof（柱の上の屋根。自転車はくぐれる）に。アレーヌのバスターミナル（写真 Commons「Gare routière des Arènes 1〜3」）:
+// バスの乗り場の上は暗い灰色の鉄の骨組みののこぎり屋根の上屋で、壁のない吹き放し。窓と扉のあるピンクの家になっていた
+export const CANOPY_ZONES = [{ at: [43.59362, 1.41845], r: 40, maxHeight: 4.6 }];
+export function canopyTags(tags, lat, lon) {
+  if (!tags?.building || tags['roof:shape'] !== 'flat' || !(parseLength(tags.height) > 0)) return null;
+  for (const z of CANOPY_ZONES) {
+    if (Math.hypot((lat - z.at[0]) * 111320, (lon - z.at[1]) * 80600) < z.r && parseLength(tags.height) <= z.maxHeight) return { ...tags, building: 'roof', 'roof:colour': '#4a4d50' };
+  }
+  return null;
+}
+
+// 建物 b（{ outer, holes }。ローカル座標）を、ローカル座標の箱 [x0, z0, x1, z1] の中と外に分ける。返り値: { inside, outside }
+// （それぞれ [{ outer, holes }…]。輪は閉じない）
+export function splitByBox(b, [x0, z0, x1, z1]) {
+  const open = (ring) => ring.slice(0, -1);
+  const poly = [b.outer.concat([b.outer[0]]), ...(b.holes || []).map((h) => h.concat([h[0]]))];
+  const box = [[[x0, z0], [x1, z0], [x1, z1], [x0, z1], [x0, z0]]];
+  const conv = (mp) => mp.map((pg) => ({ outer: open(pg[0]), holes: pg.slice(1).map(open) })).filter((p) => p.outer.length >= 3 && Math.abs(signedArea(p.outer)) >= 2);
+  return { inside: conv(polygonClipping.intersection(poly, box)), outside: conv(polygonClipping.difference(poly, box)) };
+}
+
+// 地図の誤りで、そこには無い道（名前のない道だけ。両端が box [南, 西, 北, 東] に入る、highway が type の道）
+const ROAD_DROPS = [
+  // IGN: Pont Saint-Pierre の左岸の取り付けの高架の上の点から、5 m 下の Place Lange へ 11 m で下りる道。表面モデルと
+  // OpenStreetMap では高架の下をくぐる地下道（Place Lange と La Grave を結ぶ）の口で、橋面にはつながっていない
+  { box: [43.60086, 1.43386, 43.60097, 1.43406], type: 'residential' },
+];
+// tags: 道のタグ、a・b: 道の両端 [緯度, 経度]
+export function dropRoad(tags, a, b) {
+  if (!tags?.highway || tags.name) return false;
+  const inBox = (p, f) => p[0] >= f.box[0] && p[1] >= f.box[1] && p[0] <= f.box[2] && p[1] <= f.box[3];
+  return ROAD_DROPS.some((f) => tags.highway === f.type && inBox(a, f) && inBox(b, f));
+}
+const DROP_TYPES = new Set(ROAD_DROPS.map((f) => f.type));
 
 // ポン・ヌフの橋の端のまわりの、名前のない細い車道（IGN の 2026 年秋のデータで増えた、河岸へ下りる道・歩道の上の側道。
 // 橋の端のすぐ先で橋の道の中心につながり、橋の歩道とその続きの上に路面や別の橋として重なる）は作らない。
@@ -358,7 +410,25 @@ export function parseOsm(osm, proj, rect, bdtopo = []) {
     const b = { id: p.id, tags: t, outer, holes: p.holes.map((h) => simplifyRing(h, 0.2)).filter((h) => h.length >= 3), isPart };
     b.bounds = ringBounds(outer);
     b.inside = interiorPoint(outer);
+    if (isBuilding && !isPart) b.tags = canopyTags(t, ...proj.unproject(...b.inside)) || t; // 屋根だけの上屋（CANOPY_ZONES）
     (isPart ? parts : buildings).push(b);
+  }
+
+  // 写真・表面モデルで決めた、建物の一部の高さの直し（BUILDING_SPLITS）
+  for (const [k, f] of BUILDING_SPLITS.entries()) {
+    const [ax, az] = proj.project(...f.at);
+    const i = buildings.findIndex((b) => pointInRing(ax, az, b.outer) && !b.holes.some((h) => pointInRing(ax, az, h)));
+    if (i < 0) continue;
+    const b = buildings[i], p1 = proj.project(f.box[2], f.box[1]), p2 = proj.project(f.box[0], f.box[3]);
+    const { inside, outside } = splitByBox(b, [Math.min(p1[0], p2[0]), Math.min(p1[1], p2[1]), Math.max(p1[0], p2[0]), Math.max(p1[1], p2[1])]);
+    if (!inside.length) continue;
+    const make = (p, id, tags, fixed = false) => {
+      const nb = { id, tags: { ...tags }, outer: p.outer, holes: p.holes, isPart: false, fixed }; // fixed: 写真で決めた建物（landmarkfacades.js の BRICK_SITES で屋根を変えない）
+      nb.bounds = ringBounds(nb.outer);
+      nb.inside = interiorPoint(nb.outer);
+      return nb;
+    };
+    buildings.splice(i, 1, ...outside.map((p, j) => make(p, j ? b.id + j * 1e-3 : b.id, b.tags)), ...inside.map((p, j) => make(p, 9e12 + k * 100 + j, f.tags, true)));
   }
 
   // building:part を持つ建物は、外形を描かずパーツを描く（当たり判定は外形で行う）
@@ -407,6 +477,10 @@ export function parseOsm(osm, proj, rect, bdtopo = []) {
         if (w.tags.oneway === '-1' || w.tags.oneway === 'reverse') ll.reverse();
         fix = roadFix(w.tags, ll[0], ll[1]);
       }
+    }
+    if (w.tags?.highway && !w.tags.name && w.nodes && DROP_TYPES.has(w.tags.highway)) {
+      const ends = [w.nodes[0], w.nodes[w.nodes.length - 1]].map((id) => nodePos.get(id));
+      if (ends[0] && ends[1] && dropRoad(w.tags, proj.unproject(...ends[0]), proj.unproject(...ends[1]))) continue;
     }
     const t = fix ? { ...w.tags, ...fix } : w.tags;
     if (!t || !w.nodes) continue;
@@ -513,9 +587,32 @@ export function parseOsm(osm, proj, rect, bdtopo = []) {
   }
 
   reshapeRoads(roads, proj); // ジャン・ジョレス通りの 2023 年の車道の位置（ramblas.js）
+  gardenPaths(roads, proj); // 広場の真ん中の庭の砂の園路（squares.js。Place Wilson）
   unifyWaterLevels(areas);
   fillWaterUnderBridges(areas, roads);
+  parkPavilions(buildings, areas);
   return { nodePos, buildings, parts, roads: dropPontNeufLanes(roads), areas, rails, waterLines, trees, named, proj };
+}
+
+// 公園・庭園・芝生の中の、高さのない建物（IGN の高さなしが 1 % ほど。売店・物置・温室・あずまや）は 1 階建てにする。
+// 推定（面積 60 m² 以上は 3〜5 階）のままだと、プレリー・デ・フィルトルの真ん中に 5 階建てが立っていた（航空写真・表面モデル:
+// 高さ 3〜4 m の小屋と温室）。建物の中の点が多角形の中なら（穴は除く）
+const PARK_TAGS = (t) => t.leisure === 'park' || t.leisure === 'garden' || t.landuse === 'grass' || t.landuse === 'village_green' || t.landuse === 'recreation_ground';
+export function parkPavilions(buildings, areas) {
+  const parks = areas.filter((a) => a.type === 'grass' && a.tags && PARK_TAGS(a.tags));
+  if (!parks.length) return 0;
+  let n = 0;
+  for (const b of buildings) {
+    const t = b.tags;
+    if (!t || parseLength(t.height) > 0 || parseLength(t['building:levels']) > 0 || b.bdHeight > 0 || CHURCH.has(t.building)) continue;
+    const [x, z] = b.inside;
+    const inPark = parks.some((a) => x >= a.bounds.minX && x <= a.bounds.maxX && z >= a.bounds.minZ && z <= a.bounds.maxZ && pointInRing(x, z, a.outer) && !(a.holes || []).some((h) => pointInRing(x, z, h)));
+    if (!inPark) continue;
+    b.tags = { ...t, 'building:levels': '1' };
+    if (b.info) b.info = { ...b.info, ...buildingInfo(b) }; // 高さは解析のときに決めてあるので、決め直す
+    n++;
+  }
+  return n;
 }
 
 // 水面の高さをそろえる: 長い継ぎ目（合わせて minSeam m 以上）で接している水は、いちばん深い水と同じ深さ・種類にする。

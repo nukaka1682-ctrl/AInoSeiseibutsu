@@ -79,6 +79,7 @@ export function quaySegments(chains, roads = [], { minLen = 6, taper = 6, crossS
         seen.add(k);
         const r = rsegs[k];
         if (r.under && spec?.bridge) return; // 高架の下の擁壁
+        if (r.tunnel) return; // 地下道は壁の下をくぐる（壁を切らない。Pont Saint-Pierre の取り付けの下の車の地下道）
         if (r.under) {
           const lim = r.half + 1;
           if (closestOnSegment(mx, mz, r.ax, r.az, r.bx, r.bz).d2 < lim * lim || closestOnSegment(a.x, a.z, r.ax, r.az, r.bx, r.bz).d2 < lim * lim) cut[i] = 1;
@@ -106,7 +107,7 @@ export function quaySegments(chains, roads = [], { minLen = 6, taper = 6, crossS
           if (L < 1e-6) continue;
           out.push({
             ax: a.x, az: a.z, bx: b.x, bz: b.z, nx: -(b.z - a.z) / L, nz: (b.x - a.x) / L,
-            at: a.top, bt: b.top, ab: a.bot, bb: b.bot, ea: Math.max(0, e(S[k])), eb: Math.max(0, e(S[k + 1])), wet: a.wet && b.wet, stone: !!spec?.stone, plain: !!spec?.plain,
+            at: a.top, bt: b.top, ab: a.bot, bb: b.bot, ea: Math.max(0, e(S[k])), eb: Math.max(0, e(S[k + 1])), wet: a.wet && b.wet, stone: !!spec?.stone, plain: !!spec?.plain, noParapet: spec?.parapet === false,
           });
         }
       }
@@ -385,6 +386,19 @@ export const MANUAL_QUAYS = [
   // 8 m 下の谷へ落ち込んでいた。壁を口の前もまっすぐ通し、壁の裏 13 m（道の幅）を河岸の高さまで埋める（raiseRoads: 車道の下も）。
   // topWin: 上の段の高さを前後 ±35 m の高い方（上から 1/4 の値）で決める（谷の所でも両側の河岸の高さ）
   { id: 'tounis', line: [[43.599452, 1.4404], [43.598966, 1.440368], [43.598734, 1.440304], [43.598224, 1.44016], [43.597714, 1.440096], [43.597251, 1.440144], [43.596556, 1.440224], [43.59586, 1.440304], [43.595513, 1.440352]], low: 1.0, front: 12, back: 13, raiseRoads: true, topWin: 14 },
+  // Pont Saint-Pierre の左岸の取り付け（サン・シプリアン。表面モデル・0.5 m の地形モデル・OpenStreetMap）: 擁壁で囲んだ盛り土の
+  // 斜路（地形モデルからなぞった壁、EMBANKMENT_ZONES）は 43.60089 で終わり、その先の橋のはじまりまでの 40 m は、
+  // La Grave と Place Lange を結ぶ車の地下道（OSM の tunnel）と階段・エレベーターの上を渡る高架。地形モデルは高架の下の
+  // 地面（標高 134.9 m）なので、道が斜路の上（140.5 m）から 5 m の穴へ落ちて、橋（142.4 m）へ登り直していた。
+  // 道の両側（中心から 6.3 m。橋面の幅は約 13 m）に壁を立て、そのあいだを表面モデルの路面の高さまで埋める。
+  // early: 道路をならす前（conditionRoads・raiseBridgeEnds の前）にも埋める（道の縦断面が穴をなぞらない・橋の端を盛り上げない）
+  // 東の壁は斜路の壁（地形モデルからなぞった線）の端から。橋のはじまり（IGN 43.601243・OSM はその 2.7 m 先）の 4 m 先で、
+  // 橋台の壁（psp-bout）が両側の壁をつなぐ: その先の橋の最初の径間の下は川沿いの地面（134.4 m）まで平らに（橋の端の盛り上げ
+  // raiseBridgeEnds はしない）。壁が OSM の橋のはじまりより手前だと、橋面の端が下の地面に合わせて 2.4 m 下がっていた
+  { id: 'psp-est', line: [[43.600838, 1.433902], [43.601249, 1.434212]], top: [140.5, 142.55], bottom: 134.9, front: 3, back: 12, raiseRoads: true, plain: true, early: true },
+  { id: 'psp-ouest', line: [[43.601301, 1.434074], [43.600892, 1.43378]], top: [142.55, 140.5], bottom: 134.9, front: 3, back: 12, raiseRoads: true, plain: true, early: true },
+  // parapet: false: 壁の上の手すり壁を立てない（橋台の壁は橋面の下。手すり壁が道をふさいでいた）
+  { id: 'psp-bout', line: [[43.601249, 1.434212], [43.601301, 1.434074]], top: [142.55, 142.55], bottom: 134.4, front: 10, back: 6, raiseRoads: true, plain: true, early: true, bridge: true, parapet: false },
 ];
 
 // 手で決めた岸壁をローカル座標の折れ線にする（quayChains と同じ形。solid: 小道では切らない・端をすぼめない）

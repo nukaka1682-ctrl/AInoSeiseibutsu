@@ -3,6 +3,7 @@
 //
 //   NODE_USE_ENV_PROXY=1 node scripts/metro-osm.mjs              # Overpass から取る
 //   node scripts/metro-osm.mjs --from overpass.json              # 保存した Overpass の答え（out geom の JSON）から作る
+//   node scripts/metro-osm.mjs --rebouche                        # 保存した駅の地図から出入口だけ作り直す（osmentrances.js を変えたとき）
 //
 // 駅ごとに（駅の印から 170 m 以内）:
 // - platforms: メトロのホーム（railway=platform・public_transport=platform。参照番号 4xxxx は A 線、5xxxx は B 線）の形と階
@@ -68,62 +69,81 @@ const norm = (s) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').rep
 
 const args = process.argv.slice(2);
 const from = args.includes('--from') ? args[args.indexOf('--from') + 1] : null;
-const osm = from ? JSON.parse(await readFile(from, 'utf8')) : await fetchOverpass();
-const els = osm.elements;
+const file = join(root, 'public', 'data', 'toulouse-metro-osm.json');
+// --rebouche: 保存した駅の地図（toulouse-metro-osm.json）から、出入口（bouches）と間取りの印（layout）だけを作り直す（通信なし）
+const rebouche = args.includes('--rebouche');
+let out, fetchedAt = null;
+if (rebouche) {
+  const prev = JSON.parse(await readFile(file, 'utf8'));
+  out = prev.stations;
+  fetchedAt = prev.meta?.fetchedAt || null;
+  for (const st of Object.values(out)) {
+    delete st.bouches;
+    delete st.layout;
+  }
+} else {
+  ({ out, fetchedAt } = await fromOverpass());
+}
 
-// 駅の印（OSM）と、ゲームの駅の対応（名前が似ていて近いもの。なければゲームの位置）
-const osmStations = els.filter((e) => e.type === 'node' && e.tags?.railway === 'station' && e.tags.station === 'subway');
-const out = {};
-for (const s of stationList()) {
-  let best = null;
-  for (const o of osmStations) {
-    const d = dist([o.lat, o.lon], [s.lat, s.lon]);
-    const n1 = norm(o.tags.name || ''), n2 = norm(s.bd);
-    const named = n1.includes(n2.slice(0, 6)) || n2.includes(n1.slice(0, 6));
-    if (d < 250 && (named || d < 60) && (!best || d < best.d)) best = { d, o };
-  }
-  const c = best ? [best.o.lat, best.o.lon] : [s.lat, s.lon];
-  const st = { name: s.name, bd: s.bd, osm: best ? best.o.tags.name : null, c: [r7(c[0]), r7(c[1])], platforms: [], steps: [], elevators: [], entrances: [], paths: [], areas: [] };
-  for (const e of els) {
-    const t = e.tags || {};
-    if (e.type === 'node') {
-      const p = [e.lat, e.lon];
-      if (dist(p, c) > R) continue;
-      if (t.railway === 'subway_entrance') {
-        st.entrances.push({ p: pt(e), levels: levels(t.level), elevator: t.highway === 'elevator', wheelchair: t.wheelchair || null, name: t.name || null, id: e.id });
-      } else if (t.highway === 'elevator') st.elevators.push({ p: pt(e), levels: levels(t.level), id: e.id });
-      continue;
+async function fromOverpass() {
+  const osm = from ? JSON.parse(await readFile(from, 'utf8')) : await fetchOverpass();
+  const els = osm.elements;
+
+  // 駅の印（OSM）と、ゲームの駅の対応（名前が似ていて近いもの。なければゲームの位置）
+  const osmStations = els.filter((e) => e.type === 'node' && e.tags?.railway === 'station' && e.tags.station === 'subway');
+  const out = {};
+  for (const s of stationList()) {
+    let best = null;
+    for (const o of osmStations) {
+      const d = dist([o.lat, o.lon], [s.lat, s.lon]);
+      const n1 = norm(o.tags.name || ''), n2 = norm(s.bd);
+      const named = n1.includes(n2.slice(0, 6)) || n2.includes(n1.slice(0, 6));
+      if (d < 250 && (named || d < 60) && (!best || d < best.d)) best = { d, o };
     }
-    const g = e.geometry || [];
-    if (!g.length) continue;
-    if (dist(centroid(g), c) > R && !g.some((q) => dist([q.lat, q.lon], c) < R)) continue;
-    const lv = levels(t.level);
-    const metroRef = /^[45]\d{4}$/.test(t.ref || '');
-    if ((t.railway === 'platform' || t.public_transport === 'platform') && closed(g)) {
-      // メトロのホーム: 参照番号か、地下・空中の階と「Quai」の名前
-      if (metroRef || (lv.length === 1 && lv[0] !== 0 && /^Quai/.test(t.name || ''))) {
-        st.platforms.push({ line: metroRef ? (t.ref[0] === '4' ? 'A' : 'B') : null, level: lv[0] ?? null, ref: t.ref || null, name: t.name || null, poly: g.map(pt) });
+    const c = best ? [best.o.lat, best.o.lon] : [s.lat, s.lon];
+    const st = { name: s.name, bd: s.bd, osm: best ? best.o.tags.name : null, c: [r7(c[0]), r7(c[1])], platforms: [], steps: [], elevators: [], entrances: [], paths: [], areas: [] };
+    for (const e of els) {
+      const t = e.tags || {};
+      if (e.type === 'node') {
+        const p = [e.lat, e.lon];
+        if (dist(p, c) > R) continue;
+        if (t.railway === 'subway_entrance') {
+          st.entrances.push({ p: pt(e), levels: levels(t.level), elevator: t.highway === 'elevator', wheelchair: t.wheelchair || null, name: t.name || null, id: e.id });
+        } else if (t.highway === 'elevator') st.elevators.push({ p: pt(e), levels: levels(t.level), id: e.id });
+        continue;
       }
-      continue;
+      const g = e.geometry || [];
+      if (!g.length) continue;
+      if (dist(centroid(g), c) > R && !g.some((q) => dist([q.lat, q.lon], c) < R)) continue;
+      const lv = levels(t.level);
+      const metroRef = /^[45]\d{4}$/.test(t.ref || '');
+      if ((t.railway === 'platform' || t.public_transport === 'platform') && closed(g)) {
+        // メトロのホーム: 参照番号か、地下・空中の階と「Quai」の名前
+        if (metroRef || (lv.length === 1 && lv[0] !== 0 && /^Quai/.test(t.name || ''))) {
+          st.platforms.push({ line: metroRef ? (t.ref[0] === '4' ? 'A' : 'B') : null, level: lv[0] ?? null, ref: t.ref || null, name: t.name || null, poly: g.map(pt) });
+        }
+        continue;
+      }
+      if (t.highway === 'steps') {
+        st.steps.push({ levels: lv, conveying: t.conveying || null, incline: t.incline || null, pts: g.map(pt), width: parseFloat(t.width) || null, tunnel: t.tunnel || null, indoor: t.indoor || null, id: e.id });
+        continue;
+      }
+      if (t.highway === 'elevator') {
+        st.elevators.push({ p: (() => { const q = centroid(g); return [r7(q[0]), r7(q[1])]; })(), levels: lv, id: e.id });
+        continue;
+      }
+      if (t.highway === 'footway' || t.highway === 'corridor') {
+        if (lv.length !== 1 && !t.tunnel) continue;
+        st.paths.push({ level: lv.length === 1 ? lv[0] : null, pts: g.map(pt), tunnel: t.tunnel || null, indoor: t.indoor || null, id: e.id });
+        continue;
+      }
+      if (t.indoor && closed(g) && lv.length >= 1) {
+        st.areas.push({ levels: lv, kind: t.indoor, conveying: t.conveying || null, poly: g.map(pt), id: e.id });
+      }
     }
-    if (t.highway === 'steps') {
-      st.steps.push({ levels: lv, conveying: t.conveying || null, incline: t.incline || null, pts: g.map(pt), width: parseFloat(t.width) || null, tunnel: t.tunnel || null, indoor: t.indoor || null, id: e.id });
-      continue;
-    }
-    if (t.highway === 'elevator') {
-      st.elevators.push({ p: (() => { const q = centroid(g); return [r7(q[0]), r7(q[1])]; })(), levels: lv, id: e.id });
-      continue;
-    }
-    if (t.highway === 'footway' || t.highway === 'corridor') {
-      if (lv.length !== 1 && !t.tunnel) continue;
-      st.paths.push({ level: lv.length === 1 ? lv[0] : null, pts: g.map(pt), tunnel: t.tunnel || null, indoor: t.indoor || null, id: e.id });
-      continue;
-    }
-    if (t.indoor && closed(g) && lv.length >= 1) {
-      st.areas.push({ levels: lv, kind: t.indoor, conveying: t.conveying || null, poly: g.map(pt), id: e.id });
-    }
+    out[s.id] = st;
   }
-  out[s.id] = st;
+  return { out, fetchedAt: osm.osm3s?.timestamp_osm_base || null };
 }
 // 出入口の形（地上の階段・エスカレーターから。LiDAR の吹き抜けがあればその形）
 const lidar = JSON.parse(await readFile(join(root, 'public', 'data', 'toulouse-metro.json'), 'utf8')).entrances;
@@ -149,8 +169,7 @@ for (const [id, st] of Object.entries(out)) {
     if (plan && osmConnected(plan)) st.layout = 'osm';
   }
 }
-const file = join(root, 'public', 'data', 'toulouse-metro-osm.json');
-const meta = { source: 'OpenStreetMap contributors (ODbL 1.0)', fetchedAt: osm.osm3s?.timestamp_osm_base || null, radius: R };
+const meta = { source: 'OpenStreetMap contributors (ODbL 1.0)', fetchedAt, radius: R };
 await writeFile(file, JSON.stringify({ meta, stations: out }));
 const sum = (k) => Object.values(out).reduce((a, s) => a + s[k].length, 0);
 console.log(`${file}: 駅 ${Object.keys(out).length}、ホーム ${sum('platforms')}、階段 ${sum('steps')}、出入口 ${sum('entrances')}、通路 ${sum('paths')}、部屋 ${sum('areas')}`);

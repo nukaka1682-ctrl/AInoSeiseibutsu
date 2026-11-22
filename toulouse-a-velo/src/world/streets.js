@@ -66,8 +66,9 @@ export function classifyStreet(road, old) {
   // ポン・ヌフの両端の取り付け道路: 歩道は橋の歩道の続き（ground.js の PONT_NEUF_APRONS）が敷くので作らず、ほかの道の歩道を
   // 橋と同じ幅で切る（利用者の指摘: 橋の付け根・歩道との際が雑。橋の 6 m の花崗岩の歩道が端で切れ、街の細い歩道と重なっていた）
   if (road.pontNeufApproach) return { kind: 'bridge', band: PONT_NEUF_HALF + 0.3, near };
-  // 車の通らない石の板の並木道（Allées Roosevelt。ground.js の SLAB_ALLEES）: 真ん中の道も段差のない石の板
-  if (/^All[ée]es du Pr[ée]sident Franklin Roosevelt$/i.test(road.name || '')) return { kind: 'shared', slabs: true, band: road.width / 2 + 1.2, gutter: null, near };
+  // 石の板の並木道（Allées Roosevelt。ground.js の SLAB_ALLEES）の両側の建物沿いの一方通行の車道（航空写真 2024・利用者の
+  // Street View 212248・212318: 灰色の小舗石の細い車道に路上駐車、外は石の板の歩道と並木道の広場）
+  if (/^All[ée]es du Pr[ée]sident Franklin Roosevelt$/i.test(road.name || '')) return { kind: 'taur', band: Math.max(road.width / 2 + 1.2, 3), gutter: null, near };
   if (old && (t === 'pedestrian' || t === 'living_street') && road.width > 6.5) {
     // 旧市街の広い歩行者の通り（Rue d'Alsace-Lorraine・Rue de la Pomme の広い所）: 壁から壁まで段差のない石の板、
     // 真ん中に 2 列の石の側溝

@@ -4,27 +4,29 @@
 // - 地面の板と川はエリア全体で 1 つ。緑地・道路・線路・橋はタイルごとに切り分けて作る
 // - 当たり判定は、読み込んだタイルのものを合わせて使う
 import * as THREE from 'three';
-import { Grid, pointInRing } from '../geo.js';
-import { CAR_ROADS, parseOsm } from './parse.js';
+import { Grid, pointInPolygon, pointInRing } from '../geo.js';
+import { CAR_ROADS, parkPavilions, parseOsm } from './parse.js';
 import { manualChains, nearManualQuay, quayChains, snapPathsToQuays } from './quays.js';
 let photoQuays = null;
 const PHOTO_QUAYS = (proj) => (photoQuays && photoQuays.proj === proj ? photoQuays.list : (photoQuays = { proj, list: manualChains(proj) }).list);
+const steepFn = (T) => (x, z) => Math.hypot(T.h(x + 2, z) - T.h(x - 2, z), T.h(x, z + 2) - T.h(x, z - 2)) > 0.45; // 急な斜面（assemble.js の steepAt と同じ）
 // 岸から 8 m 以上離れた水の上か（川の真ん中に土手の木が並んでいた）
 const offshore = (inWater, x, z) => inWater(x, z) && inWater(x + 8, z) && inWater(x - 8, z) && inWater(x, z + 8) && inWater(x, z - 8);
 // 小道（車の走らない道）の区間
 const PATH_SEG = (s) => s.bike && !CAR_ROADS.has(s.road.type) && s.road.type !== 'service' && s.road.type !== 'living_street' && s.road.type !== 'pedestrian';
 import { loadTileData, tileAt, tileBounds, tileLayout } from '../data/tiles.js';
 import { buildBuildings } from './buildings.js';
+import { onRamblasCarriageway } from './ramblas.js';
 import { buildTrees, fillParkTrees, planeTreeTest, streetTrees, treelessTest, magnoliaTest, liftQuayTrees, underDeck, addPhotoTrees, curbTrees } from './trees.js';
 import { buildEnclosures, clearNamedAreas, clearRoads, fixedWalls, projectTrees, projectWalls, tameWalls } from './enclosures.js';
 import { clearEntrances, entranceWalls, inEntrance } from './metro.js';
 import { findCapitoleFacade, markBrickSites, markStreetStyles } from './landmarkfacades.js';
 import { findTowers } from './towers.js';
-import { buildMonuments, findMonuments, monumentClearance, monumentSolid } from './monuments.js';
+import { addLiftKiosks, buildMonuments, findMonuments, monumentClearance, monumentSolid } from './monuments.js';
 import { areaFrame, makeSurfaceAt } from './assemble.js';
 import { buildGroundBase, buildGroundDetailAsync, makeWaterTest } from './ground.js';
 import { POST_HIT, planStreets } from './streets.js';
-import { greySquareTest, historicCoreTest, oldTownTest } from '../config.js';
+import { greySquareTest, historicCoreTest, oldTownTest, pavedQuayTest } from '../config.js';
 import { buildAbutments, makeDeckTest, setupDecks } from './bridges.js';
 import { FLAT_TERRAIN, surfaceFns, waterPass } from './terrain.js';
 import { buildTerrainTile } from './terrainmesh.js';
@@ -45,6 +47,7 @@ export async function assembleStreamWorld({ base, bbox, presetId, buildingMats, 
   progress('道路・川・公園を解析中…', 0.05);
   await pause();
   const parsed = parseOsm(base.osm, proj, rect, []);
+  addLiftKiosks(terrain.metroRaw); // メトロのエレベーターの地上の小屋（LiDAR で階段が見つからない駅）
   if (terrain.quayLines) snapPathsToQuays(parsed.roads, quayChains(terrain.quayLines, proj).filter((c) => !c.pts.every((q) => nearManualQuay(PHOTO_QUAYS(proj), q.x, q.z))).concat(PHOTO_QUAYS(proj))); // 岸壁に沿う小道を壁のどちらか側へ（assemble.js と同じ）
   progress('道路網を作成中…', 0.3);
   await pause();
@@ -70,13 +73,13 @@ export async function assembleStreamWorld({ base, bbox, presetId, buildingMats, 
   const inOldTown = oldTownTest(proj);
   // 通りの石畳・段差のない通りは右岸の歴史的な中心だけ（利用者の写真: 左岸のサン・シプリアンの通りはアスファルト）
   const inCore = historicCoreTest(proj);
-  const inGreySquare = greySquareTest(proj);
+  const inGreySquare = greySquareTest(proj), inPavedQuay = pavedQuayTest(proj);
   planStreets(parsed, inCore); // 通りの種類・交差点・横断歩道（エリアで 1 回）
   // 並木道（IGN のデータには個々の木がないので、LiDAR の木がないタイルで使う）
   const avenues = parsed.roads.filter((r) => CAR_ROADS.has(r.type) || r.type === 'pedestrian');
 
   const streamer = new TileStreamer({
-    presetId, bbox, rect, proj, layout, parsed, roadnet, inWater, onRoad, avenues, inOldTown, inCore, inGreySquare,
+    presetId, bbox, rect, proj, layout, parsed, roadnet, inWater, onRoad, avenues, inOldTown, inCore, inGreySquare, inPavedQuay,
     materials: buildingMats, groundMats, waterDepthAt: ground.waterDepthAt, bankTrees: ground.bankTrees || [], collision, group,
     terrain, far: ground.far, quayCentre: proj.project(43.5994, 1.4364), near, farDist: far,
   });
@@ -229,6 +232,9 @@ class TileStreamer {
     const buildings = (tp.buildings = tp.buildings.filter(keep));
     tp.parts = (tp.parts || []).filter(keep);
     const context = parseOsm(data.ctx, this.proj, this.rect, []).buildings.filter(keep);
+    // 公園の中の高さのない建物は 1 階建て（公園の外形はエリア全体の地図にある。タイルの地図には建物だけ）
+    parkPavilions(buildings, this.parsed.areas);
+    parkPavilions(context, this.parsed.areas);
     const group = new THREE.Group();
     group.name = `tile-${t.key}`;
     const walls = clearNamedAreas(clearEntrances(clearRoads(tameWalls(projectWalls(data.walls, this.proj), buildings.concat(context)), (x, z) => this.roadnet.onRoad(x, z, 0.3)), this.terrain.metro || []), this.parsed.areas, this.proj).concat(fixedWalls(this.proj, B));
@@ -243,9 +249,9 @@ class TileStreamer {
     // 岸壁の下の段（石の板の河岸。小舗石の岸壁 setts は除く）と灰色の広場
     const lowQuay = (x, z) => {
       const q = T.quayBelow?.(x, z, 40);
-      return this.inGreySquare(x, z) || (q != null && q.drop > 2 && !q.setts);
+      return this.inGreySquare(x, z) || (q != null && q.drop > 2 && !q.setts && this.inPavedQuay(x, z));
     };
-    if (data.cover) ground.group.add(buildCoverMesh(data.cover, B, this.groundMats.cover, this.inOldTown, this.parsed, tile?.geometry, lowQuay));
+    if (data.cover) ground.group.add(buildCoverMesh(data.cover, B, this.groundMats.cover, this.inOldTown, this.parsed, tile?.geometry, lowQuay, T.flat ? null : steepFn(T)));
     group.add(ground.group);
     await pause();
     if (t.state !== 'loading') return disposeGroup(group);
@@ -272,6 +278,7 @@ class TileStreamer {
     group.add(buildEnclosures(walls, this.materials, cw, T));
     for (const [x, z] of ground.posts) if (!this.roadnet.onRoad(x, z, 0.3)) cw.addCircle(x, z, POST_HIT); // 横断歩道の脇の車止め（小道の線の上は見た目だけ）
     for (const q of [...(T.quayWalls || []), ...(T.abutments || [])]) {
+      if (q.noParapet) continue; // 手すり壁のない壁（橋面の下の橋台）は当たり判定にしない（上の橋面を走る自転車を止めていた）
       const mx = (q.ax + q.bx) / 2, mz = (q.az + q.bz) / 2;
       if (mx >= B.minX && mx < B.maxX && mz >= B.minZ && mz < B.maxZ) cw.addSegment(q.ax, q.az, q.bx, q.bz); // 岸壁・高架の下の擁壁（タイルに中点が入る壁だけ）
     }
@@ -296,13 +303,27 @@ class TileStreamer {
       };
     };
     const insideBuilding = insideOf(buildings);
+    // 建物の中（中庭は除く）か。木を植えない所（屋根を幹が突き抜ける。assemble.js と同じ）
+    const solidOf = (list) => {
+      const grid = new Grid(30);
+      list.forEach((b, k) => grid.insertBounds(b.bounds.minX, b.bounds.minZ, b.bounds.maxX, b.bounds.maxZ, k));
+      return (x, z) => {
+        let hit = false;
+        grid.queryPoint(x, z, 0, (k) => {
+          if (!hit && pointInPolygon(x, z, list[k])) hit = true;
+        });
+        return hit;
+      };
+    };
+    const inBuildingSolid = solidOf(buildings), inContextSolid = solidOf(context);
     const insideContext = insideOf(context); // 隣のタイルの、境の近くの建物
     const inB = (x, z) => x >= B.minX && x < B.maxX && z >= B.minZ && z < B.maxZ;
     let treePts;
     if (data.trees.length) {
       const free = (x, z) => !this.inWater(x, z) && !underDeck(this.terrain, x, z) && !inEntrance(this.terrain.metro || [], x, z);
       // 車道・小道の上に立つ木（樹冠のてっぺんが道の上）は縁石の外の歩道へ寄せる（assemble.js と同じ）
-      treePts = curbTrees(projectTrees(data.trees, this.proj).filter((p) => free(p.x, p.z)), this.roadnet, (x, z) => free(x, z) && !insideBuilding(x, z) && !insideContext(x, z));
+      const onRamblas = onRamblasCarriageway(this.parsed.roads); // ジャン・ジョレス通りの車道の際の古い並木は植えない（ramblas.js）
+      treePts = curbTrees(projectTrees(data.trees, this.proj).filter((p) => free(p.x, p.z) && !onRamblas(p.x, p.z)), this.roadnet, (x, z) => free(x, z) && !insideBuilding(x, z) && !insideContext(x, z));
     } else {
       const free = (x, z) => inB(x, z) && !this.roadnet.onRoad(x, z, 1.5) && !this.inWater(x, z) && !insideBuilding(x, z);
       const parks = this.parsed.areas.filter((a) => a.bounds.maxX > B.minX && a.bounds.minX < B.maxX && a.bounds.maxZ > B.minZ && a.bounds.minZ < B.maxZ);
@@ -314,7 +335,7 @@ class TileStreamer {
     const clear = monumentClearance(monuments, this.proj);
     treePts = liftQuayTrees(treePts, T); // 岸壁の下の段の木は上の段へ
     this.treeless ||= treelessTest(this.parsed.areas);
-    treePts = treePts.filter((p) => !clear(p.x ?? p[0], p.z ?? p[1]) && !this.treeless(p.x ?? p[0], p.z ?? p[1]) && !T.clearAt?.(p.x ?? p[0], p.z ?? p[1])); // 像・塔のまわり・木のない広場には植えない
+    treePts = treePts.filter((p) => !clear(p.x ?? p[0], p.z ?? p[1]) && !this.treeless(p.x ?? p[0], p.z ?? p[1]) && !T.clearAt?.(p.x ?? p[0], p.z ?? p[1]) && !inBuildingSolid(p.x ?? p[0], p.z ?? p[1]) && !inContextSolid(p.x ?? p[0], p.z ?? p[1])); // 像・塔のまわり・木のない広場には植えない
     // 街路・運河沿いはプラタナス。横に広い LiDAR の塊を分けた木は、道路・水・建物の上には置かない
     const trees = buildTrees(treePts, {
       isPlane: planeTreeTest(this.roadnet, this.inWater),
@@ -357,7 +378,7 @@ class TileStreamer {
     const ms = performance.now() - t0;
     const roofs = built.stats.roofs;
     console.info(`タイル ${t.key}: 建物 ${buildings.length} 棟（傾斜屋根 ${roofs.pitched}・陸屋根 ${roofs.flat}・作れず陸屋根 ${roofs.fallback}）・三角形 ${tris}・小物 ${furniture.count}（車 ${furniture.stats.cars}・街灯 ${furniture.stats.lights + furniture.stats.discs}・車止め ${furniture.stats.bollards}）・組み立て ${ms.toFixed(0)} ms（建物の計算 ${built.stats.ms.toFixed(0)} ms、待ちを含め ${buildingMs.toFixed(0)} ms）`);
-    Object.assign(t, { group, cw, furniture, heightAt: ground.heightAt, buildings: buildings.length, trees: treePts.length, walls: walls.length, triangles: tris, buildMs: ms, state: 'ready' });
+    Object.assign(t, { group, cw, furniture, heightAt: ground.heightAt, buildingList: buildings, buildings: buildings.length, trees: treePts.length, walls: walls.length, triangles: tris, buildMs: ms, state: 'ready' });
     this.group.add(group);
     this.collision.add(cw);
     this.far?.setTile(t.i, t.j, true); // 遠くの地面はこのタイルの中を描かない

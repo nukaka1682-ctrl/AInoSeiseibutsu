@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { DATUM, LATTICE, Terrain } from '../../src/world/terrain.js';
 import { conditionRoads } from '../../src/world/terraincond.js';
 import { quayChains, quaySegments, snapPathsToQuays } from '../../src/world/quays.js';
-import { quayLines, simplifyLine, traceCliffs } from '../../src/data/quaybake.js';
+import { clipLines, quayLines, simplifyLine, traceCliffs } from '../../src/data/quaybake.js';
 import { latticeFor } from '../../src/data/terrainbake.js';
 import { MeshWriter } from '../../src/world/meshwriter.js';
 import { LocalProjection } from '../../src/geo.js';
@@ -187,4 +187,28 @@ test('写真で決めた岸壁: 壁の前を平らに書き直し、小道では
   const cs = memorialColliders(0, 0, [0, 1]);
   assert.equal(cs.filter((c) => c.length === 3).length, 8);
   assert.ok(cs.filter((c) => c.length === 4).every(([ax, , bx]) => Math.min(Math.abs(ax), Math.abs(bx)) >= MEMORIAL.pass - 1e-9));
+});
+
+test('擁壁の線（barrier）: 盛り土の道の高さを、壁の外の地面へ広げない', () => {
+  // 東西の盛り土の道（幅 8 m、x = −150〜150）: 道の上（|z| < 6）は 5 m 高い。両側の擁壁は z = ±6
+  const elev = (x, z) => DATUM + (Math.abs(z) < 6 ? 5 : 0);
+  const road = { type: 'primary', width: 8, pts: [[-150, 0], [150, 0]], bridge: false, tunnel: false, layer: 0 };
+  const T0 = synth(elev);
+  conditionRoads(T0, [road]);
+  const T1 = synth(elev);
+  const barrier = [{ ax: -160, az: 6, bx: 160, bz: 6 }, { ax: 160, az: -6, bx: -160, bz: -6 }];
+  conditionRoads(T1, [road], () => false, { barrier });
+  // 壁なし: 道の高さが路肩の先（10〜15 m）まで広がって丘になる。壁あり: 壁の外は元の高さのまま
+  assert.ok(T0.h(0, 12) > 2, `壁なし ${T0.h(0, 12)}`);
+  for (const z of [10, 12.5, 15, -12.5]) assert.ok(Math.abs(T1.h(0, z)) < 0.05, `壁の外 z=${z}: ${T1.h(0, z)}`);
+  // 道の上は道の高さ
+  assert.ok(Math.abs(T1.h(0, 0) - 5) < 0.05 && Math.abs(T1.h(30, 2.5) - 5) < 0.05);
+});
+
+test('岸壁の線: 円の中だけ切り出す（clipLines）', () => {
+  const line = { pts: [[0, 0], [0, 1], [0, 2], [0, 3], [0, 4], [0, 5]] };
+  const parts = clipLines([line], ([, lon]) => lon !== 2 && lon !== 3);
+  assert.deepEqual(parts.map((l) => l.pts.map((p) => p[1])), [[0, 1], [4, 5]]);
+  // 1 点だけ残る所は捨てる
+  assert.equal(clipLines([line], ([, lon]) => lon === 3).length, 0);
 });

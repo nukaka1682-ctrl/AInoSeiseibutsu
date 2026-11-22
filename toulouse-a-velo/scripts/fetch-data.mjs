@@ -11,6 +11,7 @@
 //   npm run fetch-data -- all --oneway    # 逆向きの一方通行の一覧（<preset>-oneway.json）だけ作る
 //   npm run fetch-data -- toulouse --resume  # 途中で止まった取得の続き（今の形式で保存済みのタイルは取得し直さない）
 //   npm run fetch-data -- all --terrain   # 地形（<preset>-terrain.bin）だけ作り直す（保存済みの <preset>.json を使う）
+//   npm run fetch-data -- all --metro     # メトロの出入口（<preset>-metro.json）だけ作り直す
 //
 // どのプリセットも最後に地形（LiDAR HD の地形モデルの 5 m の格子・水面の高さ・橋の縦断面）を <preset>-terrain.bin に、
 // メトロの駅の出入口（LiDAR の地形モデルの吹き抜けの穴）を <preset>-metro.json に保存する
@@ -43,6 +44,7 @@ const provider = args.includes('--ign') ? 'ign' : 'auto';
 const resume = args.includes('--resume');
 const terrainOnly = args.includes('--terrain');
 const onewayOnly = args.includes('--oneway');
+const metroOnly = args.includes('--metro');
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const arg = args.find((a) => !a.startsWith('--')) || DEFAULT_AREA;
 const ids = arg === 'all' ? Object.keys(AREA_PRESETS) : [arg];
@@ -57,6 +59,10 @@ for (const id of ids) {
   console.log(`[${id}] bbox ${JSON.stringify(bbox)}`);
   if (terrainOnly) {
     await bakeTerrainFile(id, bbox);
+    await bakeMetroFile(id, bbox);
+    continue;
+  }
+  if (metroOnly) {
     await bakeMetroFile(id, bbox);
     continue;
   }
@@ -110,7 +116,14 @@ for (const id of ids) {
 // メトロの駅の出入口（BD TOPO の駅 + LiDAR の地形モデルの穴。src/data/metro.js）。失敗してもほかのデータは使える
 async function bakeMetroFile(id, bbox) {
   try {
-    const r = await fetchMetroEntrances(bbox, { log: (t) => console.log(t) });
+    // OpenStreetMap から作った駅（LiDAR で出入口が見つからない駅に使う。scripts/metro-osm.mjs で作成）
+    let osmStations = null;
+    try {
+      osmStations = JSON.parse(await readFile(join(root, 'public', 'data', 'toulouse-metro-osm.json'), 'utf8')).stations;
+    } catch {
+      console.log('  toulouse-metro-osm.json がないので、OpenStreetMap の出入口は使いません');
+    }
+    const r = await fetchMetroEntrances(bbox, { log: (t) => console.log(t), osmStations });
     const out = join(root, 'public', 'data', `${id}-metro.json`);
     await writeFile(out, JSON.stringify(r));
     const ramps = r.entrances.filter((e) => e.kind === 'parking').length;

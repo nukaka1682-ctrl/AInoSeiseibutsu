@@ -32,6 +32,24 @@
       if (k > 7) { c.font = '9px sans-serif'; c.fillText((g.data[r * g.cols + cc] - 145).toFixed(1), X(x) + 2, Z(z) - 2); }
     }
   }
+  // 建物（旧市街のエリアは parsed、トゥールーズ全体はタイルごとの一覧）。高さで濃さを変え、名前・番号を書く
+  const blds = (W.parsed.buildings?.length ? W.parsed.buildings : [...(W.stream?.tiles.values() || [])].flatMap((t) => t.buildingList || []))
+    .filter((b) => b.bounds && b.bounds.maxX > cx - R && b.bounds.minX < cx + R && b.bounds.maxZ > cz - R && b.bounds.minZ < cz + R);
+  for (const b of blds) {
+    c.fillStyle = `rgba(90,60,40,${Math.min(0.75, 0.2 + (b.info?.height || 8) / 40)})`;
+    c.strokeStyle = '#fff';
+    c.lineWidth = 1;
+    c.beginPath();
+    b.outer.forEach(([x, z], j) => (j ? c.lineTo(X(x), Z(z)) : c.moveTo(X(x), Z(z))));
+    c.closePath();
+    c.fill();
+    c.stroke();
+    if (ARGS.names) {
+      c.fillStyle = '#fff';
+      c.font = '10px sans-serif';
+      c.fillText(`${Math.round(b.info?.height || 0)}m${b.tags?.name ? ' ' + b.tags.name : ''}`, X(b.inside[0]) - 10, Z(b.inside[1]));
+    }
+  }
   const COL = { footway: '#fff', path: '#ff0', cycleway: '#0f0', steps: '#f0f', pedestrian: '#fa0', service: '#888', living_street: '#444' };
   for (const r of W.parsed.roads) {
     if (!r.pts.some(([x, z]) => Math.abs(x - cx) < R + 30 && Math.abs(z - cz) < R + 30)) continue;

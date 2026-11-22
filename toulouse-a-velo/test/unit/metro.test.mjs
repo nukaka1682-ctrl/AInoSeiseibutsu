@@ -124,3 +124,56 @@ test('メトロの代わりの出入口: 車道と建物を避けて、駅の近
   // 歩道の狭い所しかなければ置かない
   assert.equal(placeEntrance({ rings: [rings[0], [[-100, -9], [100, -9], [100, -40], [-100, -40]]], roads }), null);
 });
+
+// OpenStreetMap の階段から作った出入口（toulouse-metro-osm.json の bouches）に替える（world/metro.js の mergeOsmBouches）
+test('メトロの出入口: OSM の出入口のある駅は、LiDAR の吹き抜けを地形を埋めるだけ（fill）にして OSM の出入口とエレベーターを使う', async () => {
+  const { mergeOsmBouches } = await import('../../src/world/metro.js');
+  const list = [
+    { kind: 'metro', station: 'Jean Jaurès', lat: 43.605618, lon: 1.448512, len: 14, wid: 9, ang: 0.82, down: 1, depth: 4.9 }, // 穴の形で向きを誤った吹き抜け
+    { kind: 'metro', station: 'Jean Jaurès', synthetic: true, lat: 43.6057, lon: 1.4487, len: 11, wid: 3.6, ang: 0, down: 1, depth: 3.8 },
+    { kind: 'metro', station: 'Capitole', lat: 43.604641, lon: 1.445481, len: 25.6, wid: 5.5, ang: 1.6, down: 1, depth: 4.6 },
+    { kind: 'parking', name: 'Parking', lat: 43.606156, lon: 1.449661, len: 29, wid: 9, ang: -0.75, down: 1, depth: 3.7 },
+  ];
+  const osm = {
+    'jean-jaures': { bd: 'Jean Jaurès', c: [43.6056, 1.4485], bouches: [
+      { kind: 'metro', station: 'Jean Jaurès', lat: 43.6056442, lon: 1.4484773, len: 14.9, wid: 4.6, ang: -0.722, down: 1, depth: null, esc: true, covered: false, level: -1, src: 'osm' },
+      { kind: 'elevator', station: 'Jean Jaurès', lat: 43.60562, lon: 1.44853, src: 'osm' },
+    ] },
+    marengo: { bd: 'Marengo', c: [43.6108, 1.455], bouches: [{ kind: 'metro', station: 'Marengo', lat: 43.6107, lon: 1.4551, len: 18, wid: 4.6, ang: 2.4, down: 1, src: 'osm' }] },
+  };
+  const out = mergeOsmBouches(list, osm);
+  const jj = out.filter((e) => e.station === 'Jean Jaurès');
+  assert.equal(jj.filter((e) => e.kind === 'fill').length, 1, 'LiDAR の吹き抜けは穴を埋めるだけに');
+  assert.ok(!jj.some((e) => e.synthetic), '代わりの出入口は要らない');
+  const m = jj.find((e) => e.kind === 'metro');
+  assert.equal(m.src, 'osm');
+  assert.equal(m.ang, -0.722); // 北東へ下りる（階段の線の向き）
+  assert.equal(m.depth, 3.8); // 深さのない OSM の出入口は 3.8 m
+  assert.equal(m.esc, true);
+  assert.ok(jj.some((e) => e.kind === 'elevator' && e.face), 'エレベーターの小屋（駅の中心を向く）');
+  assert.ok(out.some((e) => e.station === 'Capitole' && e.kind === 'metro' && !e.src), 'OSM の出入口のない駅は LiDAR のまま');
+  assert.ok(!out.some((e) => e.station === 'Marengo'), 'エリアにない駅は足さない');
+  assert.ok(out.some((e) => e.kind === 'parking'), '駐車場の坂はそのまま');
+  // 地形を埋めるだけの項目は、出入口として描かない
+  const P = { project: (lat, lon) => [(lon - 1.4485) * 80600, (43.6056 - lat) * 111320] };
+  assert.ok(projectEntrances(out, P).every((e) => !(e.station === 'Jean Jaurès' && Math.abs(e.ang - 0.82) < 1e-6)));
+  assert.deepEqual(mergeOsmBouches(list, null), list);
+});
+
+test('メトロの出入口: 階段の地図のない出入口の印の近くの LiDAR の吹き抜けは、印の階で下りる向きを決める（地下の階の印は下の端）', async () => {
+  const { stationBouches } = await import('../../src/metro/osmentrances.js');
+  // 駅の中心の局所座標で、東西 10 m の穴（中心 (20, 0)）。印は穴の東の端（x = 25）
+  const st = (levels) => ({
+    bd: 'Test', c: [43.6, 1.44], steps: [], elevators: [],
+    entrances: [{ p: [43.6, 1.44 + 25 / 80600], levels, elevator: false }],
+  });
+  const lidar = [{ kind: 'metro', station: 'Test', lat: 43.6, lon: 1.44 + 20 / 80600, len: 10, wid: 4, ang: 0, down: -1, depth: 4 }];
+  const at = (levels) => stationBouches(st(levels), lidar).find((b) => b.kind === 'metro');
+  assert.equal(at([-1]).src, 'lidar@osm');
+  assert.equal(at([-1]).down, 1, '地下の階の印（扉）の方へ下りる');
+  assert.equal(at([0]).down, -1, '地上の階の印（階段の上の端）から遠ざかる');
+  assert.equal(at([-1, 0]).down, -1, '両方の階の印は LiDAR の向きのまま');
+  // OSM から作って足した出入口（src のあるもの）は LiDAR の穴として使わない
+  const fromOsm = [{ ...lidar[0], src: 'osm' }];
+  assert.equal(stationBouches(st([-1]), fromOsm).find((b) => b.kind === 'metro').src, 'osm-guess');
+});

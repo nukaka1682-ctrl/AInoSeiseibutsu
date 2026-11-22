@@ -380,6 +380,18 @@ test('写真で決めた道の補正: 通りの名前・場所・データの値
   const gb3 = { ...gb, lanes: '3', width: '8' };
   assert.equal(roadFix(gb3, [43.60543, 1.40292], [43.60597, 1.40185]).shift, 2, 'A620 の西の西行き');
   assert.equal(roadFix(gb3, [43.60597, 1.40185], [43.60543, 1.40292]), null, '東行きは直さない');
+  // Pont Saint-Pierre: サン・シプリアンから都心へ（北東へ）の一方通行。南西へ向く way は oneway=-1
+  const psp = { highway: 'tertiary', name: 'Rue du Pont Saint Pierre', lanes: '2', width: '6' };
+  assert.equal(roadFix(psp, [43.6001334, 1.4333271], [43.6007063, 1.4337362]).oneway, 'yes');
+  assert.equal(roadFix(psp, [43.6009418, 1.4339044], [43.6007063, 1.4337362]).oneway, '-1');
+  assert.equal(roadFix({ ...psp, name: 'Pont Saint-Pierre', bridge: 'yes' }, [43.6012428, 1.4341203], [43.6031534, 1.4354973]).lanes, '1');
+  assert.equal(roadFix({ ...psp, name: 'Place Saint-Pierre' }, [43.6012428, 1.4341203], [43.6031534, 1.4354973]), null);
+  // 高架の上から Place Lange へ下りる、そこには無い道（IGN）だけを捨てる
+  const { dropRoad } = await import('../../src/world/parse.js');
+  assert.equal(dropRoad({ highway: 'residential' }, [43.600942, 1.433904], [43.600887, 1.434023]), true);
+  assert.equal(dropRoad({ highway: 'residential', name: 'Place Lange' }, [43.600942, 1.433904], [43.600887, 1.434023]), false);
+  assert.equal(dropRoad({ highway: 'service' }, [43.60088, 1.434073], [43.600918, 1.433971]), false);
+  assert.equal(dropRoad({ highway: 'residential' }, [43.600942, 1.433904], [43.6012, 1.4342]), false);
 });
 
 test('ポン・ヌフの橋の端のまわりの名前のない細い車道は作らない（名前のある道・離れた道・広い道は残す）', async () => {
@@ -398,4 +410,65 @@ test('ポン・ヌフの橋の端のまわりの名前のない細い車道は�
   dropPontNeufLanes([bridge, long]);
   assert.deepEqual(long.pts, [[104, 95], [107, 31], [109, 14]], '遠くから来る細い道は橋の端の歩道の手前で止める');
   assert.deepEqual(long.nodeIds, [1, 2, 3]);
+});
+
+test('建物の一部を別の建物に分ける（splitByBox）: 箱の中と外に切り、面積の合計は変わらない', async () => {
+  const { splitByBox } = await import('../../src/world/parse.js');
+  const { signedArea } = await import('../../src/geo.js');
+  // L 字の建物（20 × 20 から右上の 10 × 10 を除いた形）を、x ≥ 10 の箱で切る
+  const b = { outer: [[0, 0], [20, 0], [20, 10], [10, 10], [10, 20], [0, 20]], holes: [] };
+  const { inside, outside } = splitByBox(b, [10, -5, 30, 30]);
+  const area = (list) => list.reduce((s, p) => s + Math.abs(signedArea(p.outer)), 0);
+  assert.equal(inside.length, 1);
+  assert.equal(outside.length, 1);
+  assert.ok(Math.abs(area(inside) - 100) < 1e-6 && Math.abs(area(outside) - 200) < 1e-6, `${area(inside)} ${area(outside)}`);
+  assert.ok(inside[0].outer.every(([x]) => x >= 10 - 1e-9));
+  // 閉じない輪（最後の点は最初の点と違う）
+  const o = outside[0].outer;
+  assert.notDeepEqual(o[0], o[o.length - 1]);
+});
+
+test('公園の中の高さのない建物は 1 階建て（高さ・階数のある建物、公園の外、Square の外の建物はそのまま）', async () => {
+  const { parkPavilions, buildingInfo } = await import('../../src/world/parse.js');
+  const sq = (x, z, s) => [[x, z], [x + s, z], [x + s, z + s], [x, z + s]];
+  const bld = (x, z, s, tags) => {
+    const b = { id: x * 100 + z, tags: { building: 'yes', ...tags }, outer: sq(x, z, s), holes: [], inside: [x + s / 2, z + s / 2] };
+    b.info = buildingInfo(b);
+    return b;
+  };
+  const park = { type: 'grass', tags: { leisure: 'park' }, name: 'Prairie des Filtres', outer: sq(0, 0, 100), holes: [], bounds: { minX: 0, minZ: 0, maxX: 100, maxZ: 100 } };
+  const shed = bld(10, 10, 15, {}), tall = bld(40, 40, 15, { height: '12' }), outside = bld(150, 10, 15, {});
+  assert.equal(parkPavilions([shed, tall, outside], [park]), 1);
+  assert.equal(shed.info.levels, 1); // 解析のときに決めた高さも決め直す
+  assert.ok(shed.info.height < 4.5);
+  assert.equal(tall.tags['building:levels'], undefined);
+  assert.equal(outside.tags['building:levels'], undefined);
+});
+
+test('屋根だけの上屋にする所（アレーヌのバスターミナル）: 円の中の低い陸屋根の建物だけ building=roof に', async () => {
+  const { canopyTags, buildingInfo } = await import('../../src/world/parse.js');
+  const t = { building: 'yes', height: '4.1', 'roof:shape': 'flat' };
+  const c = canopyTags(t, 43.593668, 1.418429);
+  assert.equal(c.building, 'roof');
+  const sq = [[0, 0], [10, 0], [10, 10], [0, 10]];
+  const info = buildingInfo({ id: 1, tags: c, outer: sq, holes: [] });
+  assert.equal(info.collide, false); // 自転車はくぐれる
+  assert.ok(info.minHeight >= 2.6);
+  assert.equal(canopyTags({ ...t, 'roof:shape': undefined }, 43.593668, 1.418429), null, '陸屋根でない売店');
+  assert.equal(canopyTags({ ...t, height: '9' }, 43.593668, 1.418429), null, '高い建物');
+  assert.equal(canopyTags(t, 43.6, 1.44), null, '円の外');
+});
+
+test('ジャン・ジョレス通りの車道の際の古い並木（LiDAR の木）: 動かした車道とその縁石から 1.6 m 以内は植えない', async () => {
+  const { onRamblasCarriageway } = await import('../../src/world/ramblas.js');
+  const roads = [
+    { name: 'Allées Jean Jaurès', width: 7, pts: [[0, 0], [100, 0]] },
+    { name: 'Allées Jean Jaurès', width: 7, bridge: true, pts: [[0, 50], [100, 50]] },
+    { name: 'Rue Riquet', width: 7, pts: [[0, -40], [100, -40]] },
+  ];
+  const on = onRamblasCarriageway(roads);
+  assert.ok(on(50, 4.9), '縁石の際（中心線から 4.9 m）');
+  assert.ok(!on(50, 5.3), '植え込みの中（中心線から 5.3 m）');
+  assert.ok(!on(50, 50), '橋の上の同じ名前の道は見ない');
+  assert.ok(!on(50, -40), 'ほかの通り');
 });

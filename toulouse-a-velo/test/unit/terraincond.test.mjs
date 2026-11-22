@@ -259,3 +259,23 @@ test('高架の下の擁壁: 高速道路の橋の下をくぐる車道の両脇
   // 高架がなければ作らない
   assert.equal(abutmentWalls(terrain, [road]).length, 0);
 });
+
+test('でこぼこをならす所（SMOOTH_ZONES）: 5 m の格子の穴と山の列を消し、坂の面と所の外はそのまま', async () => {
+  const { smoothZones } = await import('../../src/world/terraincond.js');
+  // 東へ 1 % 上る坂に、所の中だけ 0.5 m の穴と山が 7.5 m おき（工事中の植え穴と盛り土）
+  const T = synth((x, z) => 140 + 0.01 * x + (Math.abs(z) < 60 && Math.abs(x) < 150 ? 0.5 * Math.sin((x / 7.5) * Math.PI) * Math.cos((z / 7.5) * Math.PI) : 0));
+  const T0 = synth((x, z) => 140 + 0.01 * x + (Math.abs(z) < 60 && Math.abs(x) < 150 ? 0.5 * Math.sin((x / 7.5) * Math.PI) * Math.cos((z / 7.5) * Math.PI) : 0));
+  const [a0, a1] = [P.unproject(-120, 0), P.unproject(120, 0)];
+  const n = smoothZones(T, [{ line: [a0, a1], half: 40 }], P, { fade: 10 });
+  assert.ok(n > 100);
+  let worst = 0;
+  for (let x = -90; x <= 90; x += 2.5) for (let z = -20; z <= 20; z += 2.5) worst = Math.max(worst, Math.abs(T.h(x, z) - (140 + 0.01 * x - DATUM)));
+  assert.ok(worst < 0.15, `所の中の残り ${worst.toFixed(2)} m`);
+  // 所の外（150 m 東）は元のまま
+  assert.equal(T.h(200, 0), T0.h(200, 0));
+  assert.equal(T.h(0, 120), T0.h(0, 120));
+  // 平らな坂は動かない
+  const S = synth((x) => 140 + 0.02 * x);
+  smoothZones(S, [{ c: P.unproject(0, 0), r: 50 }], P);
+  for (const x of [-30, 0, 30]) assert.ok(Math.abs(S.h(x, 0) - (140 + 0.02 * x - DATUM)) < 0.02);
+});

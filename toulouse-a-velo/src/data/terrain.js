@@ -4,6 +4,7 @@ import { FLAT_TERRAIN, Terrain, decodeTerrain } from '../world/terrain.js';
 import { bakeTerrain } from './terrainbake.js';
 import { parseOsm } from '../world/parse.js';
 import { areaFrame } from '../world/assemble.js';
+import { mergeOsmBouches } from '../world/metro.js';
 
 // 同梱の地形ファイル（デコード済みのデータ。なければ null）
 export async function fetchTerrainFile(presetId) {
@@ -21,15 +22,19 @@ export async function fetchTerrainFile(presetId) {
   }
 }
 
-// 同梱のメトロの出入口（public/data/<エリア>-metro.json の entrances。なければ空）
+// 同梱のメトロの出入口（public/data/<エリア>-metro.json の entrances。なければ空）。OpenStreetMap の駅の地図
+// （toulouse-metro-osm.json。リポジトリに入っている）があれば、その階段から作った出入口に替える（world/metro.js の mergeOsmBouches）
 async function fetchMetroFile(presetId) {
-  try {
-    const res = await fetch(`${import.meta.env.BASE_URL}data/${presetId}-metro.json`);
-    if (!res.ok || /html/.test(res.headers.get('content-type') || '')) return [];
-    return (await res.json()).entrances || [];
-  } catch {
-    return [];
-  }
+  const json = async (name) => {
+    try {
+      const res = await fetch(`${import.meta.env.BASE_URL}data/${name}`);
+      return res.ok && !/html/.test(res.headers.get('content-type') || '') ? await res.json() : null;
+    } catch {
+      return null;
+    }
+  };
+  const [metro, osm] = await Promise.all([json(`${presetId}-metro.json`), json(`${presetId}-metro-osm.json`).then((o) => o || json('toulouse-metro-osm.json'))]);
+  return mergeOsmBouches(metro?.entrances || [], osm?.stations || null);
 }
 
 // filePromise: fetchTerrainFile の結果、osm: エリアの地図（直接取得するとき、川・運河の範囲に使う）

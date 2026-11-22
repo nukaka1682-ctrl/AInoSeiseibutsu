@@ -97,6 +97,16 @@ const STONE_CHOIRS = [{ name: 'Cathédrale Saint-Étienne', lat: 43.59988, lon: 
 // 赤レンガの現代の集合住宅、210635 A620 の脇のコンクリートの格子にレンガの板の事務所、212318 Jean-Jaurès の奥の青いガラスの塔、
 // NCM_0095 サン・テティエンヌの北の赤レンガの建物
 const PHOTO_STYLES = [
+  // アレーヌの半円の事務所（Wikimedia Commons「Tramway arènes 2018」: 銀色の金属の格子とガラスの正面）。IGN では 2 つの外形に
+  // 分かれていて、東の端だけレンガの様式と瓦屋根になっていた
+  // 利用者の写真 PXL_20201129（Rue de la République の窓からシャトー・ドーを見た写真）: Place Laganne の角の 3 階建ての家は、
+  // クリーム色〜淡い黄色の漆喰に青灰色の板の鎧戸、1 階はレンガ（アーチの窓の店 Galerie Café）。瓦屋根はそのまま（keepRoof）
+  { at: [43.598767, 1.436351], style: 'faubourg', keepRoof: true },
+  { at: [43.592261, 1.418397], style: 'glass' },
+  { at: [43.592243, 1.418745], style: 'glass' },
+  // アレーヌのバスターミナルの南の曲がった 9 階建て（写真 Commons「Gare routière des Arènes 1・2」: 白い壁に黄色の斜めの帯）。
+  // 外形が 53 点の曲線と切り欠きで、5.5 m の寄棟屋根が刃のような面になって北へ突き出していた。陸屋根に
+  { at: [43.593275, 1.418515], style: 'whiteModern' },
   { at: [43.594344, 1.434192], style: 'whiteModern' },
   { at: [43.598925, 1.417837], style: 'whiteModern' },
   { at: [43.598673, 1.417451], style: 'brickGrid' },
@@ -116,7 +126,7 @@ export function markBrickSites(proj, buildings, areas = []) {
   for (const s of BRICK_SITES) {
     const [x, z] = proj.project(s.lat, s.lon);
     for (const b of buildings) {
-      if (b.info.area > 150 && Math.hypot(b.inside[0] - x, b.inside[1] - z) < s.r) {
+      if (b.info.area > 150 && !b.fixed && Math.hypot(b.inside[0] - x, b.inside[1] - z) < s.r) {
         b.tags['building:material'] = 'brick';
         b.style = STYLE.brickStone;
         b.plainGround = true; // 1 階に店・馬車門を並べない（利用者の写真 211104: オテル・デューの 1 階は窓の並び）
@@ -151,7 +161,7 @@ export function markBrickSites(proj, buildings, areas = []) {
         b.tags['roof:colour'] = ps.roof.colour;
         if (b.info.roofShape === 'flat') b.info.roofShape = 'auto';
         b.info.roofHeight = Math.max(b.info.roofHeight || 0, 3.5);
-      } else if (ps.style !== 'brickStone') b.info.roofShape = 'flat'; // 現代の建物は陸屋根
+      } else if (ps.style !== 'brickStone' && !ps.keepRoof) b.info.roofShape = 'flat'; // 現代の建物は陸屋根
     }
   }
   // キャピトルの主塔（donjon）は急なスレートの屋根
@@ -227,6 +237,9 @@ export function markStreetStyles(buildings, roads) {
     }
     if (!segs.length) continue;
     for (const b of buildings) {
+      // 戦後の高い集合住宅（コンクリート、8 階以上で 25 m 以上）は通りの古い様式にしない（航空写真: Allées Charles de Fitte の
+      // 11 階のコンクリートの集合住宅が、レンガの古い家の様式と瓦屋根で描かれていた）
+      if (b.tags['building:material'] === 'concrete' || ((b.info.levels || 0) >= 8 && b.info.height >= 25)) continue;
       if (b.style === STYLE.arcade || b.info.height < 10 || b.info.isChurch || b.info.area > STREET_MAX_AREA || (rule.keepBrick && b.tags['building:material'] === 'brick') || !facesStreet(b, segs)) continue;
       let r = hash01(b.id, 24);
       b.style = rule.styles.find(([, p]) => (r -= p) < 0)?.[0] ?? rule.styles[0][0];

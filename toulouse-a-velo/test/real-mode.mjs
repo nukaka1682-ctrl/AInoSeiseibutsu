@@ -122,7 +122,11 @@ for (let v of views) {
       s.bike.place(x, z, h, (s.world.spawnY || s.world.heightAt)(x, z));
     } else if (v.street) {
       // 通りの名前で: その通りの途中に、通りに沿って置く
-      const road = s.world.parsed.roads.filter((r) => r.name === v.street).sort((a, b) => b.pts.length - a.pts.length)[0];
+      // near: [緯度, 経度] があれば、その近くの同じ名前の道（同じ名前の通りがほかの町にもある）
+      const nearXZ = v.near ? s.world.proj.project(v.near[0], v.near[1]) : null;
+      const dist = (r) => (nearXZ ? Math.min(...r.pts.map(([x, z]) => Math.hypot(x - nearXZ[0], z - nearXZ[1]))) : 0);
+      const road = s.world.parsed.roads.filter((r) => r.name === v.street).sort((a, b) => (nearXZ ? dist(a) - dist(b) : b.pts.length - a.pts.length))[0];
+      if (!road) return;
       const i = Math.min(road.pts.length - 2, Math.floor(road.pts.length * (v.at ?? 0.5)));
       const [x, z] = road.pts[i], [x2, z2] = road.pts[i + 1];
       s.bike.place(x, z, Math.atan2(x2 - x, -(z2 - z)) + (v.turn || 0), (s.world.spawnY || s.world.heightAt)(x, z));

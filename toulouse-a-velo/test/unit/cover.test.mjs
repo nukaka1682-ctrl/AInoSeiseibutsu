@@ -265,3 +265,46 @@ test('地面の覆い: 重みのテクスチャ（舗石は R だけ半分の値
   const pav = (1 - w.reduce((s, v) => s + v, 0)) * (255 / 127);
   assert.ok(Math.abs(pav - 0.5) < 0.01 && Math.abs(w[0] - pav * (128 / 255) - 0.25) < 0.01 && Math.abs(w[3] - 0.25) < 0.01);
 });
+
+test('道から離れた公道（盛り土・法面）は芝にする（greenVerges）', async () => {
+  const { COVER: C, greenVerges } = await import('../../src/data/cover.js');
+  const grid = { cols: 100, rows: 100, data: new Uint8Array(10000) }; // 全部「公道」
+  grid.data[50 * 100 + 90] = C.private;
+  const rect = { minX: 0, minZ: 0, maxX: 100, maxZ: 100 };
+  const roads = [{ type: 'residential', width: 6, pts: [[0, 20.5], [100, 20.5]] }, { type: 'motorway', width: 10, pts: [[0, 80.5], [100, 80.5]] }, { type: 'primary', width: 8, tunnel: true, pts: [[50.5, 0], [50.5, 100]] }];
+  const plaza = { type: 'plaza', bounds: { minX: 60, minZ: 40, maxX: 80, maxZ: 60 }, outer: [[60, 40], [80, 40], [80, 60], [60, 60]] };
+  const n = greenVerges(grid, rect, roads, [plaza], (x) => x < 10);
+  const at = (x, z) => grid.data[Math.floor(z) * 100 + Math.floor(x)];
+  assert.ok(n > 1000);
+  assert.equal(at(30, 20), C.public); // 車道
+  assert.equal(at(30, 30), C.public); // 縁から 9 m 以内
+  assert.equal(at(30, 45), C.lawn); // 離れた所
+  assert.equal(at(50, 50), C.lawn); // トンネルの上
+  assert.equal(at(30, 87), C.public); // 高速道路の路肩（3 m）
+  assert.equal(at(30, 92), C.lawn); // その先の法面
+  assert.equal(at(70, 50), C.public); // 広場の中
+  assert.equal(at(5, 50), C.public); // 旧市街
+  assert.equal(at(90, 50), C.private);
+});
+
+test('草地の大きな公園（Prairie・Parc の名前の leisure=park）: 植物でない地面を芝に。Square の公園・木はそのまま', () => {
+  const rect = { minX: 0, minZ: 0, maxX: 60, maxZ: 30 }, cols = 60, rows = 30;
+  const grid = { cols, rows, data: new Uint8Array(cols * rows).fill(COVER.public) };
+  grid.data[5 * cols + 5] = COVER.trees;
+  grid.data[6 * cols + 6] = COVER.private;
+  const sq = (x, z, s) => [[x, z], [x + s, z], [x + s, z + s], [x, z + s]];
+  const parsed = {
+    areas: [
+      { type: 'grass', name: 'Prairie des Filtres', tags: { leisure: 'park' }, outer: sq(0, 0, 20), holes: [] },
+      { type: 'grass', name: 'Square Charles de Gaulle', tags: { leisure: 'park' }, outer: sq(30, 0, 20), holes: [] },
+    ],
+    roads: [],
+  };
+  stampCover(grid, rect, coverStamps(parsed));
+  const at = (x, z) => grid.data[z * cols + x];
+  assert.equal(at(10, 10), COVER.lawn);
+  assert.equal(at(5, 5), COVER.trees);
+  assert.equal(at(6, 6), COVER.lawn); // 公園の敷地の植物でない所も
+  assert.equal(at(40, 10), COVER.public); // Square は舗装のまま
+  assert.equal(at(25, 25), COVER.public); // 公園の外
+});

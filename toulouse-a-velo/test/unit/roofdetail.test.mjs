@@ -196,3 +196,23 @@ test('génoise・煙突をつける建物: 旧市街の家は付け、教会・�
   landmark.style = 3;
   assert.ok(!traditionalHouse(landmark, roofPlan(landmark)));
 });
+
+test('背の高い戦後の集合住宅・現代の建物は陸屋根（IGN の小さな屋根の高低差は胸壁・機械室の分）', () => {
+  const mk = (tags, outer = [[0, 0], [30, 0], [30, 14], [0, 14]]) => {
+    const b = { id: 11, tags, outer, holes: [], bdHeight: 0 };
+    b.info = buildingInfo(b);
+    return b;
+  };
+  // 10 階・29 m、屋根の高低差 0.7 m → 陸屋根
+  assert.equal(roofPlan(mk({ building: 'yes', height: '29.7', 'roof:height': '0.7', 'building:levels': '10' })).shape, 'flat');
+  // 7 階・17 m・高低差 3.1 m → 陸屋根（戦後の様式になる高さ）
+  assert.equal(roofPlan(mk({ building: 'yes', height: '20.5', 'roof:height': '3.1', 'building:levels': '7' })).shape, 'flat');
+  // 瓦の材料が分かる・屋根の高低差が大きい・低い家は、傾斜屋根のまま
+  assert.equal(roofPlan(mk({ building: 'yes', height: '29.7', 'roof:height': '0.7', 'building:levels': '10', 'roof:material': 'roof_tiles' })).shape, 'pitched');
+  assert.equal(roofPlan(mk({ building: 'yes', height: '30', 'roof:height': '5', 'building:levels': '9' })).shape, 'pitched');
+  assert.equal(roofPlan(mk({ building: 'yes', height: '12', 'roof:height': '2', 'building:levels': '3' })).shape, 'pitched');
+  // 旧市街の 6 階建ての家（20 m 未満）も傾斜屋根
+  const old = mk({ building: 'yes', height: '19', 'roof:height': '1.5', 'building:levels': '6' });
+  old.oldTown = true;
+  assert.equal(roofPlan(old).shape, 'pitched');
+});

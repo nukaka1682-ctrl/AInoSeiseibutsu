@@ -11,7 +11,7 @@
 //   灰色のコンクリートの舗石（20 × 10 cm、互い違い）。テクスチャでは R だけ半分の値にして、4 つの合計の不足分から割合を戻す
 // 地面の板（ground.js）の上、緑地・道路の下に、地面の板と同じステンシル（川の穴）で描く。
 import * as THREE from 'three';
-import { PAVED, coverStamps, decodeCover, paveAllees, stampCover } from '../data/cover.js';
+import { PAVED, coverStamps, decodeCover, greenVerges, paveAllees, stampCover } from '../data/cover.js';
 
 const SEG = 20; // 板の分割数（頂点ごとの「旧市街か」を補間するため）
 
@@ -153,7 +153,7 @@ function onBeforeCompile(uniforms) {
 // parsed: 地図（広場と並木道の名前で覆いを補正する。data/cover.js の coverStamps）
 // geometry: 地形のタイルの地面（terrainmesh.js。頂点はワールド座標）。あればそれに重ねて描く（同じ三角形なので地面とぴったり重なる）
 // lowQuay(x, z): 小舗石ではなく大きな灰色の花崗岩の板にする所か（利用者の写真: ラ・ドラードの下の段・ポン・ヌフの橋のたもと）
-export function buildCoverMesh(cover, bounds, shared, inOldTown = () => false, parsed = null, geometry = null, lowQuay = null) {
+export function buildCoverMesh(cover, bounds, shared, inOldTown = () => false, parsed = null, geometry = null, lowQuay = null, steep = null) {
   const grid = decodeCover(cover);
   const w = bounds.maxX - bounds.minX, h = bounds.maxZ - bounds.minZ;
   let cx = (bounds.minX + bounds.maxX) / 2, cz = (bounds.minZ + bounds.maxZ) / 2;
@@ -178,6 +178,7 @@ export function buildCoverMesh(cover, bounds, shared, inOldTown = () => false, p
   const mask = parsed && anyOld ? new Uint8Array(grid.cols * grid.rows) : null;
   if (parsed) stampCover(grid, bounds, coverStamps(parsed), mask, inOldTown);
   paveAllees(grid);
+  if (parsed) greenVerges(grid, bounds, parsed.roads.concat((parsed.rails || []).map((r) => ({ pts: r.pts || r, width: 5 }))), parsed.areas, inOldTown, 9, steep); // 道から離れた公道（盛り土・法面）は芝
   const map = coverTexture(grid);
   const plaza = mask ? maskTexture(mask, grid.cols, grid.rows) : NO_PLAZA;
   const uniforms = {

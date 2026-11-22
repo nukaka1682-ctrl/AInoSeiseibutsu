@@ -118,9 +118,14 @@ const FIXED_WALLS = [
   { pts: [[43.595281, 1.435751], [43.595441, 1.435768], [43.596323, 1.436135], [43.59672, 1.436308]], h: 3.2, kind: 'render', tint: LAGANNE_GREY },
   { pts: [[43.59655, 1.436127], [43.595812, 1.435823]], h: 3.6, kind: 'brick' },
   // 利用者の Street View 225653: Avenue de Grande-Bretagne の西行きの北の歩道沿いの、Purpan の病院の敷地の高さ約 2.5 m の
-  // サーモンピンクの漆喰の塀（航空写真で位置を決める。車道は盛り土で敷地より最大 1.7 m 高いが、塀は歩道から約 2.5 m）
-  { pts: [[43.605966, 1.402092], [43.605769, 1.402484], [43.605545, 1.402931], [43.60551, 1.403]], h: 2.5, kind: 'render', tint: [0.95, 0.72, 0.62], rail: 2.5 },
+  // サーモンピンクの漆喰の塀（航空写真で位置を決める。車道は盛り土で敷地より最大 1.7 m 高いが、塀は歩道から約 2.5 m）。
+  // 写真では信号の先まで続く: 航空写真 2024 の塀の影で、病院へ入る脇道（信号）の手前まで延ばし、脇道の先にもう 1 区間
+  { pts: [[43.606275, 1.401358], [43.605966, 1.402092], [43.605769, 1.402484], [43.605545, 1.402931], [43.60551, 1.403]], h: 2.5, kind: 'render', tint: [0.95, 0.72, 0.62], rail: 2.5 },
+  { pts: [[43.60659, 1.400639], [43.606415, 1.401048]], h: 2.5, kind: 'render', tint: [0.95, 0.72, 0.62], rail: 2.5 },
 ];
+// 写真で決めた塀に沿う LiDAR の塀（同じ塀の測りの切れ端。レンガの短い高い塀になって、漆喰の塀の先に立っていた）は除く:
+// 中点が写真の塀の線から FIXED_NEAR m 以内で、向きが 30° 以内（Purpan の塀の脇の 6.8 m の切れ端は線から 4 m）
+const FIXED_NEAR = 5;
 // 塀のない広場（利用者の写真: Square Charles-de-Gaulle とキャピトル広場は平らな舗装で、LiDAR で見つかる塀は
 // 地下鉄の出入口・植え込みの縁・日よけ）。中点がこの名前の地図の多角形の中にある塀を除く
 const WALL_FREE = /^(Square Charles de Gaulle|Place du Capitole)$/i;
@@ -131,10 +136,19 @@ const WALL_FREE_DISCS = [[43.60828, 1.39535, 40], [43.609749, 1.455105, 22]];
 export function clearNamedAreas(segs, areas, proj = null) {
   const rings = areas.filter((a) => WALL_FREE.test(a.name || '')).map((a) => a.outer);
   const discs = proj ? WALL_FREE_DISCS.map(([lat, lon, r]) => [...proj.project(lat, lon), r]) : [];
-  if (!rings.length && !discs.length) return segs;
+  const fixed = proj ? fixedWalls(proj) : [];
+  if (!rings.length && !discs.length && !fixed.length) return segs;
+  const nearFixed = (ax, az, bx, bz) => {
+    const mx = (ax + bx) / 2, mz = (az + bz) / 2, L = Math.hypot(bx - ax, bz - az) || 1;
+    return fixed.some(([fx, fz, gx, gz]) => {
+      const M = Math.hypot(gx - fx, gz - fz) || 1;
+      if (Math.abs(((bx - ax) * (gx - fx) + (bz - az) * (gz - fz)) / (L * M)) < Math.cos(Math.PI / 6)) return false;
+      return closestOnSegment(mx, mz, fx, fz, gx, gz).d2 < FIXED_NEAR * FIXED_NEAR;
+    });
+  };
   return segs.filter(([ax, az, bx, bz]) => {
     const mx = (ax + bx) / 2, mz = (az + bz) / 2;
-    return !rings.some((r) => pointInRing(mx, mz, r)) && !discs.some(([x, z, r]) => (mx - x) ** 2 + (mz - z) ** 2 < r * r);
+    return !rings.some((r) => pointInRing(mx, mz, r)) && !discs.some(([x, z, r]) => (mx - x) ** 2 + (mz - z) ** 2 < r * r) && !nearFixed(ax, az, bx, bz);
   });
 }
 
