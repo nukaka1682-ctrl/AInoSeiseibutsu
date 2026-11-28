@@ -274,6 +274,10 @@ kbd {
 #landmark-list li.target { background: #ffeeb8; }
 #landmark-list li .dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 5px; flex: none; border: 1px solid #333; background: #fff; }
 #landmark-list li.discovered .dot { background: var(--violet); }
+.map-side .metro-warp-title { margin-top: 12px; }
+.metro-warp { display: flex; gap: 6px; margin: 6px 0 10px; }
+.metro-warp select { flex: 1; min-width: 0; font: inherit; padding: 6px 8px; border: 2px solid #ead8cc; border-radius: 10px; background: #fff; color: var(--ink); }
+.metro-warp button { flex: none; margin: 0; }
 @media (max-width: 760px) {
   .map-wrap { flex-direction: column; }
   .map-side { width: 100%; max-height: 40%; }

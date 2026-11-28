@@ -53,10 +53,21 @@ const strHash = (s) => {
 // 通りの種類: shared（旧市街の石畳の共有空間）/ taur（小舗石の車道＋石の板の歩道）/ curb（縁石と一段高い歩道）/
 // bridge（橋。歩道は作らないが、ほかの歩道を切る）/ plain（それ以外: 歩道なしの車道・歩行者の通り・小道）
 // 旧市街でも、車道（アスファルト）と灰色の花崗岩の板の歩道の通り（利用者のストリートビュー 2026-10-17 210627: ポン・ヌフの橋のたもと）
+// 旧市街の小舗石の車道の通り（Rue du Taur 型。街路写真帖・利用者の写真）
+const TAUR_STREETS = /^Rue du Taur$/i;
+// 旧市街の中心の歩行者の区域の通り（IGN では住宅街の通り。街路写真帖で、縁石がなく壁から壁まで石畳の通りと確かめたもの。
+// Rue de la Bourse・Rue Peyrolières は車道と駐車があるので入れない）
+const PEDESTRIAN_ZONE = new Set(['rue saint rome', 'rue des changes', 'rue des filatiers', 'rue de la pomme', 'rue leon gambetta', 'rue pargaminieres',
+  'rue des arts', 'rue d alsace lorraine', 'rue lafayette', 'rue saint antoine du t', 'rue baour lormian', 'rue croix baragnon', 'rue temponieres',
+  'rue tripiere', 'rue du poids de l huile', 'rue romiguieres', 'rue saint pantaleon', 'rue de la trinite', 'rue des marchands', 'rue malcousinat',
+  'rue jules chalande', 'rue cujas', 'rue montardy', 'rue des puits clos', 'rue boulbonne', 'rue d astorg']);
+const plainName = (s) => (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[-'’]/g, ' ').replace(/\s+/g, ' ').trim();
+export const inPedestrianZone = (road) => PEDESTRIAN_ZONE.has(plainName(road.name));
 const GREY_WALKS = /^(Place du Pont[- ]Neuf|Quai de la Daurade)$/i;
 
 export function classifyStreet(road, old) {
-  const t = road.type;
+  const zone = old && inPedestrianZone(road); // 歩行者の区域の通りは歩行者の通りと同じ（壁から壁まで石畳）
+  const t = zone ? 'pedestrian' : road.type;
   const grey = GREY_WALKS.test(road.name || '');
   if (grey) old = false;
   const car = CAR_ROADS.has(t);
@@ -77,15 +88,18 @@ export function classifyStreet(road, old) {
     return { kind: 'shared', slabs: true, alsace, band: road.width / 2 + 1.2, gutter: alsace ? null : 0, near };
   }
   if (old && OLD_MINOR.has(t) && road.width <= (t === 'tertiary' ? 5 : 6.5)) {
-    // 旧市街の細い通り（IGN の幅は車道だけなので、壁から壁は広い）。車の通れる通りの 3 割は Rue du Taur 型
-    const taur = t !== 'pedestrian' && (/^Rue du Taur$/i.test(road.name) || hash01(h, 31) < 0.3);
-    // 側溝: 歩行者の通りは真ん中、ほかは半分が真ん中、半分は片側の壁寄り（幅の 1/3 あたり）
-    const gutter = t === 'pedestrian' || t === 'living_street' || hash01(h, 32) < 0.5 ? 0 : (hash01(h, 33) < 0.5 ? -0.9 : 0.9);
-    return { kind: taur ? 'taur' : 'shared', band: Math.max(road.width / 2 + 1.2, 3), gutter, near };
+    // 旧市街の細い通り（IGN の幅は車道だけなので、壁から壁は広い）。街路写真帖（旧市街の 2,600 枚）では:
+    // - 歩行者の通り（Rue Alexandre Fourtanier・Rue Saint-Rémésy など）: 壁から壁まで淡い石の板、真ん中に石の側溝
+    // - 小舗石の通りは Rue du Taur など少し（TAUR_STREETS: 小舗石の車道と石の板の歩道）
+    // - 車の通る通り（Rue Ninau・Rue Tolosane・Rue des Lois・Rue de la Dalbade など）は、灰色のアスファルトの車道と、黒い車止めの
+    //   並ぶ狭い歩道。下の「縁石と一段高い歩道」にする（以前は全部を小舗石の石畳にしていた）
+    // 歩行者の区域の通り（Rue Saint-Rome・Rue de la Pomme など）は小舗石と真ん中の側溝、地図の歩行者の通りは淡い石の板
+    if (t === 'pedestrian' || t === 'living_street') return { kind: 'shared', slabs: !zone, band: Math.max(road.width / 2 + 1.2, 3), gutter: 0, near };
+    if (TAUR_STREETS.test(road.name || '')) return { kind: 'taur', band: Math.max(road.width / 2 + 1.2, 3), gutter: null, near };
   }
   if (car && road.sidewalk !== 'no' && road.sidewalk !== 'none') {
     // 歩道の舗装: 中心部はえんじ色（赤茶）の舗装が多く、外は灰色のアスファルトが多い（通りの両側で違うこともある）
-    const p = old ? 0.55 : 0.2;
+    const p = old ? 0.3 : 0.2; // 旧市街の狭い通りの歩道は淡い石の板・コンクリートが多い（街路写真帖）
     // 縁石の足元の 2 列の小舗石の側溝は、中心部と幹線道路だけ（郊外の住宅街はアスファルトのまま）
     // Esquirol と Rue de Metz（利用者の Street View）: 両側とも赤茶色の小舗石の歩道
     const esq = /^(Place [EÉ]tienne[- ]Esquirol|Rue de Metz)$/i.test(road.name || '');

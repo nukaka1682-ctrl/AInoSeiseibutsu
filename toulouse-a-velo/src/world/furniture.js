@@ -385,7 +385,7 @@ export function planFurniture({ parsed, plan, clip, curbs = [], inOldTown = () =
       }
     }
 
-    // ---- 路上駐車の車（旧市街の外、車道が広い通り。自転車のために BIKE_LANE m 以上あける）。
+    // ---- 路上駐車の車（車道が広い通り。自転車のために BIKE_LANE m 以上あける。旧市街の中は縁石の外の舗装には止めない）。
     // 車道が狭い住宅街の通り（IGN の幅 4〜5 m が多い）は、歩道が広ければ片側に歩道へ半分乗り上げて（フォーブールの通りの写真）
     // バス・自転車レーンが縁石に沿う側（markings.js の laneLayout と同じ断面）には止めない
     const lay = plan?.layout ? plan.layout(road) : null;
@@ -407,7 +407,9 @@ export function planFurniture({ parsed, plan, clip, curbs = [], inOldTown = () =
           if (kerb && p.e < KERB_MIN_E) continue;
           if (walk && p.e < CAR_W + CURB_GAP + WALK_LEFT) continue;
           const x = p.ax - p.nx * off, z = p.az - p.nz * off;
-          if (inOldTown(x, z) || onLane(x, z) || ctx.nearJunction(x, z, 11) || ctx.crossingZone(road, x, z, 4.5) || ctx.nearBridgeEnd(x, z, 14) || ctx.nearRail(x, z, 4.5)) continue;
+          // 旧市街の中も、車道に止める・歩道に半分乗り上げる駐車はする（街路写真帖: Rue Théodore Ozenne・Rue des Lois・Place du Salin
+          // など、車の通る通りの片側に駐車）。縁石の外の舗装の上（walk）には止めない
+          if ((walk && inOldTown(x, z)) || onLane(x, z) || ctx.nearJunction(x, z, 11) || ctx.crossingZone(road, x, z, 4.5) || ctx.nearBridgeEnd(x, z, 14) || ctx.nearRail(x, z, 4.5)) continue;
           // ほかの通りの歩道にかかる所（交差点の角）は置かない。車道側の車輪の下は車道（高さ 0）
           const hx = p.ux * (CAR_L / 2) * sl, hz = p.uz * (CAR_L / 2) * sl;
           const ox = kerb ? -p.nx * (CAR_W / 2 - 0.2) : 0, oz = kerb ? -p.nz * (CAR_W / 2 - 0.2) : 0;
