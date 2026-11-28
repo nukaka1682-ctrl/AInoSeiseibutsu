@@ -266,9 +266,11 @@ function leafShading(material) {
       .replace('#include <normal_fragment_begin>', `#include <normal_fragment_begin>
         float facing = abs(dot(normal, normalize(vViewPosition)));
         float gaps = leafNoise(vLeafPos * 8.0) * 0.6 + leafNoise(vLeafPos * 19.0) * 0.4;
-        if (facing < 0.45 && gaps < (0.45 - facing) * 2.3) discard;`);
+        if (facing < 0.6 && gaps < (0.6 - facing) * 1.9) discard;
+        // 樹冠の中にも小さなすき間（街路写真帖のプラタナス: 葉の間から空が点々と見える）
+        if (gaps < 0.16) discard;`);
   };
-  material.customProgramCacheKey = () => 'leaf-shading-v2';
+  material.customProgramCacheKey = () => 'leaf-shading-v3';
 }
 
 // 樹冠の影の形もこぶに合わせる
@@ -285,7 +287,8 @@ function lumpyDepthMaterial() {
 
 // 葉の色: プラタナス（街路・運河・河岸）は黄みのオリーブ色、公園などの木はいろいろな緑（写真の樹冠は #414c1f〜#645731）
 const LEAF = {
-  plane: ['#667a38', '#6f823e', '#5e7233', '#768a44', '#6a7e3b'],
+  // 街路写真帖の並木のプラタナス（Boulevard Lazare Carnot・Allées Jules Guesde）は日の当たる葉が明るい黄緑
+  plane: ['#6d8239', '#788c41', '#647935', '#829648', '#71863e'],
   other: ['#5b7034', '#667a3a', '#52682f', '#6d7c3d', '#587036', '#5f7440', '#737c37', '#4f6033'],
   magnolia: ['#46552a', '#4f5e2c', '#5a6630', '#4a5928'], // 写真 #4f5a2a〜#7e784d（日なたの上は黄緑）
 };
