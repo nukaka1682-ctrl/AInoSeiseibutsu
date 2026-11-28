@@ -126,6 +126,11 @@ export const MONUMENTS = [
   { id: 'velos-saint-cyprien-n', kind: 'bikeracks', line: [[43.598081, 1.431672], [43.598105, 1.431817]] },
   { id: 'velos-saint-cyprien-s', kind: 'bikeracks', line: [[43.597905, 1.431760], [43.597928, 1.431905]] },
   { id: 'fontaine-trinite', kind: 'trinite', lat: 43.599732, lon: 1.44408 },
+  // Place Saint-Étienne の噴水（le Griffoul、1546〜1593 年。いちばん古い噴水。写真: Wikimedia Commons「Fontaine de la place
+  // Saint-Étienne Toulouse」「Toulouse - Fontaine du Griffoul」、位置は航空写真）: 階段で一段下がった八角形の石畳の中に、八角形の
+  // 石の水盤、短い柱とライオンの顔の付いた丸い上の水盤、4 体のブロンズの子ども（marmousets、Pierre Chevenet）が水を吐く八角形の
+  // 台座、その上に高いオベリスクと風見
+  { id: 'griffoul', kind: 'griffoul', lat: 43.599825, lon: 1.449138 },
   // Place Wilson の真ん中の庭と、グドゥリの噴水・回転木馬（squares.js の SQUARES の 'wilson'。写真と航空写真から）。
   // facing: 噴水の詩人の像が向く先（Wikimedia Commons「Alexandre Falguière - Pèire Godolin -Toulouse」: 正面から撮った写真の奥に
   // Allées Roosevelt のタイサンボクの並木が見える。像は南西の Rue Lafayette・キャピトルの方を向く）
@@ -626,9 +631,9 @@ export function findMonuments(proj, { buildings = [], areas = [], facade = null,
         }
       }
       if (fronts.length) out.push({ spec, kind: 'shopstreet', fronts, replaced: [] });
-    } else if (spec.kind === 'trinite') {
+    } else if (spec.kind === 'trinite' || spec.kind === 'griffoul') {
       if (!inB(x, z)) continue;
-      out.push({ spec, kind: 'trinite', x, z, replaced: [] });
+      out.push({ spec, kind: spec.kind, x, z, replaced: [] });
     } else if (spec.kind === 'halls') {
       const halls = [];
       for (const ll of spec.at) {
@@ -844,6 +849,7 @@ export function monumentClearance(list, proj = null) {
     if (m.kind === 'pavilion') circles.push([m.x, m.z, 5]);
     if (m.kind === 'hgate') circles.push([...m.arch, 5], ...m.pillars.map(([x, z]) => [x, z, 3]));
     if (m.kind === 'lift') circles.push([m.x, m.z, 3]);
+    if (m.kind === 'griffoul') circles.push([m.x, m.z, 5.5]);
   }
   // 木を植えない帯: 線 a → b の川の側に depth m。オテル・デューの川側の正面の前（利用者の写真 NCM_0107・0136:
   // 壁は水際から立ち、前に木はない）
@@ -4054,6 +4060,76 @@ function writeCarousel(m, W, groundAt, colliders, onRoad, keepOut) {
   keepOut.push([x, z, R + 1]);
 }
 
+// ---- Place Saint-Étienne の噴水（le Griffoul）
+function writeGriffoul(m, W, groundAt, colliders, onRoad, keepOut) {
+  const { x, z } = m, w = W.main, mt = W.metal, y0 = groundAt(x, z);
+  const STONE = col('#c9c0ae'), STONE_D = col('#ada392'), OBEL = col('#b8a98e'), SETTS = col('#9d968b'), STEP = col('#cbc5ba'), RISER = col('#77716a');
+  const BRONZE = col('#454b42'), BRONZE_L = col('#596052'), WATER = col('#6f8f8c'), SPRAY = col('#e6eff0');
+  // 一段下がった八角形の石畳（階段の 2 段の帯と蹴上げの暗い線。地面に貼る）
+  const oct = (r, y) => Array.from({ length: 8 }, (_, k) => {
+    const a = ((k + 0.5) / 8) * Math.PI * 2;
+    return [x + Math.cos(a) * r, y, z + Math.sin(a) * r];
+  });
+  const ring = (r0, r1, color) => {
+    const A = oct(r0, y0 + 0.04), B = oct(r1, y0 + 0.04);
+    for (let k = 0; k < 8; k++) W.inlay.quad(A[k], A[(k + 1) % 8], B[(k + 1) % 8], B[k], [0, 1, 0], PLAIN_UV, PLAIN_UV, PLAIN_UV, PLAIN_UV, color);
+  };
+  ring(0.01, 3.7, SETTS);
+  ring(3.7, 3.78, RISER);
+  ring(3.78, 4.2, STEP);
+  ring(4.2, 4.28, RISER);
+  ring(4.28, 4.75, STEP);
+  // 八角形の水盤: 外の壁・笠石・内の壁・水面
+  const yW = y0 + 0.62;
+  cylinder(w, x, z, 2.6, 2.6, y0 - 0.2, y0 + 0.72, { seg: 8, color: STONE_D });
+  cylinder(w, x, z, 2.7, 2.7, y0 + 0.72, y0 + 0.84, { seg: 8, color: STONE });
+  annulus(w, x, z, 2.3, 2.7, y0 + 0.84, 8, STONE);
+  cylinder(w, x, z, 2.3, 2.3, yW - 0.05, y0 + 0.84, { seg: 8, color: STONE_D, inward: true });
+  annulus(w, x, z, 0, 2.3, yW, 8, WATER);
+  // 短い 6 本の柱と、真ん中の八角形の柱
+  for (let k = 0; k < 6; k++) {
+    const a = (k / 6) * Math.PI * 2;
+    cylinder(w, x + Math.cos(a) * 1.0, z + Math.sin(a) * 1.0, 0.09, 0.09, yW, y0 + 1.3, { seg: 6, color: STONE });
+  }
+  cylinder(w, x, z, 0.5, 0.45, yW, y0 + 1.3, { seg: 8, color: STONE_D });
+  // 丸い上の水盤（ライオンの顔 4 つ）
+  cylinder(w, x, z, 0.7, 1.3, y0 + 1.25, y0 + 1.52, { seg: 24, color: STONE });
+  cylinder(w, x, z, 1.32, 1.32, y0 + 1.52, y0 + 1.66, { seg: 24, color: STONE });
+  annulus(w, x, z, 1.18, 1.32, y0 + 1.66, 24, STONE);
+  annulus(w, x, z, 0, 1.18, y0 + 1.6, 24, WATER);
+  for (let k = 0; k < 4; k++) {
+    const a = (k / 4) * Math.PI * 2 + Math.PI / 4;
+    blob(w, [x + Math.cos(a) * 1.32, y0 + 1.48, z + Math.sin(a) * 1.32], [0.16, 0.17, 0.16], -a, 8, 5, () => STONE_D);
+  }
+  // 八角形の台座（4 つのニッチにブロンズの子ども）と軒
+  const yP = y0 + 1.62, yT = y0 + 3.05;
+  cylinder(w, x, z, 0.58, 0.58, yP, yT, { seg: 8, color: STONE });
+  cylinder(w, x, z, 0.7, 0.7, yT, yT + 0.16, { seg: 8, color: STONE_D });
+  for (let k = 0; k < 4; k++) {
+    const a = (k / 4) * Math.PI * 2, c = Math.cos(a), sn = Math.sin(a);
+    const at = (r, y) => [x + c * r, y, z + sn * r];
+    box(w, at(0.5, yP + 0.72), [c * 0.05, 0, sn * 0.05], [0, 0.6, 0], [-sn * 0.26, 0, c * 0.26], col('#8f8676')); // ニッチの影
+    blob(mt, at(0.6, yP + 0.55), [0.14, 0.24, 0.12], -a, 8, 5, () => BRONZE);
+    blob(mt, at(0.62, yP + 0.9), [0.11, 0.12, 0.11], 0, 8, 5, () => BRONZE_L);
+    limb(mt, at(0.62, yP + 0.65), at(0.78, yP + 0.55), 0.04, BRONZE);
+    // 吐く水: 子どもの前から上の水盤へ弧を描いて落ちる
+    let p = at(0.8, yP + 0.55);
+    for (let j = 1; j <= 5; j++) {
+      const t = j / 5, q = at(0.8 + 0.45 * t, yP + 0.55 + 0.15 * t - 0.6 * t * t);
+      box(w, [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2, (p[2] + q[2]) / 2], [(q[0] - p[0]) / 2, (q[1] - p[1]) / 2, (q[2] - p[2]) / 2], [-sn * 0.015, 0, c * 0.015], [0, 0.015, 0], SPRAY);
+      p = q;
+    }
+  }
+  // オベリスク（四角い柱が上へ細くなる）・頂の小さな四角錐・風見
+  cylinder(w, x, z, 0.5, 0.5, yT + 0.16, yT + 0.55, { seg: 4, color: STONE_D });
+  cylinder(w, x, z, 0.42, 0.22, yT + 0.55, y0 + 9.6, { seg: 4, color: OBEL });
+  cylinder(w, x, z, 0.24, 0.01, y0 + 9.6, y0 + 10.0, { seg: 4, color: OBEL });
+  cylinder(mt, x, z, 0.025, 0.025, y0 + 10.0, y0 + 10.9, { seg: 5, color: BRONZE });
+  box(mt, [x + 0.18, y0 + 10.6, z], [0.2, 0, 0], [0, 0.1, 0], [0, 0, 0.01], BRONZE);
+  colliders.push([x, z, 2.75]);
+  keepOut.push([x, z, 4.8]);
+}
+
 // ---- 自転車置き場: 逆 U 字の輪（高さ 0.8 m・幅 0.7 m、線に直角）と、6 割ほどの輪に止めた自転車
 const BIKE_COLORS = ['#2c2f33', '#7a1f22', '#1f4d7a', '#3d6b3a', '#d8d5cc', '#c98a1e', '#4a4f55', '#16a0a0'];
 function writeBikeracks(m, W, groundAt, colliders) {
@@ -4100,7 +4176,7 @@ function writeBikeracks(m, W, groundAt, colliders) {
   colliders.push([a[0], a[1], b[0], b[1]]);
 }
 
-const WRITERS = { halls: writeHalls, gothic: writeGothic, hall: writeHall, market: writeMarket, barracks: writeBarracks, memorial: writeMemorial, bikeracks: writeBikeracks, shopstreet: writeShopstreet, trinite: writeTrinite, bollards: writeBollards, hgate: writeHospitalGate, lift: writeLift, pavilion: writePavilion, lock: writeLock, equestrian: writeEquestrian, wallFountain: writeWallFountain, capitainerie: writeCapitainerie, moorings: writeMoorings, riverfront: writeRiverfront, arcades: writeArcades, choir: writeChoir, ramblas: writeRamblas, basilica: writeBasilica, island: writeIsland, roundabout: writeRoundabout, portico: writePortico, donjon: writeDonjon, statue: writeStatue, dome: writeDome, chateau: writeChateau, stadium: writeStadium, cabanis: writeCabanis, coq: writeCoq, cross: writeCross, fastfood: writeFastfood, jgarden: writeJgarden, parterre: writeParterre, square: writeSquare, carousel: writeCarousel };
+const WRITERS = { halls: writeHalls, gothic: writeGothic, hall: writeHall, market: writeMarket, barracks: writeBarracks, memorial: writeMemorial, bikeracks: writeBikeracks, shopstreet: writeShopstreet, trinite: writeTrinite, bollards: writeBollards, hgate: writeHospitalGate, lift: writeLift, pavilion: writePavilion, lock: writeLock, equestrian: writeEquestrian, wallFountain: writeWallFountain, capitainerie: writeCapitainerie, moorings: writeMoorings, riverfront: writeRiverfront, arcades: writeArcades, choir: writeChoir, ramblas: writeRamblas, basilica: writeBasilica, island: writeIsland, roundabout: writeRoundabout, portico: writePortico, donjon: writeDonjon, statue: writeStatue, dome: writeDome, chateau: writeChateau, stadium: writeStadium, cabanis: writeCabanis, coq: writeCoq, cross: writeCross, fastfood: writeFastfood, jgarden: writeJgarden, parterre: writeParterre, square: writeSquare, carousel: writeCarousel, griffoul: writeGriffoul };
 
 // 名所のモデルを作る。colliders: 足す当たり判定の円 [x, z, r] か線分 [ax, az, bx, bz]、
 // keepOut: 街の小物を置かない円 [x, z, r]（像の台・シャトー・ドーの柵の内側。monumentSolid）

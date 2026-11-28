@@ -6,6 +6,7 @@
 // - 木の下: 植物で、地面からの高さが高い所（樹冠）。下の地面は見えないので、周りの地面から推定する
 // 結果は 1 m 格子の種類の配列で、ランレングス符号化して base64 の文字列にし、タイルのデータに入れる（encodeCover）。
 import { ELEVATION_WMS } from './lidar.js';
+import { pointInRing } from '../geo.js';
 import { gardenOutline, squaresLocal } from '../world/squares.js';
 
 export const COVER = { public: 0, private: 1, lawn: 2, trees: 3 };
@@ -201,6 +202,8 @@ const MAP_GARDEN = remap({ [COVER.public]: COVER.lawn, [COVER.private]: COVER.la
 // アレーヌ（Wikimedia Commons「T1Arènes012014」「Station Arènes à Toulouse」と航空写真）: 半円の事務所の建物の中庭は、
 // メトロの駅へ下りる一段低い石の広場（植え込みの緑で芝生と見なされていた）
 const PHOTO_PLAZAS = [[43.59248, 1.41859, 16]];
+// 木の下が舗装の広場（地図では林 natural=wood。街路写真帖 M11: Place du Salin はプラタナスの下の駐車場）。この点を含む林の多角形を舗石に
+const PHOTO_TREE_SQUARES = [[43.59455, 1.44458]];
 const stampCache = new WeakMap();
 export function coverStamps(parsed) {
   let s = stampCache.get(parsed);
@@ -219,6 +222,13 @@ export function coverStamps(parsed) {
     for (const sq of squaresLocal(parsed.proj)) {
       const ring = gardenOutline(sq, parsed.roads || []).ring;
       s.push({ rings: [ring], bounds: ringBounds(ring, 0), keepOut: true }, { rings: [ring], bounds: ringBounds(ring, 0), map: MAP_GARDEN });
+    }
+    for (const [lat, lon] of PHOTO_TREE_SQUARES) {
+      const [x, z] = parsed.proj.project(lat, lon);
+      for (const a of parsed.areas || []) {
+        if (a.type !== 'forest' || !pointInRing(x, z, a.outer)) continue;
+        s.push({ rings: [a.outer], bounds: ringBounds(a.outer, 0), map: MAP_PHOTO_PLAZA, plaza: true });
+      }
     }
     for (const [lat, lon, r] of PHOTO_PLAZAS) {
       const [x, z] = parsed.proj.project(lat, lon), ring = [];

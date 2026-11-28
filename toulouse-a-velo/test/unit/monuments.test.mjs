@@ -424,3 +424,13 @@ test('Place Wilson の庭の縁: 楕円の環状の車道の内側の縁石に�
   assert.ok(posts.length > 60, `車止め ${posts.length}`);
   for (const [x, z, r] of posts) assert.ok(d(x, z) > 2.5 + r - 0.01, `車止めが車道の上（芯線から ${d(x, z).toFixed(2)} m）`);
 });
+
+test('Place Saint-Étienne の噴水（Griffoul）: 1 つ、水盤の当たり判定と、まわりに木・小物を置かない', () => {
+  const proj = new LocalProjection(43.5998, 1.4491);
+  const list = findMonuments(proj, { buildings: [], areas: [], roads: [] }).filter((m) => m.kind === 'griffoul');
+  assert.equal(list.length, 1);
+  const { colliders, keepOut } = buildMonuments(list, {}, { groundAt: () => 0 });
+  assert.equal(colliders.length, 1);
+  assert.ok(keepOut[0][2] > colliders[0][2]);
+  assert.ok(monumentClearance(list)(list[0].x + 3, list[0].z));
+});
