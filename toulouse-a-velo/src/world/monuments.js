@@ -131,6 +131,10 @@ export const MONUMENTS = [
   // 石の水盤、短い柱とライオンの顔の付いた丸い上の水盤、4 体のブロンズの子ども（marmousets、Pierre Chevenet）が水を吐く八角形の
   // 台座、その上に高いオベリスクと風見
   { id: 'griffoul', kind: 'griffoul', lat: 43.599825, lon: 1.449138 },
+  // Place Dupuy のコロンヌ・デュピュイ（1834 年。写真: Wikimedia Commons「Toulouse - Colonne Dupuy - 1」「Columna Dupuy」、位置は
+  // 航空写真）: アル・オー・グラン（Halle aux Grains）の西、直径約 9 m の淡い石の丸い水盤の真ん中に、四隅にブロンズのグリフォンの
+  // いる白い石の台座、黄土色の石の円柱（約 15 m）と柱頭、頂に金色の名声の女神（Renommée）の像
+  { id: 'colonne-dupuy', kind: 'column', lat: 43.600036, lon: 1.453725 },
   // Place Wilson の真ん中の庭と、グドゥリの噴水・回転木馬（squares.js の SQUARES の 'wilson'。写真と航空写真から）。
   // facing: 噴水の詩人の像が向く先（Wikimedia Commons「Alexandre Falguière - Pèire Godolin -Toulouse」: 正面から撮った写真の奥に
   // Allées Roosevelt のタイサンボクの並木が見える。像は南西の Rue Lafayette・キャピトルの方を向く）
@@ -631,7 +635,7 @@ export function findMonuments(proj, { buildings = [], areas = [], facade = null,
         }
       }
       if (fronts.length) out.push({ spec, kind: 'shopstreet', fronts, replaced: [] });
-    } else if (spec.kind === 'trinite' || spec.kind === 'griffoul') {
+    } else if (spec.kind === 'trinite' || spec.kind === 'griffoul' || spec.kind === 'column') {
       if (!inB(x, z)) continue;
       out.push({ spec, kind: spec.kind, x, z, replaced: [] });
     } else if (spec.kind === 'halls') {
@@ -850,6 +854,7 @@ export function monumentClearance(list, proj = null) {
     if (m.kind === 'hgate') circles.push([...m.arch, 5], ...m.pillars.map(([x, z]) => [x, z, 3]));
     if (m.kind === 'lift') circles.push([m.x, m.z, 3]);
     if (m.kind === 'griffoul') circles.push([m.x, m.z, 5.5]);
+    if (m.kind === 'column') circles.push([m.x, m.z, 5.5]);
   }
   // 木を植えない帯: 線 a → b の川の側に depth m。オテル・デューの川側の正面の前（利用者の写真 NCM_0107・0136:
   // 壁は水際から立ち、前に木はない）
@@ -4130,6 +4135,46 @@ function writeGriffoul(m, W, groundAt, colliders, onRoad, keepOut) {
   keepOut.push([x, z, 4.8]);
 }
 
+// ---- Place Dupuy のコロンヌ・デュピュイ
+function writeColumn(m, W, groundAt, colliders, onRoad, keepOut) {
+  const { x, z } = m, w = W.main, mt = W.metal, y0 = groundAt(x, z);
+  const LIME = col('#e2dccf'), LIME_D = col('#c9c1b1'), SHAFT = col('#c8b98d'), SHAFT_D = col('#b3a57c');
+  const BRONZE = col('#4a4f43'), GOLD = col('#d6aa3a'), WATER = col('#6f8f8c');
+  // 丸い水盤（低い淡い石の縁）と水面
+  const RB = 4.4, yW = y0 + 0.45;
+  cylinder(w, x, z, RB, RB, y0 - 0.2, y0 + 0.55, { seg: 40, color: LIME_D });
+  annulus(w, x, z, RB - 0.35, RB, y0 + 0.55, 40, LIME);
+  cylinder(w, x, z, RB - 0.35, RB - 0.35, yW - 0.05, y0 + 0.55, { seg: 40, color: LIME_D, inward: true });
+  annulus(w, x, z, 0, RB - 0.35, yW, 40, WATER);
+  // 台座（四角。段・本体・軒）。四隅にブロンズのグリフォン
+  const sq = (half, ya, yb, color) => box(w, [x, (ya + yb) / 2, z], [half, 0, 0], [0, (yb - ya) / 2, 0], [0, 0, half], color);
+  sq(2.0, yW - 0.1, y0 + 1.0, LIME_D);
+  sq(1.6, y0 + 1.0, y0 + 1.35, LIME);
+  sq(1.3, y0 + 1.35, y0 + 4.6, LIME);
+  sq(1.5, y0 + 4.6, y0 + 4.95, LIME_D);
+  sq(1.1, y0 + 4.95, y0 + 5.5, LIME);
+  for (const [sx, sz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+    const gx = x + sx * 1.65, gz = z + sz * 1.65, a = Math.atan2(sz, sx);
+    blob(mt, [gx, y0 + 1.75, gz], [0.55, 0.32, 0.28], -a, 8, 5, () => BRONZE);
+    blob(mt, [gx + Math.cos(a) * 0.45, y0 + 2.15, gz + Math.sin(a) * 0.45], [0.2, 0.22, 0.18], 0, 8, 5, () => BRONZE);
+    for (const sd of [-1, 1]) blob(mt, [gx - Math.sin(a) * 0.25 * sd, y0 + 2.2, gz + Math.cos(a) * 0.25 * sd], [0.32, 0.25, 0.06], -a, 6, 4, () => BRONZE); // 翼
+  }
+  // 円柱（礎盤・柱身・柱頭）と頂の台
+  cylinder(w, x, z, 0.95, 0.85, y0 + 5.5, y0 + 6.0, { seg: 20, color: SHAFT_D });
+  cylinder(w, x, z, 0.72, 0.6, y0 + 6.0, y0 + 20.6, { seg: 20, color: SHAFT });
+  cylinder(w, x, z, 0.62, 0.85, y0 + 20.6, y0 + 21.1, { seg: 20, color: SHAFT_D });
+  box(w, [x, y0 + 21.25, z], [0.95, 0, 0], [0, 0.15, 0], [0, 0, 0.95], SHAFT_D);
+  cylinder(w, x, z, 0.45, 0.4, y0 + 21.4, y0 + 22.0, { seg: 12, color: SHAFT });
+  // 金色の名声の女神（体・頭・掲げた腕とラッパ・翼）
+  blob(mt, [x, y0 + 22.8, z], [0.32, 0.8, 0.3], 0, 10, 6, () => GOLD);
+  blob(mt, [x, y0 + 23.75, z], [0.16, 0.19, 0.16], 0, 8, 5, () => GOLD);
+  limb(mt, [x + 0.15, y0 + 23.4, z], [x + 0.35, y0 + 24.4, z + 0.1], 0.06, GOLD);
+  limb(mt, [x + 0.35, y0 + 24.4, z + 0.1], [x + 0.75, y0 + 24.6, z + 0.15], 0.04, GOLD, 0.1);
+  for (const sd of [-1, 1]) blob(mt, [x - 0.25, y0 + 23.4, z + sd * 0.35], [0.12, 0.55, 0.35], 0, 6, 4, () => GOLD);
+  colliders.push([x, z, RB]);
+  keepOut.push([x, z, RB + 1.2]);
+}
+
 // ---- 自転車置き場: 逆 U 字の輪（高さ 0.8 m・幅 0.7 m、線に直角）と、6 割ほどの輪に止めた自転車
 const BIKE_COLORS = ['#2c2f33', '#7a1f22', '#1f4d7a', '#3d6b3a', '#d8d5cc', '#c98a1e', '#4a4f55', '#16a0a0'];
 function writeBikeracks(m, W, groundAt, colliders) {
@@ -4176,7 +4221,7 @@ function writeBikeracks(m, W, groundAt, colliders) {
   colliders.push([a[0], a[1], b[0], b[1]]);
 }
 
-const WRITERS = { halls: writeHalls, gothic: writeGothic, hall: writeHall, market: writeMarket, barracks: writeBarracks, memorial: writeMemorial, bikeracks: writeBikeracks, shopstreet: writeShopstreet, trinite: writeTrinite, bollards: writeBollards, hgate: writeHospitalGate, lift: writeLift, pavilion: writePavilion, lock: writeLock, equestrian: writeEquestrian, wallFountain: writeWallFountain, capitainerie: writeCapitainerie, moorings: writeMoorings, riverfront: writeRiverfront, arcades: writeArcades, choir: writeChoir, ramblas: writeRamblas, basilica: writeBasilica, island: writeIsland, roundabout: writeRoundabout, portico: writePortico, donjon: writeDonjon, statue: writeStatue, dome: writeDome, chateau: writeChateau, stadium: writeStadium, cabanis: writeCabanis, coq: writeCoq, cross: writeCross, fastfood: writeFastfood, jgarden: writeJgarden, parterre: writeParterre, square: writeSquare, carousel: writeCarousel, griffoul: writeGriffoul };
+const WRITERS = { halls: writeHalls, gothic: writeGothic, hall: writeHall, market: writeMarket, barracks: writeBarracks, memorial: writeMemorial, bikeracks: writeBikeracks, shopstreet: writeShopstreet, trinite: writeTrinite, bollards: writeBollards, hgate: writeHospitalGate, lift: writeLift, pavilion: writePavilion, lock: writeLock, equestrian: writeEquestrian, wallFountain: writeWallFountain, capitainerie: writeCapitainerie, moorings: writeMoorings, riverfront: writeRiverfront, arcades: writeArcades, choir: writeChoir, ramblas: writeRamblas, basilica: writeBasilica, island: writeIsland, roundabout: writeRoundabout, portico: writePortico, donjon: writeDonjon, statue: writeStatue, dome: writeDome, chateau: writeChateau, stadium: writeStadium, cabanis: writeCabanis, coq: writeCoq, cross: writeCross, fastfood: writeFastfood, jgarden: writeJgarden, parterre: writeParterre, square: writeSquare, carousel: writeCarousel, griffoul: writeGriffoul, column: writeColumn };
 
 // 名所のモデルを作る。colliders: 足す当たり判定の円 [x, z, r] か線分 [ax, az, bx, bz]、
 // keepOut: 街の小物を置かない円 [x, z, r]（像の台・シャトー・ドーの柵の内側。monumentSolid）

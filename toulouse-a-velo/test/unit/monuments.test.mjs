@@ -425,8 +425,11 @@ test('Place Wilson の庭の縁: 楕円の環状の車道の内側の縁石に�
   for (const [x, z, r] of posts) assert.ok(d(x, z) > 2.5 + r - 0.01, `車止めが車道の上（芯線から ${d(x, z).toFixed(2)} m）`);
 });
 
-test('Place Saint-Étienne の噴水（Griffoul）: 1 つ、水盤の当たり判定と、まわりに木・小物を置かない', () => {
+test('Place Saint-Étienne の噴水（Griffoul）とコロンヌ・デュピュイ: 1 つずつ、水盤の当たり判定と、まわりに木・小物を置かない', () => {
   const proj = new LocalProjection(43.5998, 1.4491);
+  const col2 = findMonuments(proj, { buildings: [], areas: [], roads: [] }).filter((m) => m.kind === 'column');
+  assert.equal(col2.length, 1);
+  assert.equal(buildMonuments(col2, {}, { groundAt: () => 0 }).colliders.length, 1);
   const list = findMonuments(proj, { buildings: [], areas: [], roads: [] }).filter((m) => m.kind === 'griffoul');
   assert.equal(list.length, 1);
   const { colliders, keepOut } = buildMonuments(list, {}, { groundAt: () => 0 });
